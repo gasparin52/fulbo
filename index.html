@@ -544,7 +544,10 @@ function vistaLogin() {
       <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
         <p id="aviso-usuario" class="hidden text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"></p>
         <input id="l-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" title="Letras, números, punto o guion bajo" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" class="${INPUT}">
-        <input id="l-pass" name="pass" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}" placeholder="Contraseña${reg ? ' (mínimo 6 caracteres)' : ''}" class="${INPUT}">
+        <div class="relative">
+          <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? ' (mínimo 6 caracteres)' : ''}" class="${INPUT} pr-12">
+          <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ui.verPass ? '🙈' : '👁️'}</button>
+        </div>
         ${reg ? camposPerfil() : ''}
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
@@ -1091,6 +1094,7 @@ async function guardarPerfil(f) {
 
 const acciones = {
   tab: ({ tab }) => { ui.tab = tab; ui.foto = null; render(); },
+  'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
   logout: () => A.signOut(auth),
   anotarme: () => actualizarGrupo(s => { if (!s.anotados.includes(miUid())) s.anotados.push(miUid()); }, '⚽ ¡Anotado!'),
   bajar: ({ id }) => {
