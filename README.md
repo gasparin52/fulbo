@@ -30,8 +30,10 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 3. **Add New… → Project** → importá `gasparin52/fulbo`.
 4. Antes de tocar Deploy, abrí **Environment Variables** y agregá:
    - `FIREBASE_SERVICE_ACCOUNT`: abrí el `.json` con el Bloc de notas, copiá **todo** y pegalo como valor.
-5. **Deploy**. Cuando termine, copiá el dominio (algo como `fulbo-xxxx.vercel.app`).
+5. **Deploy**. Cuando termine, copiá el dominio (el nuestro es `fulbo-one.vercel.app`).
 6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/admin`.
+
+Ojo: la red del trabajo bloquea `vercel.app`. Usá el panel de usuarios desde el celular con datos móviles.
 
 Después borrá el `.json` descargado o guardalo en un lugar seguro.
 
