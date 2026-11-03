@@ -496,6 +496,20 @@ function camposPerfil(p = {}) {
     </div>`;
 }
 
+// La gente tiende a poner el mail del trabajo: acá va solo un nombre de usuario.
+function avisoMail(usuario) {
+  if (!usuario.includes('@')) return '';
+  return /@uade\.edu\.ar/i.test(usuario)
+    ? '⚠️ No pongas tu mail de UADE. Acá va solo un nombre de usuario (ej: juanp), sin @.'
+    : '⚠️ Acá va un nombre de usuario, no un mail (sin @).';
+}
+function actualizarAvisoUsuario() {
+  const input = $('#l-usuario'), aviso = $('#aviso-usuario');
+  if (!input || !aviso) return;
+  aviso.textContent = avisoMail(input.value);
+  aviso.classList.toggle('hidden', !aviso.textContent);
+}
+
 // ---------------- Vistas ----------------
 function vistaLogin() {
   const reg = ui.tab === 'registro';
@@ -511,6 +525,7 @@ function vistaLogin() {
     ${card(`
       <div class="grid grid-cols-2 gap-1 p-1 bg-slate-800 rounded-xl mb-4">${tab('entrar', 'Entrar')}${tab('registro', 'Crear cuenta')}</div>
       <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
+        <p id="aviso-usuario" class="hidden text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"></p>
         <input id="l-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" title="Letras, números, punto o guion bajo" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" class="${INPUT}">
         <input id="l-pass" name="pass" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}" placeholder="Contraseña${reg ? ' (mínimo 6 caracteres)' : ''}" class="${INPUT}">
         ${reg ? camposPerfil() : ''}
@@ -973,7 +988,7 @@ function pintar(el, html) {
 function render() {
   const el = $('#app');
   if (D.user === undefined) return pintar(el, cargando());
-  if (!D.user) return pintar(el, vistaLogin());
+  if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
   if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
@@ -1125,9 +1140,13 @@ const cambios = {
 };
 
 const formularios = {
-  entrar: f => act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass'))),
+  entrar: f => {
+    if (avisoMail(f.get('usuario'))) return toast(avisoMail(f.get('usuario')));
+    return act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass')));
+  },
   registro: async f => {
     const usuario = f.get('usuario').trim();
+    if (avisoMail(usuario)) return toast(avisoMail(usuario));
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
     const edad = parseInt(f.get('edad'));
     if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
@@ -1205,6 +1224,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id) t.dataset.dirty = '1';
   if (t.dataset.out) document.getElementById(t.dataset.out).textContent = t.value;
+  if (t.id === 'l-usuario') actualizarAvisoUsuario();
 });
 document.addEventListener('submit', async e => {
   const form = e.target.closest('[data-form]');
