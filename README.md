@@ -34,6 +34,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
    - `FIREBASE_SERVICE_ACCOUNT`: abrí el `.json` con el Bloc de notas, copiá **todo** y pegalo como valor.
 5. **Deploy**. Cuando termine, copiá el dominio (el nuestro es `fulbo-one.vercel.app`).
 6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/admin`.
+7. (Recomendado) Agregá también `RECOVERY_CODE`, una frase secreta de 16 caracteres o más que solo sepas vos, y hacé **Redeploy**. Sirve para recuperar la contraseña del superadmin desde el login ("¿Sos el admin y olvidaste la contraseña?").
 
 Ojo: la red del trabajo bloquea `vercel.app`. Usá el panel de usuarios desde el celular con datos móviles.
 
@@ -42,6 +43,8 @@ Después borrá el `.json` descargado o guardalo en un lugar seguro.
 ## Si alguien se olvida la contraseña
 
 El superadmin entra a **Usuarios** (link arriba a la derecha), toca 🔑 en esa persona y le pone una contraseña nueva. Los datos de acceso quedan copiados para mandárselos por WhatsApp.
+
+Si el que se olvidó es el superadmin: en el login, **¿Sos el admin y olvidaste la contraseña?** → ingresá el `RECOVERY_CODE` de Vercel y una contraseña nueva.
 
 ## Desarrollo local
 

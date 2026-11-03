@@ -528,7 +528,25 @@ function actualizarAvisoUsuario() {
 }
 
 // ---------------- Vistas ----------------
+function vistaRecuperar() {
+  return `
+    <div class="text-center pt-6">
+      <div class="text-5xl">🔑</div>
+      <h1 class="text-2xl font-black mt-2">Recuperar acceso de admin</h1>
+      <p class="text-slate-400 text-sm mt-1">Para la cuenta <b>${esc(CONFIG.superadmin)}</b>. Necesitás el código de recuperación que está guardado en Vercel (RECOVERY_CODE).</p>
+    </div>
+    ${card(`
+      <form data-form="recuperar" class="space-y-3">
+        <input id="r-codigo" name="codigo" required type="password" autocomplete="off" placeholder="Código de recuperación" class="${INPUT}">
+        <input id="r-pass" name="pass" required minlength="6" type="text" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Contraseña nueva (mínimo 6)" class="${INPUT}">
+        <button class="${BTN_OK} w-full">Cambiar contraseña</button>
+      </form>
+      <p class="text-xs text-slate-500 mt-3">¿Sos jugador y te olvidaste la contraseña? Pedile al admin que te la resetee.</p>`)}
+    <div class="text-center"><button data-action="tab" data-tab="entrar" class="text-sm text-slate-400 underline">← Volver a entrar</button></div>`;
+}
+
 function vistaLogin() {
+  if (ui.tab === 'recuperar') return vistaRecuperar();
   const reg = ui.tab === 'registro';
   const tab = (k, txt) => `<button type="button" data-action="tab" data-tab="${k}" class="rounded-lg py-2 text-sm font-semibold ${ui.tab === k ? 'bg-slate-950 text-white' : 'text-slate-400'}">${txt}</button>`;
   const invitado = guardado.get(LS + 'inv');
@@ -552,7 +570,8 @@ function vistaLogin() {
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
       ${reg ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
-    `)}`;
+    `)}
+    ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}`;
 }
 
 function vistaCompletar() {
@@ -940,10 +959,14 @@ const SA = { usuarios: null, cargando: false, error: null, editando: null, foto:
 
 async function api(accion, datos = {}) {
   if (!CONFIG.api) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
+  const headers = { 'Content-Type': 'application/json' };
+  if (D.user) headers.Authorization = 'Bearer ' + await D.user.getIdToken();
   const r = await fetch(CONFIG.api, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await D.user.getIdToken() },
+    headers,
     body: JSON.stringify({ accion, ...datos }),
+  }).catch(e => {
+    throw Object.assign(e, { mensaje: 'No se pudo conectar con el servidor. Probá de nuevo en un rato o desde otra red (por ejemplo, datos del celular).' });
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error), { mensaje: j.error || `Error del servidor (${r.status})` });
@@ -1250,6 +1273,18 @@ const formularios = {
     return ok;
   },
   perfil: guardarPerfil,
+  recuperar: async f => {
+    let usuario;
+    const ok = await act(async () => { usuario = (await api('recuperar', { codigo: f.get('codigo'), password: f.get('pass') })).usuario; });
+    if (ok) {
+      toast(`✅ Listo. Entrá como ${usuario} con la contraseña nueva`);
+      ui.tab = 'entrar';
+      render();
+      const u = $('#l-usuario');
+      if (u) { u.value = usuario; u.dataset.dirty = '1'; }
+    }
+    return ok;
+  },
   'crear-grupo': f => crearGrupo(f.get('nombre').trim()),
   unirse: f => {
     const m = f.get('link').match(/unirse\/([^/\s]+)\/([^/\s#?]+)/);

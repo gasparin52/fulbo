@@ -5,6 +5,8 @@
 // Variables de entorno en Vercel:
 //   FIREBASE_SERVICE_ACCOUNT  JSON de la cuenta de servicio (Firebase → Configuración → Cuentas de servicio)
 //   SUPERADMINS               usuarios con acceso, separados por coma (por defecto "gasparin")
+//   RECOVERY_CODE             frase secreta (16+ caracteres) para que el superadmin recupere su contraseña
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -94,6 +96,26 @@ async function sacarDeGrupo(gid, uid) {
   [...dados.docs, ...recibidos.docs].forEach(d => batch.delete(d.ref));
   batch.delete(gref.collection('miembros').doc(uid));
   await batch.commit();
+}
+
+// Recuperación del superadmin: no hay sesión (se olvidó la contraseña), así que
+// se autoriza con RECOVERY_CODE, que solo está en Vercel.
+const igual = (a, b) => timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
+async function recuperar({ codigo, password }) {
+  const secreto = process.env.RECOVERY_CODE || '';
+  if (secreto.length < 16) throw new ErrorApi(403, 'La recuperación no está configurada: falta RECOVERY_CODE en Vercel (mínimo 16 caracteres) y hacer Redeploy');
+  if (typeof codigo !== 'string' || !igual(codigo.trim(), secreto.trim())) {
+    await new Promise(r => setTimeout(r, 2000));  // frena a quien pruebe códigos al azar
+    throw new ErrorApi(403, 'Código de recuperación incorrecto');
+  }
+  validarPassword(password);
+  const usuario = SUPERADMINS[0];
+  const cuenta = await auth.getUserByEmail(`${usuario}@${DOMINIO}`).catch(() => {
+    throw new ErrorApi(404, `La cuenta "${usuario}" no existe: registrala de nuevo desde "Crear cuenta"`);
+  });
+  await auth.updateUser(cuenta.uid, { password });
+  await auth.revokeRefreshTokens(cuenta.uid);
+  return { ok: true, usuario };
 }
 
 const ACCIONES = {
@@ -188,12 +210,14 @@ export default async function handler(req, res) {
 
   try {
     iniciar();
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+    if (body.accion === 'recuperar') return res.status(200).json(await recuperar(body));
+
     const token = (req.headers.authorization || '').replace(/^Bearer /, '');
     const quien = await auth.verifyIdToken(token).catch(() => { throw new ErrorApi(401, 'Sesión inválida, volvé a entrar'); });
     const [usuario, dominio] = (quien.email || '').split('@');
     if (dominio !== DOMINIO || !SUPERADMINS.includes(usuario)) throw new ErrorApi(403, 'Solo el superadmin puede hacer esto');
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     const accion = ACCIONES[body.accion];
     if (!accion) throw new ErrorApi(400, 'Acción desconocida');
     res.status(200).json(await accion(body, quien));
