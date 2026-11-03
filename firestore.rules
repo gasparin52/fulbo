@@ -12,6 +12,15 @@ service cloud.firestore {
       return logueado() && exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(uid()));
     }
     function esAdmin(g) { return logueado() && uid() in grupo(g).admins; }
+    // Armadores: designados por un admin para armar y editar equipos.
+    function esArmador(g) { return logueado() && uid() in grupo(g).get('armadores', []); }
+    function cambia() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    // Solo toca su propio pedido de cambio de equipo.
+    function soloMiSolicitud() {
+      let nuevas = request.resource.data.get('solicitudes', {});
+      return nuevas.diff(resource.data.get('solicitudes', {})).affectedKeys().hasOnly([uid()])
+        && (!(uid() in nuevas) || (nuevas[uid()].keys().hasOnly(['a', 'ts']) && nuevas[uid()].a in ['A', 'B']));
+    }
 
     // Ficha de un jugador: el nombre tiene que ser el de su propia cuenta.
     function perfilValido(d) {
@@ -44,12 +53,16 @@ service cloud.firestore {
       allow create: if logueado()
         && request.resource.data.creador == uid()
         && request.resource.data.admins == [uid()];
-      // Los admins cambian todo; los demás solo se anotan o se bajan a sí mismos.
-      allow update: if esAdmin(g) || (
-        esMiembro(g)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['anotados'])
-        && request.resource.data.anotados.removeAll([uid()]) == resource.data.anotados.removeAll([uid()])
-      );
+      // Los admins cambian todo; los armadores, los equipos y los pedidos de cambio;
+      // los demás solo se anotan o se bajan a sí mismos y piden cambiarse de equipo.
+      allow update: if esAdmin(g)
+        || (esArmador(g) && cambia().hasOnly(['equipos', 'solicitudes']))
+        || (
+          esMiembro(g)
+          && cambia().hasOnly(['anotados', 'solicitudes'])
+          && request.resource.data.anotados.removeAll([uid()]) == resource.data.anotados.removeAll([uid()])
+          && soloMiSolicitud()
+        );
       allow delete: if esAdmin(g);
 
       // Para entrar hay que tener el código del link de invitación y no estar expulsado.
@@ -80,9 +93,10 @@ service cloud.firestore {
         allow delete: if logueado() && (resource.data.voter == uid() || esAdmin(g));
       }
 
-      // Niveles que pone el admin: solo los ven los admins.
+      // Niveles que pone el admin: los ven admins y armadores (para equilibrar), los cambian solo los admins.
       match /privado/{doc} {
-        allow read, write: if esAdmin(g);
+        allow read: if esAdmin(g) || esArmador(g);
+        allow write: if esAdmin(g);
       }
     }
   }

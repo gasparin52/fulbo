@@ -96,10 +96,11 @@ const datosGrupoIniciales = () => ({
   partido: { titulo: 'Fulbo ⚽', cuando: '', lugar: '', cupo: 10 },
   anotados: [],                // uids e ids de invitados ("inv_…"), en orden de llegada
   invitados: {},               // id -> { nombre, posicion } (gente sin cuenta)
-  equipos: null,               // { A: [ids], B: [ids], modo, base }
+  equipos: null,               // { A: [ids], B: [ids], modo, base, editado }
+  solicitudes: {},             // uid -> { a: 'A'|'B', ts } pedidos para cambiarse de equipo
 });
 const normGrupo = d => {
-  const g = { nombre: '', admins: [], codigo: '', baneados: [], ...datosGrupoIniciales(), ...(d || {}) };
+  const g = { nombre: '', admins: [], armadores: [], codigo: '', baneados: [], ...datosGrupoIniciales(), ...(d || {}) };
   g.partido = { ...datosGrupoIniciales().partido, ...g.partido };
   return g;
 };
@@ -133,6 +134,22 @@ const pos = p => POS[p?.posicion] || POS.comodin;
 const emailDe = usuario => `${usuario.trim().toLowerCase()}@${CONFIG.dominio}`;
 const miUid = () => D.user?.uid;
 const esAdmin = () => !!(D.grupo && D.user && D.grupo.admins.includes(D.user.uid));
+// Admins y "armadores" (designados por un admin) pueden armar y editar los equipos.
+const esArmador = id => !!D.grupo?.armadores.includes(id);
+const puedeEditarEquipos = () => esAdmin() || esArmador(miUid());
+const equipoDe = id => D.grupo?.equipos?.A.includes(id) ? 'A' : D.grupo?.equipos?.B.includes(id) ? 'B' : null;
+const otroEquipo = e => (e === 'A' ? 'B' : 'A');
+const NOMBRE_EQUIPO = { A: '🔴 Equipo A', B: '🔵 Equipo B' };
+
+// Pasa a alguien al equipo "a" dentro de un estado de grupo (para usar en actualizarGrupo).
+function moverDeEquipo(s, id, a) {
+  if (!s.equipos) return;
+  const de = otroEquipo(a);
+  if (!s.equipos[de].includes(id)) return;
+  s.equipos[de] = s.equipos[de].filter(x => x !== id);
+  s.equipos[a].push(id);
+  s.equipos.editado = true;
+}
 const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
 const cortar = arr => { arr.forEach(f => f()); arr.length = 0; };
 const urlBase = () => location.origin + location.pathname;
@@ -247,7 +264,7 @@ function elegirGrupo() {
 }
 
 function suscribirNiveles() {
-  if (!esAdmin() || nivelesDe === D.gid) return;
+  if (!puedeEditarEquipos() || nivelesDe === D.gid) return;
   nivelesDe = D.gid;
   subsGrupo.push(F.onSnapshot(refNiveles(D.gid), s => { D.niveles = s.data() || {}; render(); }, e => console.warn(e.code)));
 }
@@ -683,7 +700,9 @@ function lista(d) {
 
 function equipos(d) {
   const eq = D.grupo.equipos;
-  const botones = esAdmin() ? `
+  const editor = puedeEditarEquipos();
+  const vigentes = eq && !equiposDesactualizados(d);
+  const botones = editor ? `
     <div class="grid grid-cols-2 gap-2 mt-4">
       <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">⚖️ Armar equilibrados</button>
       <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
@@ -695,30 +714,65 @@ function equipos(d) {
       <p class="text-sm text-slate-400 mt-1">Todavía no se armaron los equipos.</p>
       ${botones}`);
   }
-  const columna = (titulo, color, ids) => {
-    const js = ids.map(jugador).filter(Boolean);
+  const solicitudes = Object.entries(D.grupo.solicitudes).filter(([id, s]) => jugador(id) && equipoDe(id) && equipoDe(id) !== s.a);
+  const columna = (e, color) => {
+    const js = eq[e].map(jugador).filter(Boolean);
     const suma = js.reduce((t, p) => t + puntaje(p.id), 0);
     return `
       <div class="rounded-xl border ${color} p-3">
-        <div class="flex items-baseline justify-between">
-          <h3 class="font-bold">${titulo}</h3>
-          ${esAdmin() ? `<span class="text-xs text-slate-400">Σ ${suma.toFixed(1)} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
+        <div class="flex items-baseline justify-between gap-2">
+          <h3 class="font-bold">${NOMBRE_EQUIPO[e]} <span class="text-xs font-normal text-slate-400">(${js.length})</span></h3>
+          ${editor ? `<span class="text-xs text-slate-400">Σ ${suma.toFixed(1)} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
         </div>
         <ul class="mt-2 space-y-1.5 text-sm">
-          ${js.map(p => `<li class="flex items-center gap-2">${avatar(p, 22)}<span class="truncate flex-1">${esc(p.usuario)}</span><span>${pos(p).emoji}</span></li>`).join('')}
+          ${js.map(p => `
+            <li class="flex items-center gap-2">
+              ${avatar(p, 22)}
+              <span class="truncate flex-1">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse">🔄</span>' : ''}</span>
+              <span>${pos(p).emoji}</span>
+              ${editor && vigentes ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${NOMBRE_EQUIPO[otroEquipo(e)]}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : ''}
+            </li>`).join('')}
         </ul>
       </div>`;
   };
+
+  // Pedido propio para cambiarse (solo si no puede moverse solo).
+  const yo = miUid(), miEquipo = equipoDe(yo), miSolicitud = D.grupo.solicitudes[yo];
+  const pedido = vigentes && miEquipo && !editor ? (miSolicitud && miSolicitud.a !== miEquipo
+    ? `<div class="mt-3 flex items-center justify-between gap-2 text-sm bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
+         <span>🔄 Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}. Esperando respuesta.</span>
+         <button data-action="cancelar-solicitud" class="text-xs text-slate-400 underline shrink-0">Cancelar</button>
+       </div>`
+    : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full mt-3 text-sm">🔄 Pedir pasar al ${NOMBRE_EQUIPO[otroEquipo(miEquipo)]}</button>`) : '';
+
+  const pendientes = editor && vigentes && solicitudes.length ? `
+    <div class="mt-3 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
+      <h3 class="text-sm font-bold mb-2">🔄 Pedidos de cambio (${solicitudes.length})</h3>
+      <ul class="space-y-2">
+        ${solicitudes.map(([id, s]) => `
+          <li class="flex items-center gap-2 text-sm">
+            ${avatar(jugador(id), 24)}
+            <span class="flex-1 min-w-0 truncate"><b>${esc(jugador(id).usuario)}</b> quiere pasar al ${NOMBRE_EQUIPO[s.a]}</span>
+            <button data-action="aprobar-cambio" data-id="${id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-emerald-500 text-slate-950">Aprobar</button>
+            <button data-action="rechazar-cambio" data-id="${id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800 text-slate-300">Rechazar</button>
+          </li>`).join('')}
+      </ul>
+    </div>` : '';
+
+  const modo = eq.editado ? '✏️ editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado';
   return card(`
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold">🆚 Equipos</h2>
-      <span class="text-xs text-slate-500">${eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado'}</span>
+      <span class="text-xs text-slate-500">${modo}</span>
     </div>
-    ${equiposDesactualizados(d) ? `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${esAdmin() ? 'Volvé a armarlos.' : 'El admin los va a rearmar.'}</p>` : ''}
+    ${vigentes ? '' : `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${editor ? 'Volvé a armarlos.' : 'Los van a rearmar.'}</p>`}
+    ${pendientes}
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
-      ${columna('🔴 Equipo A', 'border-red-500/30 bg-red-500/5', eq.A)}
-      ${columna('🔵 Equipo B', 'border-sky-500/30 bg-sky-500/5', eq.B)}
+      ${columna('A', 'border-red-500/30 bg-red-500/5')}
+      ${columna('B', 'border-sky-500/30 bg-sky-500/5')}
     </div>
+    ${editor && vigentes ? '<p class="text-xs text-slate-500 mt-2">Tocá → o ← para pasar a alguien al otro equipo.</p>' : ''}
+    ${pedido}
     ${botones}`);
 }
 
@@ -759,7 +813,7 @@ function vistaFicha(id) {
       <div class="flex items-center gap-4">
         ${avatar(p, 96)}
         <div class="min-w-0 flex-1">
-          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : ''}</h1>
+          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">🛠️ armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
           <p class="text-xs text-slate-500 mt-1">${r.n ? `Según ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Todavía nadie lo calificó'}</p>
         </div>
@@ -808,6 +862,7 @@ function vistaFicha(id) {
         <label class="flex items-center gap-2">Nivel si no tiene votos
           ${stepper(nivelDe(id), `data-action="nivel" data-id="${id}"`)}
         </label>
+        ${admin ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">🛠️ ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
         ${admin ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
         <button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>
       </div>`) : ''}`;
@@ -853,7 +908,7 @@ function panelAdmin(d) {
         return `
           <li class="py-2 flex flex-wrap items-center gap-2">
             ${avatar(j, 28)}
-            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : ''}</span>
+            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : esArmador(j.id) ? ' <span class="text-xs text-amber-300">🛠️ armador</span>' : ''}</span>
             <span class="text-xs ${r.n ? 'text-emerald-300' : 'text-slate-500'}" title="Promedio de votos">${r.n ? `★ ${r.general.toFixed(1)} (${r.n})` : 'sin votos'}</span>
             <span title="Nivel si no tiene votos">${stepper(nivelDe(j.id), `data-action="nivel" data-id="${j.id}"`)}</span>
             <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
@@ -1046,8 +1101,28 @@ const acciones = {
   armar: ({ modo }) => actualizarGrupo(s => {
     const titulares = s.anotados.map(jugador).filter(Boolean).slice(0, Number(s.partido.cupo) || 10);
     s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
+    s.solicitudes = {};
   }, '🆚 Equipos armados'),
-  'borrar-equipos': () => actualizarGrupo(s => { s.equipos = null; }),
+  'borrar-equipos': () => actualizarGrupo(s => { s.equipos = null; s.solicitudes = {}; }),
+  'mover-equipo': ({ id }) => actualizarGrupo(s => {
+    const de = s.equipos?.A.includes(id) ? 'A' : 'B';
+    moverDeEquipo(s, id, otroEquipo(de));
+    delete s.solicitudes[id];
+  }),
+  'pedir-cambio': () => actualizarGrupo(s => {
+    const de = s.equipos?.A.includes(miUid()) ? 'A' : s.equipos?.B.includes(miUid()) ? 'B' : null;
+    if (de) s.solicitudes[miUid()] = { a: otroEquipo(de), ts: Date.now() };
+  }, '🔄 Pedido enviado'),
+  'cancelar-solicitud': () => actualizarGrupo(s => { delete s.solicitudes[miUid()]; }),
+  'aprobar-cambio': ({ id }) => actualizarGrupo(s => {
+    const sol = s.solicitudes[id];
+    if (sol) moverDeEquipo(s, id, sol.a);
+    delete s.solicitudes[id];
+  }, '✅ Cambio aprobado'),
+  'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
+  'toggle-armador': ({ id }) => actualizarGrupo(s => {
+    s.armadores = s.armadores.includes(id) ? s.armadores.filter(x => x !== id) : [...s.armadores, id];
+  }, esArmador(id) ? 'Ya no puede editar equipos' : '🛠️ Ahora puede armar y editar equipos'),
   'nueva-fecha': () => {
     if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen.')) return;
     actualizarGrupo(s => { s.anotados = []; s.equipos = null; }, '🗓️ Lista nueva');
@@ -1069,6 +1144,8 @@ const acciones = {
     const ok = await actualizarGrupo(s => {
       s.anotados = s.anotados.filter(x => x !== id);
       s.admins = s.admins.filter(x => x !== id);
+      s.armadores = s.armadores.filter(x => x !== id);
+      delete s.solicitudes[id];
       if (!s.baneados.includes(id)) s.baneados.push(id);
     });
     if (ok && await act(() => F.deleteDoc(F.doc(colMiembros(D.gid), id)), `${p.usuario} fue expulsado`)) location.hash = '';

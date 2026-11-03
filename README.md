@@ -13,6 +13,8 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 - **Fichas**: cada jugador tiene 7 estadísticas del 1 al 10 (Velocidad, Técnica, Pase, Remate, Defensa, Físico y Arquero), con gráfico tipo PES. Los compañeros votan; cada uno tiene **un solo voto por compañero** (si lo cambia, reemplaza al anterior) y nadie se puede votar a sí mismo. Lo garantizan las reglas de Firestore, no solo la página.
 - **General**: promedio de las 6 estadísticas de campo. Para los arqueros, mitad eso y mitad la de Arquero.
 - **Equipos equilibrados**: ordena a los titulares por puntaje y los reparte en serpentina A‑B‑B‑A‑A‑B… El puntaje es el general votado; si alguien todavía no tiene votos, se usa el nivel que pone el admin (por defecto 5, solo lo ven los admins). Si hay 2 o más arqueros, va uno a cada equipo.
+- **Editar equipos**: los admins y los **armadores** pasan jugadores de un equipo al otro con → / ←. Un admin designa armadores desde la ficha de cada jugador ("🛠️ Puede editar equipos"). Los armadores solo pueden armar y editar equipos y responder pedidos; no cambian el partido ni otras cosas del grupo.
+- **Pedidos de cambio**: un jugador que está en un equipo puede tocar "Pedir pasar al otro equipo". Los admins y armadores lo aprueban o lo rechazan. Si se rearman los equipos, los pedidos pendientes se borran.
 - **Invitados**: el admin puede anotar a alguien sin cuenta (nombre, posición y nivel).
 - **Superadmin** (`gasparin`): tiene el panel **Usuarios** para ver a todos, crearlos, editarlos, borrarlos y ponerles una contraseña nueva.
 
