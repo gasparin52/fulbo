@@ -3,7 +3,7 @@
 Una página (`index.html`) para que el grupo se anote al fulbo, con titulares y suplentes, equipos equilibrados y un botón para copiar la lista a WhatsApp.
 
 - **Jugadores**: crean su ficha una vez (nombre y posición), después tocan "¡Me anoto!" o "Me bajo". El celu los recuerda.
-- **Admin** (botón 🔒 Admin al pie, PIN en `CONFIG.adminPin`): pone los niveles del 1 al 10 (por defecto 5), configura cupo/fecha/lugar, agrega o borra jugadores, arma los equipos (equilibrados o aleatorios) y empieza una fecha nueva.
+- **Admin** (botón 🔒 Admin al pie, PIN por defecto `1234`, ver "Cambiar el PIN"): pone los niveles del 1 al 10 (por defecto 5), configura cupo/fecha/lugar, agrega o borra jugadores, arma los equipos (equilibrados o aleatorios) y empieza una fecha nueva.
 
 ## 1. Probarla ya
 
@@ -36,15 +36,21 @@ Abrí `index.html` en el navegador. Sin Firebase funciona en **modo local** (sol
      appId: "..."
    },
    ```
-6. Cambiá `adminPin` por uno tuyo.
+6. Cambiá el PIN (ver abajo).
 
-## 3. Subirla a internet (gratis)
+## 3. Online con GitHub Pages
 
-La opción más rápida es **Netlify Drop**: entrá a <https://app.netlify.com/drop> y arrastrá la carpeta del proyecto. Te da un link `https://algo.netlify.app` para mandar al grupo. Con una cuenta gratis podés cambiarle el nombre al link y volver a subirla cuando hagas cambios.
+La página se publica sola con GitHub Pages desde la rama `main`: cada `git push` la actualiza en un minuto, aproximadamente. El link es `https://gasparin52.github.io/fulbo/`, y el mensaje de WhatsApp lo agrega al final.
 
-Otra opción es **GitHub Pages**: subís `index.html` a un repo y activás *Settings → Pages*.
+## Cambiar el PIN
 
-Cuando la página está online, el mensaje de WhatsApp incluye al final el link para anotarse.
+El repo es público, así que el código guarda solo el hash SHA-256 del PIN (`CONFIG.adminPinHash`), no el PIN. Para generar el hash de uno nuevo:
+
+```bash
+python -c "import hashlib;print(hashlib.sha256('MI-PIN'.encode()).hexdigest())"
+```
+
+Mejor usá una frase que 4 números: el hash de un PIN corto se puede adivinar probando todas las combinaciones.
 
 ## Cómo se arman los equipos
 
@@ -55,4 +61,4 @@ Cuando la página está online, el mensaje de WhatsApp incluye al final el link 
 ## Limitaciones (es un grupo de amigos, no un banco)
 
 - No hay login: cualquiera con el link podría elegir el nombre de otro. El ❌ solo aparece en tu propia fila (el admin ve todos).
-- El PIN de admin y los niveles se pueden ver mirando el código o la base de datos con las herramientas del navegador. Alcanza para que nadie se los cambie sin querer, pero no son secretos de verdad.
+- Los niveles se pueden ver mirando la base de datos con las herramientas del navegador, y la base acepta escrituras de cualquiera que tenga el link. El PIN alcanza para que nadie cambie cosas sin querer, pero no es seguridad de verdad.
