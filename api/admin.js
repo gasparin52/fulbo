@@ -14,15 +14,35 @@ const SUPERADMINS = (process.env.SUPERADMINS || 'gasparin').split(',').map(s => 
 const ORIGENES = ['https://gasparin52.github.io', 'http://localhost:8791'];
 const POSICIONES = ['comodin', 'arquero', 'defensor', 'medio', 'delantero'];
 
-if (!getApps().length) initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) });
-const auth = getAuth();
-const db = getFirestore();
-
 class ErrorApi extends Error {
   constructor(status, message) {
     super(message);
     this.status = status;
   }
+}
+
+// Se inicializa en el primer pedido (no al cargar el módulo) para que un error
+// de configuración se pueda devolver como mensaje en vez de tirar la función.
+let auth, db;
+function iniciar() {
+  if (auth) return;
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) throw new ErrorApi(500, 'Falta la variable FIREBASE_SERVICE_ACCOUNT en Vercel (o se agregó después del último deploy: hacé Redeploy)');
+  let cuenta;
+  try {
+    cuenta = JSON.parse(raw);
+  } catch {
+    throw new ErrorApi(500, 'FIREBASE_SERVICE_ACCOUNT no es un JSON válido: tiene que ser el contenido completo del archivo .json, de { a }');
+  }
+  if (typeof cuenta.private_key === 'string') cuenta.private_key = cuenta.private_key.replace(/\\n/g, '\n');
+  if (cuenta.project_id !== 'fulbo-5d6f5') throw new ErrorApi(500, `La clave es del proyecto "${cuenta.project_id}", no de fulbo-5d6f5`);
+  try {
+    if (!getApps().length) initializeApp({ credential: cert(cuenta) });
+  } catch (e) {
+    throw new ErrorApi(500, 'La clave de FIREBASE_SERVICE_ACCOUNT no es válida: ' + e.message);
+  }
+  auth = getAuth();
+  db = getFirestore();
 }
 
 const ERRORES_AUTH = {
@@ -154,9 +174,20 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
+
+  // GET: chequeo de configuración (no expone nada secreto).
+  if (req.method === 'GET') {
+    try {
+      iniciar();
+      return res.status(200).json({ ok: true, mensaje: 'Servidor configurado' });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
   try {
+    iniciar();
     const token = (req.headers.authorization || '').replace(/^Bearer /, '');
     const quien = await auth.verifyIdToken(token).catch(() => { throw new ErrorApi(401, 'Sesión inválida, volvé a entrar'); });
     const [usuario, dominio] = (quien.email || '').split('@');

@@ -933,7 +933,7 @@ function panelAdmin(d) {
 }
 
 // ---------------- Superadmin: usuarios ----------------
-const SA = { usuarios: null, cargando: false, editando: null, foto: null, passSugerida: genId(8) };
+const SA = { usuarios: null, cargando: false, error: null, editando: null, foto: null, passSugerida: genId(8) };
 
 async function api(accion, datos = {}) {
   if (!CONFIG.api) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
@@ -950,10 +950,15 @@ async function api(accion, datos = {}) {
 async function cargarUsuarios() {
   if (SA.cargando) return;
   SA.cargando = true;
-  const ok = await act(async () => {
+  SA.error = null;
+  try {
     SA.usuarios = (await api('listar')).usuarios.sort((a, b) => a.usuario.localeCompare(b.usuario));
-  });
-  if (!ok) SA.usuarios ??= [];  // sin reintentos automáticos: está el botón Recargar
+  } catch (e) {
+    console.error(e);
+    // "Failed to fetch": no llegó al servidor (red que lo bloquea) o el servidor se cayó.
+    SA.error = e.mensaje || 'No se pudo conectar con el servidor. Si estás en la red del trabajo, probá desde el celular con datos.';
+    SA.usuarios ??= [];  // sin reintentos automáticos: está el botón Recargar
+  }
   SA.cargando = false;
   render();
 }
@@ -971,6 +976,7 @@ function vistaUsuarios() {
       <button data-action="sa-recargar" class="text-xs text-slate-500 hover:text-slate-300 underline">Recargar</button>
     </div>
     ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">⚠️ Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
+    ${SA.error ? `<p class="text-sm text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">❌ ${esc(SA.error)}</p>` : ''}
     ${card(`
       <h2 class="text-lg font-bold mb-3">➕ Crear usuario</h2>
       <form data-form="sa-crear" class="space-y-2">
