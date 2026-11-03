@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fulbo ⚽ Anotate</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; }
+    select, input { color-scheme: dark; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <div class="max-w-2xl mx-auto px-4 py-6 space-y-5">
+    <header id="hdr"><p class="text-slate-400">Cargando…</p></header>
+    <section id="me"></section>
+    <section id="lista"></section>
+    <section id="equipos"></section>
+    <section id="admin"></section>
+  </div>
+  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity"></div>
+
+<script type="module">
+// ======================= CONFIGURACIÓN =======================
+const CONFIG = {
+  // Pegá acá el objeto firebaseConfig de tu proyecto (ver README.md) para que
+  // todos compartan la misma lista. Si queda en null, los datos se guardan
+  // solo en este navegador (sirve para probar).
+  firebase: null,
+  grupo: 'fulbo-trabajo', // nombre del documento en Firestore
+  adminPin: '1234',       // PIN para entrar como admin (puntajes, equipos, etc.)
+};
+// =============================================================
+
+const POS = {
+  comodin:   { label: 'Jugador/Comodín', emoji: '🃏' },
+  arquero:   { label: 'Arquero', emoji: '🧤' },
+  defensor:  { label: 'Defensor', emoji: '🛡️' },
+  medio:     { label: 'Mediocampista', emoji: '⚙️' },
+  delantero: { label: 'Delantero', emoji: '⚽' },
+};
+const NIVEL_DEFAULT = 5;
+
+const estadoInicial = () => ({
+  players: {},                 // id -> { id, nombre, posicion, nivel }
+  partido: { titulo: 'Fulbo ⚽', cuando: '', lugar: '', cupo: 10 },
+  anotados: [],                // ids en orden de llegada
+  equipos: null,               // { A: [ids], B: [ids], modo, base }
+});
+
+// ---------------- Almacenamiento ----------------
+function crearStoreLocal() {
+  const KEY = 'f5_estado_' + CONFIG.grupo;
+  const leer = () => {
+    try { return { ...estadoInicial(), ...JSON.parse(localStorage.getItem(KEY)) }; }
+    catch { return estadoInicial(); }
+  };
+  const subs = new Set();
+  window.addEventListener('storage', e => { if (e.key === KEY) subs.forEach(fn => fn(leer())); });
+  return {
+    modo: 'local',
+    subscribe(fn) { subs.add(fn); fn(leer()); },
+    async update(mut) {
+      const s = leer();
+      mut(s);
+      localStorage.setItem(KEY, JSON.stringify(s));
+      subs.forEach(fn => fn(s));
+    },
+  };
+}
+
+async function crearStoreFirebase(cfg) {
+  const V = '10.12.2';
+  const { initializeApp } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
+  const { getFirestore, doc, onSnapshot, runTransaction } =
+    await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
+  const db = getFirestore(initializeApp(cfg));
+  const ref = doc(db, 'grupos', CONFIG.grupo);
+  const norm = d => ({ ...estadoInicial(), ...(d || {}) });
+  return {
+    modo: 'firebase',
+    subscribe(fn) {
+      onSnapshot(ref, snap => fn(norm(snap.data())), err => {
+        console.error(err);
+        toast('Error de conexión: ' + err.code);
+      });
+    },
+    // Transacción: si dos se anotan a la vez, ninguno pisa al otro.
+    async update(mut) {
+      await runTransaction(db, async tx => {
+        const s = norm((await tx.get(ref)).data());
+        mut(s);
+        tx.set(ref, s);
+      });
+    },
+  };
+}
+
+// ---------------- Estado y utilidades ----------------
+let S = estadoInicial();
+let store;
+let cargado = false;
+
+const guardado = {
+  get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
+};
+const ME_KEY = 'f5_me_' + CONFIG.grupo;
+const ui = {
+  meId: guardado.get(ME_KEY),
+  admin: (() => { try { return sessionStorage.getItem('f5_admin') === '1'; } catch { return false; } })(),
+};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const pos = p => POS[p?.posicion] || POS.comodin;
+const nivel = p => Number(p?.nivel) || NIVEL_DEFAULT;
+const normNombre = s => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+function derivar(s) {
+  const lista = s.anotados.map(id => s.players[id]).filter(Boolean);
+  const cupo = Number(s.partido.cupo) || 10;
+  return { cupo, titulares: lista.slice(0, cupo), suplentes: lista.slice(cupo) };
+}
+const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
+const equiposDesactualizados = d => S.equipos && S.equipos.base !== baseKey(d.titulares);
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.style.opacity = 0), 2200);
+}
+
+async function act(mut, okMsg) {
+  try {
+    await store.update(mut);
+    if (okMsg) toast(okMsg);
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast('❌ No se pudo guardar, probá de nuevo');
+    return false;
+  }
+}
+
+// ---------------- Armado de equipos ----------------
+function armarEquipos(jugadores, modo) {
+  const mezclados = shuffle([...jugadores]);
+  const A = [], B = [];
+  if (modo === 'aleatorio') {
+    mezclados.forEach((p, i) => (i % 2 ? B : A).push(p.id));
+    return { A, B };
+  }
+  // Mayor a menor; el sort es estable, así que los empates quedan al azar.
+  const orden = mezclados.sort((a, b) => nivel(b) - nivel(a));
+  let resto = orden, offset = 0;
+  // Si hay 2+ arqueros, uno para cada lado; la serpentina sigue compensando.
+  const arqueros = orden.filter(p => p.posicion === 'arquero');
+  if (arqueros.length >= 2) {
+    A.push(arqueros[0].id);
+    B.push(arqueros[1].id);
+    resto = orden.filter(p => p !== arqueros[0] && p !== arqueros[1]);
+    offset = 2;
+  }
+  // Serpentina: A, B, B, A, A, B, B, A…
+  resto.forEach((p, i) => (['A', 'B', 'B', 'A'][(i + offset) % 4] === 'A' ? A : B).push(p.id));
+  return { A, B };
+}
+
+// ---------------- Mensaje de WhatsApp ----------------
+function mensajeWsp() {
+  const d = derivar(S);
+  const p = S.partido;
+  const L = [`⚽ *${p.titulo || 'Fulbo'}*`];
+  if (p.cuando) L.push(`📅 ${p.cuando}`);
+  if (p.lugar) L.push(`📍 ${p.lugar}`);
+  L.push('', `✅ *TITULARES (${d.titulares.length}/${d.cupo})*`);
+  for (let i = 0; i < d.cupo; i++) {
+    const j = d.titulares[i];
+    L.push(j ? `${i + 1}. ${j.nombre} ${pos(j).emoji}` : `${i + 1}. _libre_`);
+  }
+  if (d.suplentes.length) {
+    L.push('', '🔁 *SUPLENTES*');
+    d.suplentes.forEach((j, i) => L.push(`S${i + 1}. ${j.nombre} ${pos(j).emoji}`));
+  }
+  if (S.equipos && !equiposDesactualizados(d)) {
+    L.push('', '🆚 *EQUIPOS*');
+    [['🔴', 'Equipo A', S.equipos.A], ['🔵', 'Equipo B', S.equipos.B]].forEach(([e, nom, ids]) => {
+      L.push('', `${e} *${nom}*`);
+      ids.map(id => S.players[id]).filter(Boolean).forEach(j => L.push(`• ${j.nombre} ${pos(j).emoji}`));
+    });
+  }
+  if (location.protocol.startsWith('http')) L.push('', `👉 Anotate acá: ${location.origin + location.pathname}`);
+  return L.join('\n');
+}
+
+async function copiar(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch {
+    const ta = Object.assign(document.createElement('textarea'), { value: texto });
+    document.body.append(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  toast('📋 ¡Copiado! Pegalo en el grupo');
+}
+
+// ---------------- Render ----------------
+const CARD = 'bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5';
+const INPUT = 'w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500';
+const BTN = 'rounded-xl px-4 py-2.5 font-semibold transition active:scale-[.98] disabled:opacity-40 disabled:pointer-events-none';
+const card = html => `<div class="${CARD}">${html}</div>`;
+const opcionesPos = sel => Object.entries(POS).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v.emoji} ${v.label}</option>`).join('');
+const opcionesNivel = sel => Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<option value="${n}" ${n === sel ? 'selected' : ''}>${n}</option>`).join('');
+
+// Re-renderiza sin perder lo que el usuario está escribiendo.
+function pintar(el, html) {
+  if (el._html === html) return;
+  const sucios = [...el.querySelectorAll('[data-dirty]')].map(i => [i.id, i.value]);
+  const foco = el.contains(document.activeElement) ? document.activeElement.id : null;
+  el.innerHTML = el._html = html;
+  sucios.forEach(([id, v]) => { const i = document.getElementById(id); if (i) { i.value = v; i.dataset.dirty = '1'; } });
+  if (foco) document.getElementById(foco)?.focus();
+}
+
+function render() {
+  const d = derivar(S);
+  pintar($('#hdr'), renderHeader(d));
+  pintar($('#me'), renderMe(d));
+  pintar($('#lista'), renderLista(d));
+  pintar($('#equipos'), renderEquipos(d));
+  pintar($('#admin'), renderAdmin(d));
+}
+
+function renderHeader(d) {
+  const p = S.partido;
+  const faltan = d.cupo - d.titulares.length;
+  const aviso = store.modo === 'local'
+    ? `<p class="mt-3 text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">⚠️ Modo local: la lista se guarda solo en este navegador. Configurá Firebase para compartirla (ver README.md).</p>`
+    : '';
+  return `
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
+        <div class="mt-1 text-slate-400 text-sm space-x-3">
+          ${p.cuando ? `<span>📅 ${esc(p.cuando)}</span>` : ''}
+          ${p.lugar ? `<span>📍 ${esc(p.lugar)}</span>` : ''}
+        </div>
+      </div>
+      <div class="text-right shrink-0">
+        <div class="text-3xl font-black ${faltan <= 0 ? 'text-emerald-400' : ''}">${d.titulares.length}<span class="text-slate-500 text-xl">/${d.cupo}</span></div>
+        <div class="text-xs text-slate-400">${faltan > 0 ? `faltan ${faltan}` : '¡completo!'}</div>
+      </div>
+    </div>
+    <div class="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
+      <div class="h-full bg-emerald-500 transition-all" style="width:${Math.min(100, (d.titulares.length / d.cupo) * 100)}%"></div>
+    </div>
+    ${aviso}`;
+}
+
+function renderMe(d) {
+  const yo = S.players[ui.meId];
+  if (yo) {
+    const iT = d.titulares.findIndex(p => p.id === yo.id);
+    const iS = d.suplentes.findIndex(p => p.id === yo.id);
+    const anotado = iT >= 0 || iS >= 0;
+    const estado = iT >= 0 ? `<span class="text-emerald-400">✅ Estás anotado · titular #${iT + 1}</span>`
+      : iS >= 0 ? `<span class="text-amber-400">⏳ Estás de suplente S${iS + 1}</span>`
+      : `<span class="text-slate-400">No estás anotado para este partido</span>`;
+    const lleno = d.titulares.length >= d.cupo;
+    return card(`
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm text-slate-400">Hola 👋</p>
+          <p class="text-xl font-bold truncate">${esc(yo.nombre)}</p>
+          <p class="text-sm mt-1">${estado}</p>
+        </div>
+        <button data-action="salir" class="text-xs text-slate-500 hover:text-slate-300 underline shrink-0">No soy yo</button>
+      </div>
+      <label class="block mt-4 text-sm text-slate-400">Mi posición
+        <select data-change="mi-pos" class="${INPUT} mt-1">${opcionesPos(yo.posicion)}</select>
+      </label>
+      ${anotado
+        ? `<button data-action="bajar" data-id="${yo.id}" class="${BTN} w-full mt-4 bg-slate-800 hover:bg-red-950 text-red-300 border border-red-900/50">Me bajo 😢</button>`
+        : `<button data-action="anotarme" class="${BTN} w-full mt-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>`}
+    `);
+  }
+  const existentes = Object.values(S.players).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return card(`
+    <h2 class="text-lg font-bold">Armá tu ficha</h2>
+    <p class="text-sm text-slate-400 mb-4">Una sola vez: después este celu te recuerda.</p>
+    <form data-form="crear-ficha" class="space-y-3">
+      <input id="f-nombre" name="nombre" required maxlength="40" autocomplete="name" placeholder="Nombre y Apellido" class="${INPUT}">
+      <select id="f-pos" name="posicion" class="${INPUT}">${opcionesPos('comodin')}</select>
+      <label class="flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" name="anotar" checked class="w-4 h-4 accent-emerald-500"> Anotarme para este partido
+      </label>
+      <button class="${BTN} w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950">Crear ficha</button>
+    </form>
+    ${existentes.length ? `
+      <div class="mt-5 pt-4 border-t border-slate-800">
+        <label class="text-sm text-slate-400">¿Ya tenés ficha?
+          <select data-change="elegir-ficha" class="${INPUT} mt-1">
+            <option value="">Elegí tu nombre…</option>
+            ${existentes.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('')}
+          </select>
+        </label>
+      </div>` : ''}
+  `);
+}
+
+function filaJugador(p, etiqueta, clase) {
+  const puedeBorrar = ui.admin || p.id === ui.meId;
+  return `
+    <li class="flex items-center gap-3 py-2">
+      <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
+      <span class="flex-1 min-w-0">
+        <span class="block font-medium truncate">${esc(p.nombre)}${p.id === ui.meId ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}</span>
+        <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
+      </span>
+      ${ui.admin ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Nivel">${nivel(p)}</span>` : ''}
+      ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Bajar de la lista" class="w-8 h-8 rounded-lg hover:bg-red-950 grid place-items-center">❌</button>` : ''}
+    </li>`;
+}
+
+function renderLista(d) {
+  const libres = Array.from({ length: Math.max(0, d.cupo - d.titulares.length) }, (_, i) => `
+    <li class="flex items-center gap-3 py-2 opacity-40">
+      <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 border border-dashed border-slate-600">${d.titulares.length + i + 1}</span>
+      <span class="text-sm italic text-slate-500">libre</span>
+    </li>`).join('');
+  return card(`
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-lg font-bold">✅ Titulares</h2>
+      <button data-action="copiar" class="${BTN} bg-green-600 hover:bg-green-500 text-white text-sm py-2">📋 Copiar para WhatsApp</button>
+    </div>
+    <ul class="divide-y divide-slate-800">
+      ${d.titulares.map((p, i) => filaJugador(p, i + 1, 'bg-emerald-500/15 text-emerald-300')).join('')}
+      ${libres}
+    </ul>
+    ${d.suplentes.length ? `
+      <h3 class="text-base font-bold mt-5 mb-1">🔁 Suplentes</h3>
+      <ul class="divide-y divide-slate-800">
+        ${d.suplentes.map((p, i) => filaJugador(p, 'S' + (i + 1), 'bg-amber-500/15 text-amber-300')).join('')}
+      </ul>` : ''}
+  `);
+}
+
+function renderEquipos(d) {
+  const eq = S.equipos;
+  const botones = ui.admin ? `
+    <div class="grid grid-cols-2 gap-2 mt-4">
+      <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm">⚖️ Armar equilibrados</button>
+      <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN} bg-slate-800 hover:bg-slate-700 text-sm">🎲 Aleatorio</button>
+    </div>
+    ${eq ? `<button data-action="borrar-equipos" class="mt-2 text-xs text-slate-500 hover:text-red-300 underline">Borrar equipos</button>` : ''}` : '';
+  if (!eq) {
+    return card(`
+      <h2 class="text-lg font-bold">🆚 Equipos</h2>
+      <p class="text-sm text-slate-400 mt-1">Todavía no se armaron los equipos.</p>
+      ${botones}`);
+  }
+  const columna = (titulo, color, ids) => {
+    const js = ids.map(id => S.players[id]).filter(Boolean);
+    const suma = js.reduce((t, p) => t + nivel(p), 0);
+    return `
+      <div class="rounded-xl border ${color} p-3">
+        <div class="flex items-baseline justify-between">
+          <h3 class="font-bold">${titulo}</h3>
+          ${ui.admin ? `<span class="text-xs text-slate-400">Σ ${suma} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
+        </div>
+        <ul class="mt-2 space-y-1 text-sm">
+          ${js.map(p => `<li class="flex justify-between gap-2"><span class="truncate">${pos(p).emoji} ${esc(p.nombre)}</span>${ui.admin ? `<span class="font-mono text-slate-500">${nivel(p)}</span>` : ''}</li>`).join('')}
+        </ul>
+      </div>`;
+  };
+  return card(`
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-bold">🆚 Equipos</h2>
+      <span class="text-xs text-slate-500">${eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado'}</span>
+    </div>
+    ${equiposDesactualizados(d) ? `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${ui.admin ? 'Volvé a armarlos.' : 'El admin los va a rearmar.'}</p>` : ''}
+    <div class="grid sm:grid-cols-2 gap-3 mt-3">
+      ${columna('🔴 Equipo A', 'border-red-500/30 bg-red-500/5', eq.A)}
+      ${columna('🔵 Equipo B', 'border-sky-500/30 bg-sky-500/5', eq.B)}
+    </div>
+    ${botones}`);
+}
+
+function renderAdmin(d) {
+  if (!ui.admin) {
+    return `<div class="text-center pt-2"><button data-action="admin-entrar" class="text-xs text-slate-600 hover:text-slate-400">🔒 Admin</button></div>`;
+  }
+  const p = S.partido;
+  const anotados = new Set(S.anotados);
+  const fichas = Object.values(S.players).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  return card(`
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-bold">🔧 Panel admin</h2>
+      <button data-action="admin-salir" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir de admin</button>
+    </div>
+
+    <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-4">
+      <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Cuándo<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="Jueves 20:00" maxlength="40" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Cupo titulares<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
+      <div class="sm:col-span-2 flex gap-2">
+        <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">💾 Guardar partido</button>
+        <button type="button" data-action="nueva-fecha" class="${BTN} bg-red-950 hover:bg-red-900 text-red-200 text-sm">🗓️ Nueva fecha</button>
+      </div>
+    </form>
+
+    <h3 class="font-bold mt-6 mb-2">Fichas y puntajes <span class="text-slate-500 font-normal text-sm">(${fichas.length})</span></h3>
+    <p class="text-xs text-slate-500 mb-2">El nivel (1–10) solo lo ve el admin. Por defecto: ${NIVEL_DEFAULT}.</p>
+    <ul class="divide-y divide-slate-800">
+      ${fichas.map(j => `
+        <li class="py-2 flex flex-wrap items-center gap-2">
+          <span class="flex-1 min-w-[8rem] font-medium truncate">${esc(j.nombre)}</span>
+          <select data-change="pos" data-id="${j.id}" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm">${opcionesPos(j.posicion)}</select>
+          <select data-change="nivel" data-id="${j.id}" title="Nivel" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm font-mono">${opcionesNivel(nivel(j))}</select>
+          <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
+          <button data-action="borrar-ficha" data-id="${j.id}" title="Borrar ficha" class="rounded-lg px-2 py-1.5 hover:bg-red-950">🗑️</button>
+        </li>`).join('') || '<li class="py-2 text-sm text-slate-500">Todavía no hay fichas.</li>'}
+    </ul>
+
+    <form data-form="agregar" class="mt-4 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto_auto] gap-2">
+      <input id="a-nombre" name="nombre" required maxlength="40" placeholder="Agregar jugador (Nombre y Apellido)" class="${INPUT} col-span-2 sm:col-span-1">
+      <select id="a-pos" name="posicion" class="${INPUT} w-auto">${opcionesPos('comodin')}</select>
+      <select id="a-nivel" name="nivel" class="${INPUT} w-auto font-mono">${opcionesNivel(NIVEL_DEFAULT)}</select>
+      <button class="${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950 col-span-2 sm:col-span-1">+ Agregar y anotar</button>
+    </form>
+  `);
+}
+
+// ---------------- Acciones ----------------
+function nuevaFicha(s, nombre, posicion, nivelInicial = NIVEL_DEFAULT) {
+  const id = uid();
+  s.players[id] = { id, nombre: nombre.trim(), posicion, nivel: nivelInicial };
+  return id;
+}
+const anotar = (s, id) => { if (!s.anotados.includes(id)) s.anotados.push(id); };
+const buscarPorNombre = nombre => Object.values(S.players).find(p => normNombre(p.nombre) === normNombre(nombre));
+function setMe(id) { ui.meId = id; guardado.set(ME_KEY, id); render(); }
+
+const acciones = {
+  anotarme: () => act(s => anotar(s, ui.meId), '⚽ ¡Anotado!'),
+  bajar: ({ id }) => {
+    const p = S.players[id];
+    if (!p || !confirm(id === ui.meId ? '¿Seguro que te bajás?' : `¿Bajar a ${p.nombre} de la lista?`)) return;
+    act(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista');
+  },
+  salir: () => setMe(null),
+  copiar: () => copiar(mensajeWsp()),
+  armar: ({ modo }) => act(s => {
+    const { titulares } = derivar(s);
+    s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
+  }, '🆚 Equipos armados'),
+  'borrar-equipos': () => act(s => { s.equipos = null; }),
+  'admin-entrar': () => {
+    const pin = prompt('PIN de admin:');
+    if (pin == null) return;
+    if (pin !== CONFIG.adminPin) return toast('PIN incorrecto');
+    ui.admin = true;
+    try { sessionStorage.setItem('f5_admin', '1'); } catch {}
+    render();
+  },
+  'admin-salir': () => {
+    ui.admin = false;
+    try { sessionStorage.removeItem('f5_admin'); } catch {}
+    render();
+  },
+  'nueva-fecha': () => {
+    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y puntajes se mantienen.')) return;
+    act(s => { s.anotados = []; s.equipos = null; }, '🗓️ Lista nueva');
+  },
+  'toggle-anotado': ({ id }) => act(s => {
+    s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
+  }),
+  'borrar-ficha': ({ id }) => {
+    const p = S.players[id];
+    if (!p || !confirm(`¿Borrar la ficha de ${p.nombre}? Se pierde su puntaje.`)) return;
+    act(s => { delete s.players[id]; s.anotados = s.anotados.filter(x => x !== id); }, 'Ficha borrada');
+  },
+};
+
+const cambios = {
+  'mi-pos': v => act(s => { if (s.players[ui.meId]) s.players[ui.meId].posicion = v; }, 'Posición actualizada'),
+  'elegir-ficha': v => v && setMe(v),
+  pos: (v, { id }) => act(s => { if (s.players[id]) s.players[id].posicion = v; }),
+  nivel: (v, { id }) => act(s => { if (s.players[id]) s.players[id].nivel = Number(v); }),
+};
+
+const formularios = {
+  'crear-ficha': f => {
+    const nombre = f.get('nombre').trim();
+    if (!nombre) return;
+    const anotarse = f.get('anotar') === 'on';
+    const existe = buscarPorNombre(nombre);
+    if (existe && confirm(`Ya hay una ficha de "${existe.nombre}". ¿Sos vos?`)) {
+      setMe(existe.id);
+      if (anotarse) act(s => anotar(s, existe.id), '⚽ ¡Anotado!');
+      return true;
+    }
+    let id;
+    act(s => {
+      id = nuevaFicha(s, nombre, f.get('posicion'));
+      if (anotarse) anotar(s, id);
+    }, anotarse ? '⚽ ¡Ficha creada y anotado!' : 'Ficha creada').then(ok => ok && setMe(id));
+    return true;
+  },
+  partido: f => {
+    const cupo = Math.max(2, Math.min(30, parseInt(f.get('cupo')) || 10));
+    act(s => {
+      s.partido = {
+        titulo: f.get('titulo').trim(),
+        cuando: f.get('cuando').trim(),
+        lugar: f.get('lugar').trim(),
+        cupo,
+      };
+    }, '💾 Partido guardado');
+    return true;
+  },
+  agregar: f => {
+    const nombre = f.get('nombre').trim();
+    if (!nombre) return;
+    const existe = buscarPorNombre(nombre);
+    if (existe) {
+      act(s => anotar(s, existe.id), `${existe.nombre} ya tenía ficha: anotado`);
+    } else {
+      act(s => anotar(s, nuevaFicha(s, nombre, f.get('posicion'), Number(f.get('nivel')))), 'Jugador agregado');
+    }
+    return true;
+  },
+};
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-action]');
+  if (b && cargado) acciones[b.dataset.action]?.(b.dataset);
+});
+document.addEventListener('change', e => {
+  const el = e.target.closest('[data-change]');
+  if (el && cargado) cambios[el.dataset.change]?.(el.value, el.dataset);
+});
+document.addEventListener('input', e => { if (e.target.id) e.target.dataset.dirty = '1'; });
+document.addEventListener('submit', e => {
+  const form = e.target.closest('[data-form]');
+  if (!form) return;
+  e.preventDefault();
+  if (!cargado) return;
+  if (formularios[form.dataset.form]?.(new FormData(form))) {
+    form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
+    if (form.dataset.form !== 'partido') form.reset();
+  }
+});
+
+// ---------------- Inicio ----------------
+try {
+  store = CONFIG.firebase ? await crearStoreFirebase(CONFIG.firebase) : crearStoreLocal();
+} catch (e) {
+  console.error(e);
+  store = crearStoreLocal();
+  setTimeout(() => toast('No se pudo conectar a Firebase: modo local'), 300);
+}
+store.subscribe(s => { S = s; cargado = true; render(); });
+</script>
+</body>
+</html>
