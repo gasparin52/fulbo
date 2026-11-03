@@ -40,11 +40,11 @@ const CONFIG = {
 // =============================================================
 
 const POS = {
-  comodin:   { label: 'Jugador/Comodín', emoji: '🃏' },
-  arquero:   { label: 'Arquero', emoji: '🧤' },
-  defensor:  { label: 'Defensor', emoji: '🛡️' },
-  medio:     { label: 'Mediocampista', emoji: '⚙️' },
-  delantero: { label: 'Delantero', emoji: '⚽' },
+  comodin:   { label: 'Jugador/Comodín', corto: 'Comodín', emoji: '🃏' },
+  arquero:   { label: 'Arquero', corto: 'Arquero', emoji: '🧤' },
+  defensor:  { label: 'Defensor', corto: 'Defensor', emoji: '🛡️' },
+  medio:     { label: 'Mediocampista', corto: 'Medio', emoji: '⚙️' },
+  delantero: { label: 'Delantero', corto: 'Delantero', emoji: '⚽' },
 };
 const STATS = [
   { k: 'velocidad', label: 'Velocidad', corto: 'VEL', emoji: '⚡' },
@@ -424,8 +424,28 @@ const BTN = 'rounded-xl px-4 py-2.5 font-semibold transition active:scale-[.98] 
 const BTN_OK = `${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950`;
 const BTN_SEC = `${BTN} bg-slate-800 hover:bg-slate-700`;
 const card = html => `<div class="${CARD}">${html}</div>`;
-const opcionesPos = sel => Object.entries(POS).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v.emoji} ${v.label}</option>`).join('');
-const opcionesNivel = sel => Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<option value="${n}" ${n === sel ? 'selected' : ''}>${n}</option>`).join('');
+// Selector de posición: radios ocultos con botones dibujados (el <select> nativo queda feo en el celular).
+const selectorPos = (pref, sel = 'comodin') => `
+  <div class="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label="Posición">
+    ${Object.entries(POS).map(([k, v]) => `
+      <label class="cursor-pointer min-w-0">
+        <input type="radio" id="${pref}-${k}" name="posicion" value="${k}" ${k === sel ? 'checked' : ''} class="peer sr-only">
+        <span class="flex flex-col items-center gap-1 rounded-xl border border-slate-700 bg-slate-800 px-0.5 py-2 text-slate-400 transition select-none peer-checked:border-emerald-500 peer-checked:bg-emerald-500/15 peer-checked:text-emerald-200 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500">
+          <span class="text-xl leading-none">${v.emoji}</span>
+          <span class="text-[10px] sm:text-[11px] font-semibold truncate max-w-full">${v.corto}</span>
+        </span>
+      </label>`).join('')}
+  </div>`;
+
+// Nivel 1–10 con botones − y +. "attrs" decide qué hacen los botones (data-action…).
+const stepper = (valor, attrs, outId = '') => `
+  <span class="inline-flex items-center rounded-xl border border-slate-700 bg-slate-800 font-mono select-none">
+    <button type="button" ${attrs} data-delta="-1" aria-label="Bajar" class="w-9 h-9 grid place-items-center text-lg text-slate-400 hover:text-white active:scale-90 transition">−</button>
+    <span ${outId ? `id="${outId}"` : ''} class="w-6 text-center font-bold">${valor}</span>
+    <button type="button" ${attrs} data-delta="1" aria-label="Subir" class="w-9 h-9 grid place-items-center text-lg text-slate-400 hover:text-white active:scale-90 transition">+</button>
+  </span>`;
+const nivelDe = id => Number(D.niveles[id]) || NIVEL_DEFAULT;
+const limitarNivel = n => Math.max(1, Math.min(10, n));
 const colorNota = v => v >= 8 ? 'text-emerald-400' : v >= 6.5 ? 'text-lime-400' : v >= 5 ? 'text-amber-400' : 'text-red-400';
 const bgNota = v => v >= 8 ? 'bg-emerald-500' : v >= 6.5 ? 'bg-lime-500' : v >= 5 ? 'bg-amber-500' : 'bg-red-500';
 const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-center">${msg}</p>`;
@@ -467,13 +487,12 @@ function camposPerfil(p = {}) {
         ${foto ? `<button type="button" data-action="quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
       </div>
     </div>
-    <div class="grid grid-cols-[6rem_1fr] gap-3">
-      <label class="text-sm text-slate-400">Edad
-        <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1">
-      </label>
-      <label class="text-sm text-slate-400">Posición
-        <select id="pf-pos" name="posicion" class="${INPUT} mt-1">${opcionesPos(p.posicion || 'comodin')}</select>
-      </label>
+    <label class="block text-sm text-slate-400">Edad
+      <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1 block !w-28">
+    </label>
+    <div>
+      <p class="text-sm text-slate-400 mb-1">Posición</p>
+      ${selectorPos('pf-pos', p.posicion || 'comodin')}
     </div>`;
 }
 
@@ -772,7 +791,7 @@ function vistaFicha(id) {
       <h2 class="text-sm font-bold text-slate-400 mb-2">🔧 Admin</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <label class="flex items-center gap-2">Nivel si no tiene votos
-          <select data-change="nivel" data-id="${id}" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 font-mono">${opcionesNivel(Number(D.niveles[id]) || NIVEL_DEFAULT)}</select>
+          ${stepper(nivelDe(id), `data-action="nivel" data-id="${id}"`)}
         </label>
         ${admin ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
         <button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>
@@ -821,18 +840,23 @@ function panelAdmin(d) {
             ${avatar(j, 28)}
             <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : ''}</span>
             <span class="text-xs ${r.n ? 'text-emerald-300' : 'text-slate-500'}" title="Promedio de votos">${r.n ? `★ ${r.general.toFixed(1)} (${r.n})` : 'sin votos'}</span>
-            <select data-change="nivel" data-id="${j.id}" title="Nivel si no tiene votos" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm font-mono">${opcionesNivel(Number(D.niveles[j.id]) || NIVEL_DEFAULT)}</select>
+            <span title="Nivel si no tiene votos">${stepper(nivelDe(j.id), `data-action="nivel" data-id="${j.id}"`)}</span>
             <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
             ${j.invitado ? `<button data-action="borrar-invitado" data-id="${j.id}" title="Borrar invitado" class="rounded-lg px-2 py-1.5 hover:bg-red-950">🗑️</button>` : ''}
           </li>`;
       }).join('')}
     </ul>
 
-    <form data-form="invitado" class="mt-4 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto_auto] gap-2">
-      <input id="i-nombre" name="nombre" required maxlength="20" placeholder="Invitado sin cuenta (nombre)" class="${INPUT} col-span-2 sm:col-span-1">
-      <select id="i-pos" name="posicion" class="${INPUT} w-auto">${opcionesPos('comodin')}</select>
-      <select id="i-nivel" name="nivel" class="${INPUT} w-auto font-mono">${opcionesNivel(NIVEL_DEFAULT)}</select>
-      <button class="${BTN_OK} col-span-2 sm:col-span-1">+ Anotar invitado</button>
+    <form data-form="invitado" class="mt-5 space-y-2 rounded-xl border border-slate-800 p-3">
+      <h3 class="font-semibold text-sm text-slate-300">➕ Anotar invitado sin cuenta</h3>
+      <input id="i-nombre" name="nombre" required maxlength="20" placeholder="Nombre" class="${INPUT}">
+      ${selectorPos('i-pos')}
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-sm text-slate-400">Nivel</span>
+        <input type="hidden" id="i-nivel" name="nivel" value="${NIVEL_DEFAULT}" data-out="i-nivel-out">
+        ${stepper(NIVEL_DEFAULT, 'data-action="paso" data-target="i-nivel"', 'i-nivel-out')}
+      </div>
+      <button class="${BTN_OK} w-full">+ Anotar invitado</button>
     </form>
     <p class="text-xs text-slate-500 mt-2">Para expulsar a alguien o hacerlo admin, entrá a su ficha.</p>
   `);
@@ -879,12 +903,14 @@ function vistaUsuarios() {
     ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">⚠️ Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
     ${card(`
       <h2 class="text-lg font-bold mb-3">➕ Crear usuario</h2>
-      <form data-form="sa-crear" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT} col-span-2 sm:col-span-1">
-        <input id="sa-pass" name="pass" required minlength="6" value="${SA.passSugerida}" class="${INPUT} col-span-2 sm:col-span-1 font-mono" title="Contraseña">
-        <input id="sa-edad" name="edad" type="number" min="10" max="99" required placeholder="Edad" class="${INPUT}">
-        <select id="sa-pos" name="posicion" class="${INPUT}">${opcionesPos('comodin')}</select>
-        <button class="${BTN_OK} col-span-2 sm:col-span-4">Crear y copiar datos de acceso</button>
+      <form data-form="sa-crear" class="space-y-2">
+        <div class="grid grid-cols-2 gap-2">
+          <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT}">
+          <input id="sa-pass" name="pass" required minlength="6" value="${SA.passSugerida}" class="${INPUT} font-mono" title="Contraseña">
+        </div>
+        <input id="sa-edad" name="edad" type="number" min="10" max="99" required placeholder="Edad" class="${INPUT} !w-28">
+        ${selectorPos('sa-pos')}
+        <button class="${BTN_OK} w-full">Crear y copiar datos de acceso</button>
       </form>`)}
     ${card(`
       <h2 class="text-lg font-bold mb-2">Todos <span class="text-slate-500 font-normal text-sm">(${us.length})</span></h2>
@@ -916,10 +942,8 @@ function filaUsuarioEditando(u) {
           <span class="font-semibold flex-1">${esc(u.usuario)}</span>
           ${foto ? `<button type="button" data-action="sa-quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
         </div>
-        <div class="grid grid-cols-[6rem_1fr] gap-2">
-          <input id="sae-edad-${u.uid}" name="edad" type="number" min="10" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT}">
-          <select id="sae-pos-${u.uid}" name="posicion" class="${INPUT}">${opcionesPos(u.posicion || 'comodin')}</select>
-        </div>
+        <input id="sae-edad-${u.uid}" name="edad" type="number" min="10" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT} !w-28">
+        ${selectorPos(`sae-pos-${u.uid}`, u.posicion || 'comodin')}
         <div class="flex gap-2">
           <button class="${BTN_OK} flex-1 text-sm">Guardar</button>
           <button type="button" data-action="sa-cancelar" class="${BTN_SEC} text-sm">Cancelar</button>
@@ -932,13 +956,14 @@ function filaUsuarioEditando(u) {
 // Re-renderiza sin perder lo que el usuario está escribiendo.
 function pintar(el, html) {
   if (el._html === html) return;
-  const sucios = [...el.querySelectorAll('[data-dirty]')].map(i => [i.id, i.value]);
+  const sucios = [...el.querySelectorAll('[data-dirty]')].map(i => [i.id, i.value, i.checked]);
   const foco = el.contains(document.activeElement) ? document.activeElement.id : null;
   el.innerHTML = el._html = html;
-  sucios.forEach(([id, v]) => {
+  sucios.forEach(([id, v, checked]) => {
     const i = document.getElementById(id);
     if (!i) return;
-    i.value = v;
+    if (i.type === 'radio' || i.type === 'checkbox') i.checked = checked;
+    else i.value = v;
     i.dataset.dirty = '1';
     if (i.dataset.out) document.getElementById(i.dataset.out).textContent = v;
   });
@@ -1049,6 +1074,17 @@ const acciones = {
     }, 'Saliste del grupo');
   },
   'quitar-foto': () => { ui.foto = ''; render(); },
+  nivel: ({ id, delta }) => {
+    const n = limitarNivel(nivelDe(id) + Number(delta));
+    if (n !== nivelDe(id)) guardarNivel(id, n);
+  },
+  // Stepper dentro de un formulario: cambia un input oculto, se guarda al enviar.
+  paso: ({ target, delta }) => {
+    const i = document.getElementById(target);
+    i.value = limitarNivel(Number(i.value) + Number(delta));
+    i.dataset.dirty = '1';
+    document.getElementById(i.dataset.out).textContent = i.value;
+  },
 
   'sa-recargar': () => { SA.usuarios = null; render(); },
   'sa-editar': ({ uid }) => { SA.editando = uid; SA.foto = null; render(); },
@@ -1072,8 +1108,9 @@ const acciones = {
   },
 };
 
+const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n }, { merge: true }));
+
 const cambios = {
-  nivel: (el, { id }) => act(() => F.setDoc(refNiveles(D.gid), { [id]: Number(el.value) }, { merge: true })),
   foto: async el => {
     const file = el.files?.[0];
     if (!file) return;
@@ -1152,7 +1189,7 @@ const formularios = {
     return actualizarGrupo(s => {
       s.invitados[id] = { nombre: f.get('nombre').trim(), posicion: f.get('posicion') };
       s.anotados.push(id);
-    }, 'Invitado anotado').then(ok => ok && nivel !== NIVEL_DEFAULT ? cambios.nivel({ value: nivel }, { id }).then(() => ok) : ok);
+    }, 'Invitado anotado').then(ok => ok && nivel !== NIVEL_DEFAULT ? guardarNivel(id, nivel).then(() => ok) : ok);
   },
 };
 
@@ -1178,7 +1215,10 @@ document.addEventListener('submit', async e => {
   try {
     if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
       form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear'].includes(form.dataset.form)) form.reset();
+      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear'].includes(form.dataset.form)) {
+        form.reset();
+        form.querySelectorAll('[data-out]').forEach(i => (document.getElementById(i.dataset.out).textContent = i.value));
+      }
       form._html = null;
       render();
     }
