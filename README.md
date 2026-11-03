@@ -3,7 +3,7 @@
 Una página (`index.html`) para que el grupo se anote al fulbo, con titulares y suplentes, equipos equilibrados y un botón para copiar la lista a WhatsApp.
 
 - **Jugadores**: crean su ficha una vez (nombre y posición), después tocan "¡Me anoto!" o "Me bajo". El celu los recuerda.
-- **Admin** (botón 🔒 Admin al pie, PIN por defecto `1234`, ver "Cambiar el PIN"): pone los niveles del 1 al 10 (por defecto 5), configura cupo/fecha/lugar, agrega o borra jugadores, arma los equipos (equilibrados o aleatorios) y empieza una fecha nueva.
+- **Admin** (botón 🔒 Admin al pie, ver "Cambiar el PIN"): pone los niveles del 1 al 10 (por defecto 5), configura cupo/fecha/lugar, agrega o borra jugadores, arma los equipos (equilibrados o aleatorios) y empieza una fecha nueva.
 
 ## 1. Probarla ya
 
