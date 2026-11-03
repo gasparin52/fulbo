@@ -1,0 +1,89 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore. Pegarlas en la consola de Firebase:
+// Firestore Database → Reglas → Publicar.
+// El dominio "fulbo.app" tiene que coincidir con CONFIG.dominio de index.html.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function logueado() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function grupo(g) { return get(/databases/$(database)/documents/grupos/$(g)).data; }
+    function esMiembro(g) {
+      return logueado() && exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(uid()));
+    }
+    function esAdmin(g) { return logueado() && uid() in grupo(g).admins; }
+
+    // Ficha de un jugador: el nombre tiene que ser el de su propia cuenta.
+    function perfilValido(d) {
+      return d.usuario is string
+        && d.usuario.lower() + '@fulbo.app' == request.auth.token.email
+        && d.edad is int && d.edad >= 10 && d.edad <= 99
+        && d.posicion in ['comodin', 'arquero', 'defensor', 'medio', 'delantero']
+        && d.foto is string && d.foto.size() < 200000
+        && (d.foto == '' || d.foto.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+'));
+    }
+    function nota(s, k) { return s[k] is int && s[k] >= 1 && s[k] <= 10; }
+    function statsValidas(s) {
+      return s.keys().hasOnly(['velocidad', 'tecnica', 'pase', 'remate', 'defensa', 'fisico', 'arquero'])
+        && nota(s, 'velocidad') && nota(s, 'tecnica') && nota(s, 'pase') && nota(s, 'remate')
+        && nota(s, 'defensa') && nota(s, 'fisico') && nota(s, 'arquero');
+    }
+
+    // Datos privados de cada usuario (su ficha y la lista de sus grupos).
+    match /usuarios/{u} {
+      allow read: if logueado() && uid() == u;
+      allow create, update: if logueado() && uid() == u
+        && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'grupos', 'creado'])
+        && perfilValido(request.resource.data)
+        && request.resource.data.grupos is list && request.resource.data.grupos.size() <= 20;
+    }
+
+    match /grupos/{g} {
+      // Solo los miembros ven el grupo. Afuera no se ve nada.
+      allow read: if esMiembro(g);
+      allow create: if logueado()
+        && request.resource.data.creador == uid()
+        && request.resource.data.admins == [uid()];
+      // Los admins cambian todo; los demás solo se anotan o se bajan a sí mismos.
+      allow update: if esAdmin(g) || (
+        esMiembro(g)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['anotados'])
+        && request.resource.data.anotados.removeAll([uid()]) == resource.data.anotados.removeAll([uid()])
+      );
+      allow delete: if esAdmin(g);
+
+      // Para entrar hay que tener el código del link de invitación y no estar expulsado.
+      match /miembros/{m} {
+        allow read: if esMiembro(g);
+        allow create: if logueado() && uid() == m
+          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'codigo', 'unido'])
+          && perfilValido(request.resource.data)
+          && request.resource.data.codigo == grupo(g).codigo
+          && !(m in grupo(g).get('baneados', []));
+        allow update: if logueado() && uid() == m
+          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'codigo', 'unido'])
+          && perfilValido(request.resource.data)
+          && request.resource.data.codigo == resource.data.codigo;
+        allow delete: if logueado() && (uid() == m || esAdmin(g));
+      }
+
+      // Un voto por persona y por compañero: el id del documento es "quienVota_aQuien".
+      match /votos/{v} {
+        allow read: if esMiembro(g);
+        allow create, update: if esMiembro(g)
+          && request.resource.data.keys().hasOnly(['voter', 'target', 'stats', 'ts'])
+          && request.resource.data.voter == uid()
+          && request.resource.data.target != uid()
+          && v == uid() + '_' + request.resource.data.target
+          && exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(request.resource.data.target))
+          && statsValidas(request.resource.data.stats);
+        allow delete: if logueado() && (resource.data.voter == uid() || esAdmin(g));
+      }
+
+      // Niveles que pone el admin: solo los ven los admins.
+      match /privado/{doc} {
+        allow read, write: if esAdmin(g);
+      }
+    }
+  }
+}

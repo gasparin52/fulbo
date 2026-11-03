@@ -1,64 +1,54 @@
-# Fulbo ⚽ – Anotate
+# Fulbo ⚽
 
-Una página (`index.html`) para que el grupo se anote al fulbo, con titulares y suplentes, equipos equilibrados y un botón para copiar la lista a WhatsApp.
+App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grupos privados, fichas de jugador con estadísticas votadas por los compañeros, titulares y suplentes, equipos equilibrados y un botón para copiar la lista a WhatsApp.
 
-- **Jugadores**: crean su ficha una vez (nombre y posición), después tocan "¡Me anoto!" o "Me bajo". El celu los recuerda.
-- **Admin** (botón 🔒 Admin al pie, ver "Cambiar el PIN"): pone los niveles del 1 al 10 (por defecto 5), configura cupo/fecha/lugar, agrega o borra jugadores, arma los equipos (equilibrados o aleatorios) y empieza una fecha nueva.
+- **Página**: `index.html`, publicada con GitHub Pages en <https://gasparin52.github.io/fulbo/>. Cada `git push` a `main` la actualiza.
+- **Datos y login**: Firebase (Authentication + Firestore), proyecto `fulbo-5d6f5`.
+- **Servidor del superadmin**: `api/admin.js`, una función de Vercel (resetear contraseñas y administrar usuarios).
 
-## 1. Probarla ya
+## Cómo funciona
 
-Abrí `index.html` en el navegador. Sin Firebase funciona en **modo local** (solo en ese navegador), ideal para probar.
+- **Cuentas**: cada uno se registra con nombre de usuario, contraseña, edad, posición y foto (opcional). No se pide mail: por dentro Firebase guarda `usuario@fulbo.app`. La sesión dura 30 días.
+- **Grupos**: cualquiera puede crear un grupo y queda como admin. Solo se entra con el **link de invitación** del grupo; quien no es miembro no ve nada. El admin puede generar un link nuevo (el viejo deja de andar) y expulsar gente (no puede volver a entrar).
+- **Fichas**: cada jugador tiene 7 estadísticas del 1 al 10 (Velocidad, Técnica, Pase, Remate, Defensa, Físico y Arquero), con gráfico tipo PES. Los compañeros votan; cada uno tiene **un solo voto por compañero** (si lo cambia, reemplaza al anterior) y nadie se puede votar a sí mismo. Lo garantizan las reglas de Firestore, no solo la página.
+- **General**: promedio de las 6 estadísticas de campo. Para los arqueros, mitad eso y mitad la de Arquero.
+- **Equipos equilibrados**: ordena a los titulares por puntaje y los reparte en serpentina A‑B‑B‑A‑A‑B… El puntaje es el general votado; si alguien todavía no tiene votos, se usa el nivel que pone el admin (por defecto 5, solo lo ven los admins). Si hay 2 o más arqueros, va uno a cada equipo.
+- **Invitados**: el admin puede anotar a alguien sin cuenta (nombre, posición y nivel).
+- **Superadmin** (`gasparin`): tiene el panel **Usuarios** para ver a todos, crearlos, editarlos, borrarlos y ponerles una contraseña nueva.
 
-## 2. Hacer que todos compartan la lista (Firebase, gratis)
+## Configuración (una sola vez)
 
-1. Entrá a <https://console.firebase.google.com> → **Agregar proyecto** (podés desactivar Analytics).
-2. Menú **Compilación → Firestore Database → Crear base de datos** → elegí una ubicación (ej. `southamerica-east1`) → modo **producción**.
-3. En la pestaña **Reglas** de Firestore pegá esto y publicá:
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /grupos/{grupo} {
-         allow read, write: if true;
-       }
-     }
-   }
-   ```
-4. **Configuración del proyecto (⚙️) → Tus apps → Web (`</>`)** → registrá la app → copiá el objeto `firebaseConfig`.
-5. En `index.html`, pegalo en `CONFIG.firebase`:
-   ```js
-   firebase: {
-     apiKey: "...",
-     authDomain: "...",
-     projectId: "...",
-     storageBucket: "...",
-     messagingSenderId: "...",
-     appId: "..."
-   },
-   ```
-6. Cambiá el PIN (ver abajo).
+### 1. Firebase
 
-## 3. Online con GitHub Pages
+1. **Authentication → Comenzar → Método de acceso → Correo electrónico/contraseña → Habilitar** (solo la primera opción) → Guardar.
+2. **Firestore Database → Reglas**: borrá todo, pegá el contenido de [`firestore.rules`](firestore.rules) y tocá **Publicar**.
 
-La página se publica sola con GitHub Pages desde la rama `main`: cada `git push` la actualiza en un minuto, aproximadamente. El link es `https://gasparin52.github.io/fulbo/`, y el mensaje de WhatsApp lo agrega al final.
+### 2. Vercel (servidor del superadmin)
 
-## Cambiar el PIN
+1. En Firebase: **⚙️ Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada**. Se descarga un archivo `.json`. **Es secreto**: no lo subas a GitHub ni lo mandes por chat.
+2. Entrá a <https://vercel.com/signup> con **Continue with GitHub**.
+3. **Add New… → Project** → importá `gasparin52/fulbo`.
+4. Antes de tocar Deploy, abrí **Environment Variables** y agregá:
+   - `FIREBASE_SERVICE_ACCOUNT`: abrí el `.json` con el Bloc de notas, copiá **todo** y pegalo como valor.
+5. **Deploy**. Cuando termine, copiá el dominio (algo como `fulbo-xxxx.vercel.app`).
+6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/admin`.
 
-El repo es público, así que el código guarda solo el hash SHA-256 del PIN (`CONFIG.adminPinHash`), no el PIN. Para generar el hash de uno nuevo:
+Después borrá el `.json` descargado o guardalo en un lugar seguro.
+
+## Si alguien se olvida la contraseña
+
+El superadmin entra a **Usuarios** (link arriba a la derecha), toca 🔑 en esa persona y le pone una contraseña nueva. Los datos de acceso quedan copiados para mandárselos por WhatsApp.
+
+## Desarrollo local
 
 ```bash
-python -c "import hashlib;print(hashlib.sha256('MI-PIN'.encode()).hexdigest())"
+python -m http.server 8791
 ```
 
-Mejor usá una frase que 4 números: el hash de un PIN corto se puede adivinar probando todas las combinaciones.
+Abrí <http://localhost:8791>. Usa la misma base de Firebase que la versión online.
 
-## Cómo se arman los equipos
+## Limitaciones
 
-- **⚖️ Equilibrados**: ordena a los titulares de mayor a menor nivel (en los empates el orden se sortea) y los reparte en serpentina A‑B‑B‑A‑A‑B… Si hay 2 o más arqueros, pone uno en cada equipo primero. Si tocás el botón de nuevo, sale otra combinación igual de pareja.
-- **🎲 Aleatorio**: sorteo puro.
-- Si la lista de titulares cambia después de armar, aparece un aviso para volver a armarlos, y los equipos viejos no se incluyen en el mensaje de WhatsApp.
-
-## Limitaciones (es un grupo de amigos, no un banco)
-
-- No hay login: cualquiera con el link podría elegir el nombre de otro. El ❌ solo aparece en tu propia fila (el admin ve todos).
-- Los niveles se pueden ver mirando la base de datos con las herramientas del navegador, y la base acepta escrituras de cualquiera que tenga el link. El PIN alcanza para que nadie cambie cosas sin querer, pero no es seguridad de verdad.
+- Con varias cuentas, una persona podría votar más de una vez al mismo compañero. El admin puede expulsar esas cuentas y el superadmin, borrarlas.
+- Los votos individuales no son secretos para alguien que sepa leer la base de datos con las herramientas del navegador. La página solo muestra promedios.
+- Los miembros pueden ver el código de invitación. Si alguien lo pasa afuera, el admin genera uno nuevo.

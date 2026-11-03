@@ -9,24 +9,16 @@
   <style>
     body { -webkit-tap-highlight-color: transparent; }
     select, input { color-scheme: dark; }
+    input[type=range] { accent-color: #10b981; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
-  <div class="max-w-2xl mx-auto px-4 py-6 space-y-5">
-    <header id="hdr"><p class="text-slate-400">Cargando…</p></header>
-    <section id="me"></section>
-    <section id="lista"></section>
-    <section id="equipos"></section>
-    <section id="admin"></section>
-  </div>
-  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity"></div>
+  <div id="app" class="max-w-2xl mx-auto px-4 py-6 space-y-5"><p class="text-slate-400">Cargando…</p></div>
+  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
 
 <script type="module">
 // ======================= CONFIGURACIÓN =======================
 const CONFIG = {
-  // Pegá acá el objeto firebaseConfig de tu proyecto (ver README.md) para que
-  // todos compartan la misma lista. Si queda en null, los datos se guardan
-  // solo en este navegador (sirve para probar).
   firebase: {
     apiKey: 'AIzaSyAuvaJTlSBo-FGc-CV5XvxIB6lSgMYgG4g',
     authDomain: 'fulbo-5d6f5.firebaseapp.com',
@@ -35,10 +27,15 @@ const CONFIG = {
     messagingSenderId: '52183970723',
     appId: '1:52183970723:web:d996338f96b0448ae42016',
   },
-  grupo: 'fulbo-trabajo', // nombre del documento en Firestore
-  // SHA-256 del PIN de admin (no el PIN en sí, porque el repo es público).
-  // Para cambiarlo ver README.md.
-  adminPinHash: '2cde073b39dd6bb110a2c85de907705a365f55ca08df8de23c47028aea843a5a',
+  // Los usuarios entran con nombre de usuario; por dentro Firebase usa
+  // "usuario@dominio". Tiene que coincidir con firestore.rules.
+  dominio: 'fulbo.app',
+  // Usuario con acceso al panel de usuarios (el servidor lo vuelve a verificar).
+  superadmin: 'gasparin',
+  // URL de la función de Vercel (api/admin.js). Vacía hasta que se configure.
+  api: '',
+  // Días que dura la sesión antes de pedir la contraseña de nuevo.
+  diasSesion: 30,
 };
 // =============================================================
 
@@ -49,97 +46,98 @@ const POS = {
   medio:     { label: 'Mediocampista', emoji: '⚙️' },
   delantero: { label: 'Delantero', emoji: '⚽' },
 };
+const STATS = [
+  { k: 'velocidad', label: 'Velocidad', corto: 'VEL', emoji: '⚡' },
+  { k: 'tecnica',   label: 'Técnica',   corto: 'TÉC', emoji: '🎩' },
+  { k: 'pase',      label: 'Pase',      corto: 'PAS', emoji: '🎯' },
+  { k: 'remate',    label: 'Remate',    corto: 'REM', emoji: '💥' },
+  { k: 'defensa',   label: 'Defensa',   corto: 'DEF', emoji: '🛡️' },
+  { k: 'fisico',    label: 'Físico',    corto: 'FÍS', emoji: '💪' },
+  { k: 'arquero',   label: 'Arquero',   corto: 'ARQ', emoji: '🧤' },
+];
+const CAMPO = STATS.filter(s => s.k !== 'arquero').map(s => s.k);
 const NIVEL_DEFAULT = 5;
+const LS = 'f5_';
 
-const estadoInicial = () => ({
-  players: {},                 // id -> { id, nombre, posicion, nivel }
+// ---------------- Firebase ----------------
+const V = '10.12.2';
+let A, F, auth, db;
+try {
+  const [{ initializeApp }, authMod, fsMod] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+  ]);
+  A = authMod;
+  F = fsMod;
+  const app = initializeApp(CONFIG.firebase);
+  auth = A.getAuth(app);
+  db = F.getFirestore(app);
+  // Desarrollo: http://localhost:8791/?emulador usa los emuladores locales de Firebase.
+  if (location.hostname === 'localhost' && new URLSearchParams(location.search).has('emulador')) {
+    A.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    F.connectFirestoreEmulator(db, '127.0.0.1', 8085);
+    CONFIG.api = 'http://localhost:3001/api/admin';
+  }
+} catch (e) {
+  console.error(e);
+  document.querySelector('#app').innerHTML = '<p class="text-red-300">No se pudo cargar Firebase. Revisá la conexión y recargá la página.</p>';
+  throw e;
+}
+
+const refUsuario = id => F.doc(db, 'usuarios', id);
+const refGrupo = g => F.doc(db, 'grupos', g);
+const colMiembros = g => F.collection(db, 'grupos', g, 'miembros');
+const colVotos = g => F.collection(db, 'grupos', g, 'votos');
+const refNiveles = g => F.doc(db, 'grupos', g, 'privado', 'niveles');
+
+// ---------------- Estado ----------------
+const datosGrupoIniciales = () => ({
   partido: { titulo: 'Fulbo ⚽', cuando: '', lugar: '', cupo: 10 },
-  anotados: [],                // ids en orden de llegada
+  anotados: [],                // uids e ids de invitados ("inv_…"), en orden de llegada
+  invitados: {},               // id -> { nombre, posicion } (gente sin cuenta)
   equipos: null,               // { A: [ids], B: [ids], modo, base }
 });
+const normGrupo = d => {
+  const g = { nombre: '', admins: [], codigo: '', baneados: [], ...datosGrupoIniciales(), ...(d || {}) };
+  g.partido = { ...datosGrupoIniciales().partido, ...g.partido };
+  return g;
+};
 
-// ---------------- Almacenamiento ----------------
-function crearStoreLocal() {
-  const KEY = 'f5_estado_' + CONFIG.grupo;
-  const leer = () => {
-    try { return { ...estadoInicial(), ...JSON.parse(localStorage.getItem(KEY)) }; }
-    catch { return estadoInicial(); }
-  };
-  const subs = new Set();
-  window.addEventListener('storage', e => { if (e.key === KEY) subs.forEach(fn => fn(leer())); });
-  return {
-    modo: 'local',
-    subscribe(fn) { subs.add(fn); fn(leer()); },
-    async update(mut) {
-      const s = leer();
-      mut(s);
-      localStorage.setItem(KEY, JSON.stringify(s));
-      subs.forEach(fn => fn(s));
-    },
-  };
-}
+const D = {
+  user: undefined,     // undefined: todavía no sabemos; null: sin sesión
+  perfil: undefined,   // usuarios/{uid}; null si todavía no completó la ficha
+  gid: null,
+  grupo: null,
+  miembros: null,      // uid -> ficha dentro del grupo
+  votos: {},           // target -> { voter -> stats }
+  niveles: {},         // solo admins: id -> 1..10
+  registrando: false,
+};
+const ui = { tab: 'entrar', foto: null };  // foto: null = sin cambios, '' = quitar, dataURL = nueva
+let subsUser = [], subsGrupo = [], nivelesDe = null;
 
-async function crearStoreFirebase(cfg) {
-  const V = '10.12.2';
-  const { initializeApp } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
-  const { getFirestore, doc, onSnapshot, runTransaction } =
-    await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
-  const db = getFirestore(initializeApp(cfg));
-  const ref = doc(db, 'grupos', CONFIG.grupo);
-  const norm = d => ({ ...estadoInicial(), ...(d || {}) });
-  return {
-    modo: 'firebase',
-    subscribe(fn) {
-      onSnapshot(ref, snap => fn(norm(snap.data())), err => {
-        console.error(err);
-        toast('Error de conexión: ' + err.code);
-      });
-    },
-    // Transacción: si dos se anotan a la vez, ninguno pisa al otro.
-    async update(mut) {
-      await runTransaction(db, async tx => {
-        const s = norm((await tx.get(ref)).data());
-        mut(s);
-        tx.set(ref, s);
-      });
-    },
-  };
-}
-
-// ---------------- Estado y utilidades ----------------
-let S = estadoInicial();
-let store;
-let cargado = false;
-
+// ---------------- Utilidades ----------------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const genId = (n = 20) => {
+  const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+  return [...crypto.getRandomValues(new Uint8Array(n))].map(x => abc[x % abc.length]).join('');
+};
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const guardado = {
   get: k => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
 };
-const ME_KEY = 'f5_me_' + CONFIG.grupo;
-const ui = {
-  meId: guardado.get(ME_KEY),
-  admin: (() => { try { return sessionStorage.getItem('f5_admin') === '1'; } catch { return false; } })(),
-};
-
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const pos = p => POS[p?.posicion] || POS.comodin;
-const nivel = p => Number(p?.nivel) || NIVEL_DEFAULT;
-const normNombre = s => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
-async function sha256(texto) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-
-function derivar(s) {
-  const lista = s.anotados.map(id => s.players[id]).filter(Boolean);
-  const cupo = Number(s.partido.cupo) || 10;
-  return { cupo, titulares: lista.slice(0, cupo), suplentes: lista.slice(cupo) };
-}
-const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
-const equiposDesactualizados = d => S.equipos && S.equipos.base !== baseKey(d.titulares);
+const emailDe = usuario => `${usuario.trim().toLowerCase()}@${CONFIG.dominio}`;
+const miUid = () => D.user?.uid;
+const esAdmin = () => !!(D.grupo && D.user && D.grupo.admins.includes(D.user.uid));
+const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
+const cortar = arr => { arr.forEach(f => f()); arr.length = 0; };
+const urlBase = () => location.origin + location.pathname;
+const linkInvitacion = () => `${urlBase()}#/unirse/${D.gid}/${D.grupo.codigo}`;
+const datosPerfil = p => ({ usuario: p.usuario, edad: p.edad, posicion: p.posicion, foto: p.foto || '' });
 
 let toastTimer;
 function toast(msg) {
@@ -147,22 +145,204 @@ function toast(msg) {
   t.textContent = msg;
   t.style.opacity = 1;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.style.opacity = 0), 2200);
+  toastTimer = setTimeout(() => (t.style.opacity = 0), 2600);
 }
 
-async function act(mut, okMsg) {
+function msgError(e) {
+  const c = e?.code || '';
+  return {
+    'auth/email-already-in-use': 'Ese nombre de usuario ya existe',
+    'auth/invalid-credential': 'Usuario o contraseña incorrectos',
+    'auth/invalid-login-credentials': 'Usuario o contraseña incorrectos',
+    'auth/wrong-password': 'Usuario o contraseña incorrectos',
+    'auth/user-not-found': 'Usuario o contraseña incorrectos',
+    'auth/weak-password': 'La contraseña tiene que tener al menos 6 caracteres',
+    'auth/too-many-requests': 'Demasiados intentos, esperá un rato',
+    'auth/operation-not-allowed': 'Falta habilitar el login en Firebase',
+    'auth/network-request-failed': 'Sin conexión',
+    'permission-denied': 'No tenés permiso para hacer eso',
+  }[c] || 'Algo salió mal' + (c ? ` (${c})` : '');
+}
+
+async function act(fn, okMsg) {
   try {
-    await store.update(mut);
+    await fn();
     if (okMsg) toast(okMsg);
     return true;
   } catch (e) {
     console.error(e);
-    toast('❌ No se pudo guardar, probá de nuevo');
+    toast('❌ ' + (e.mensaje || msgError(e)));
     return false;
   }
 }
 
-// ---------------- Armado de equipos ----------------
+// Transacción sobre el documento del grupo. Solo escribe los campos que
+// cambiaron: los jugadores solo pueden tocar "anotados" (ver firestore.rules).
+function actualizarGrupo(mut, okMsg) {
+  const gid = D.gid;
+  return act(() => F.runTransaction(db, async tx => {
+    const snap = await tx.get(refGrupo(gid));
+    const antes = normGrupo(snap.data());
+    const s = structuredClone(antes);
+    mut(s);
+    const patch = {};
+    for (const k of Object.keys(s)) if (JSON.stringify(s[k]) !== JSON.stringify(antes[k])) patch[k] = s[k];
+    if (Object.keys(patch).length) tx.update(refGrupo(gid), patch);
+  }), okMsg);
+}
+
+// ---------------- Suscripciones ----------------
+A.onAuthStateChanged(auth, user => {
+  const ultimoIngreso = Date.parse(user?.metadata.lastSignInTime || '');
+  if (user && Date.now() - ultimoIngreso > CONFIG.diasSesion * 864e5) {
+    toast('Tu sesión venció, entrá de nuevo');
+    return A.signOut(auth);
+  }
+  cortar(subsUser);
+  cortar(subsGrupo);
+  nivelesDe = null;
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {} });
+  if (user) {
+    subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
+      D.perfil = s.exists() ? s.data() : null;
+      if (D.perfil) D.registrando = false;
+      elegirGrupo();
+      procesarInvitacion();
+      render();
+    }, e => { console.error(e); toast('❌ ' + msgError(e)); }));
+  }
+  render();
+});
+
+function elegirGrupo() {
+  const ids = (D.perfil?.grupos || []).map(g => g.id);
+  const quiero = guardado.get(LS + 'gid');
+  const gid = ids.includes(quiero) ? quiero : ids.includes(D.gid) ? D.gid : ids[0] || null;
+  if (gid === D.gid) return;
+  cortar(subsGrupo);
+  nivelesDe = null;
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {} });
+  if (!gid) return;
+  guardado.set(LS + 'gid', gid);
+  subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
+    if (!s.exists()) return olvidarGrupo(gid, 'Ese grupo ya no existe');
+    D.grupo = normGrupo(s.data());
+    suscribirNiveles();
+    render();
+  }, e => {
+    if (e.code === 'permission-denied') olvidarGrupo(gid, 'Ya no sos parte de ese grupo');
+    else console.error(e);
+  }));
+  subsGrupo.push(F.onSnapshot(colMiembros(gid), qs => {
+    D.miembros = Object.fromEntries(qs.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    render();
+  }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(colVotos(gid), qs => {
+    const v = {};
+    qs.docs.forEach(d => { const x = d.data(); (v[x.target] ||= {})[x.voter] = x.stats; });
+    D.votos = v;
+    render();
+  }, e => console.warn(e.code)));
+}
+
+function suscribirNiveles() {
+  if (!esAdmin() || nivelesDe === D.gid) return;
+  nivelesDe = D.gid;
+  subsGrupo.push(F.onSnapshot(refNiveles(D.gid), s => { D.niveles = s.data() || {}; render(); }, e => console.warn(e.code)));
+}
+
+// Saca un grupo de mi lista (me expulsaron o lo borraron).
+function olvidarGrupo(gid, msg) {
+  toast(msg);
+  if (guardado.get(LS + 'gid') === gid) guardado.set(LS + 'gid', null);
+  const grupos = (D.perfil?.grupos || []).filter(g => g.id !== gid);
+  act(() => F.updateDoc(refUsuario(miUid()), { grupos }));
+}
+
+// ---------------- Invitaciones ----------------
+function leerInvitacion() {
+  const m = location.hash.match(/^#\/unirse\/([^/]+)\/([^/]+)/);
+  if (!m) return;
+  guardado.set(LS + 'inv', `${m[1]}/${m[2]}`);
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
+let uniendo = false;
+async function procesarInvitacion() {
+  const inv = guardado.get(LS + 'inv');
+  if (!inv || !D.user || !D.perfil || uniendo) return;
+  guardado.set(LS + 'inv', null);
+  const [gid, codigo] = inv.split('/');
+  if (D.perfil.grupos?.some(g => g.id === gid)) {
+    guardado.set(LS + 'gid', gid);
+    elegirGrupo();
+    return render();
+  }
+  uniendo = true;
+  await unirse(gid, codigo);
+  uniendo = false;
+}
+
+function unirse(gid, codigo) {
+  return act(async () => {
+    try {
+      await F.setDoc(F.doc(colMiembros(gid), miUid()), { ...datosPerfil(D.perfil), codigo, unido: Date.now() });
+    } catch (e) {
+      if (e.code === 'permission-denied') e.mensaje = 'El link de invitación no es válido o ya lo cambiaron. Pedile uno nuevo al admin.';
+      throw e;
+    }
+    const g = await F.getDoc(refGrupo(gid));
+    guardado.set(LS + 'gid', gid);
+    await F.updateDoc(refUsuario(miUid()), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre: g.data().nombre }] });
+  }, '🎉 ¡Te uniste al grupo!');
+}
+
+function crearGrupo(nombre) {
+  const gid = genId(20), codigo = genId(12), uid = miUid();
+  return act(async () => {
+    await F.setDoc(refGrupo(gid), { nombre, creador: uid, admins: [uid], codigo, baneados: [], ...datosGrupoIniciales() });
+    await F.setDoc(F.doc(colMiembros(gid), uid), { ...datosPerfil(D.perfil), codigo, unido: Date.now() });
+    guardado.set(LS + 'gid', gid);
+    await F.updateDoc(refUsuario(uid), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre }] });
+    location.hash = '';
+  }, '⚽ Grupo creado. Compartí el link de invitación desde el panel de admin.');
+}
+
+// ---------------- Jugadores, votos y puntajes ----------------
+function jugador(id) {
+  if (id.startsWith('inv_')) {
+    const i = D.grupo?.invitados[id];
+    return i && { id, usuario: i.nombre, posicion: i.posicion, invitado: true };
+  }
+  return D.miembros?.[id];
+}
+
+function resumen(id) {
+  const p = jugador(id);
+  // Solo cuentan los votos de gente que sigue en el grupo.
+  const vs = Object.entries(D.votos[id] || {}).filter(([voter]) => D.miembros?.[voter]).map(([, s]) => s);
+  if (!vs.length) return { n: 0 };
+  const prom = {};
+  STATS.forEach(s => (prom[s.k] = vs.reduce((t, v) => t + (v[s.k] || 0), 0) / vs.length));
+  const campo = CAMPO.reduce((t, k) => t + prom[k], 0) / CAMPO.length;
+  const general = p?.posicion === 'arquero' ? (campo + prom.arquero) / 2 : campo;
+  return { n: vs.length, prom, general };
+}
+
+// Para equilibrar: promedio de votos si tiene; si no, el nivel que puso el admin.
+function puntaje(id) {
+  const r = resumen(id);
+  return r.n ? r.general : Number(D.niveles[id]) || NIVEL_DEFAULT;
+}
+
+function derivar() {
+  const lista = D.grupo.anotados.map(jugador).filter(Boolean);
+  const cupo = Number(D.grupo.partido.cupo) || 10;
+  return { cupo, titulares: lista.slice(0, cupo), suplentes: lista.slice(cupo) };
+}
+const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
+const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== baseKey(d.titulares);
+
 function armarEquipos(jugadores, modo) {
   const mezclados = shuffle([...jugadores]);
   const A = [], B = [];
@@ -171,7 +351,7 @@ function armarEquipos(jugadores, modo) {
     return { A, B };
   }
   // Mayor a menor; el sort es estable, así que los empates quedan al azar.
-  const orden = mezclados.sort((a, b) => nivel(b) - nivel(a));
+  const orden = mezclados.sort((a, b) => puntaje(b.id) - puntaje(a.id));
   let resto = orden, offset = 0;
   // Si hay 2+ arqueros, uno para cada lado; la serpentina sigue compensando.
   const arqueros = orden.filter(p => p.posicion === 'arquero');
@@ -186,34 +366,34 @@ function armarEquipos(jugadores, modo) {
   return { A, B };
 }
 
-// ---------------- Mensaje de WhatsApp ----------------
+// ---------------- WhatsApp ----------------
 function mensajeWsp() {
-  const d = derivar(S);
-  const p = S.partido;
+  const d = derivar();
+  const p = D.grupo.partido;
   const L = [`⚽ *${p.titulo || 'Fulbo'}*`];
   if (p.cuando) L.push(`📅 ${p.cuando}`);
   if (p.lugar) L.push(`📍 ${p.lugar}`);
   L.push('', `✅ *TITULARES (${d.titulares.length}/${d.cupo})*`);
   for (let i = 0; i < d.cupo; i++) {
     const j = d.titulares[i];
-    L.push(j ? `${i + 1}. ${j.nombre} ${pos(j).emoji}` : `${i + 1}. _libre_`);
+    L.push(j ? `${i + 1}. ${j.usuario} ${pos(j).emoji}` : `${i + 1}. _libre_`);
   }
   if (d.suplentes.length) {
     L.push('', '🔁 *SUPLENTES*');
-    d.suplentes.forEach((j, i) => L.push(`S${i + 1}. ${j.nombre} ${pos(j).emoji}`));
+    d.suplentes.forEach((j, i) => L.push(`S${i + 1}. ${j.usuario} ${pos(j).emoji}`));
   }
-  if (S.equipos && !equiposDesactualizados(d)) {
+  if (D.grupo.equipos && !equiposDesactualizados(d)) {
     L.push('', '🆚 *EQUIPOS*');
-    [['🔴', 'Equipo A', S.equipos.A], ['🔵', 'Equipo B', S.equipos.B]].forEach(([e, nom, ids]) => {
+    [['🔴', 'Equipo A', D.grupo.equipos.A], ['🔵', 'Equipo B', D.grupo.equipos.B]].forEach(([e, nom, ids]) => {
       L.push('', `${e} *${nom}*`);
-      ids.map(id => S.players[id]).filter(Boolean).forEach(j => L.push(`• ${j.nombre} ${pos(j).emoji}`));
+      ids.map(jugador).filter(Boolean).forEach(j => L.push(`• ${j.usuario} ${pos(j).emoji}`));
     });
   }
-  if (location.protocol.startsWith('http')) L.push('', `👉 Anotate acá: ${location.origin + location.pathname}`);
+  L.push('', `👉 Anotate acá: ${urlBase()}`);
   return L.join('\n');
 }
 
-async function copiar(texto) {
+async function copiar(texto, msg = '📋 ¡Copiado! Pegalo en el grupo') {
   try {
     await navigator.clipboard.writeText(texto);
   } catch {
@@ -223,128 +403,227 @@ async function copiar(texto) {
     document.execCommand('copy');
     ta.remove();
   }
-  toast('📋 ¡Copiado! Pegalo en el grupo');
+  toast(msg);
 }
 
-// ---------------- Render ----------------
+// ---------------- Fotos ----------------
+// Recorta al centro y achica a 256×256: ~20 KB, entra cómodo en Firestore.
+async function procesarFoto(file) {
+  const img = await createImageBitmap(file);
+  const L = 256, lado = Math.min(img.width, img.height);
+  const c = Object.assign(document.createElement('canvas'), { width: L, height: L });
+  c.getContext('2d').drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, L, L);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+
+// ---------------- Componentes ----------------
 const CARD = 'bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5';
 const INPUT = 'w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500';
 const BTN = 'rounded-xl px-4 py-2.5 font-semibold transition active:scale-[.98] disabled:opacity-40 disabled:pointer-events-none';
+const BTN_OK = `${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950`;
+const BTN_SEC = `${BTN} bg-slate-800 hover:bg-slate-700`;
 const card = html => `<div class="${CARD}">${html}</div>`;
 const opcionesPos = sel => Object.entries(POS).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v.emoji} ${v.label}</option>`).join('');
 const opcionesNivel = sel => Array.from({ length: 10 }, (_, i) => i + 1).map(n => `<option value="${n}" ${n === sel ? 'selected' : ''}>${n}</option>`).join('');
+const colorNota = v => v >= 8 ? 'text-emerald-400' : v >= 6.5 ? 'text-lime-400' : v >= 5 ? 'text-amber-400' : 'text-red-400';
+const bgNota = v => v >= 8 ? 'bg-emerald-500' : v >= 6.5 ? 'bg-lime-500' : v >= 5 ? 'bg-amber-500' : 'bg-red-500';
+const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-center">${msg}</p>`;
 
-// Re-renderiza sin perder lo que el usuario está escribiendo.
-function pintar(el, html) {
-  if (el._html === html) return;
-  const sucios = [...el.querySelectorAll('[data-dirty]')].map(i => [i.id, i.value]);
-  const foco = el.contains(document.activeElement) ? document.activeElement.id : null;
-  el.innerHTML = el._html = html;
-  sucios.forEach(([id, v]) => { const i = document.getElementById(id); if (i) { i.value = v; i.dataset.dirty = '1'; } });
-  if (foco) document.getElementById(foco)?.focus();
+function avatar(p, size = 40) {
+  const s = `width:${size}px;height:${size}px`;
+  if (p?.foto) return `<img src="${esc(p.foto)}" alt="" style="${s}" class="rounded-full object-cover shrink-0 bg-slate-800">`;
+  const n = p?.usuario || '?';
+  const hue = [...n].reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
+  return `<span style="${s};background:hsl(${hue} 40% 32%);font-size:${Math.round(size * 0.42)}px" class="rounded-full grid place-items-center font-bold shrink-0 text-white">${esc(n[0].toUpperCase())}</span>`;
 }
 
-function render() {
-  const d = derivar(S);
-  pintar($('#hdr'), renderHeader(d));
-  pintar($('#me'), renderMe(d));
-  pintar($('#lista'), renderLista(d));
-  pintar($('#equipos'), renderEquipos(d));
-  pintar($('#admin'), renderAdmin(d));
-}
-
-function renderHeader(d) {
-  const p = S.partido;
-  const faltan = d.cupo - d.titulares.length;
-  const aviso = store.modo === 'local'
-    ? `<p class="mt-3 text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">⚠️ Modo local: la lista se guarda solo en este navegador. Configurá Firebase para compartirla (ver README.md).</p>`
+function radar(prom) {
+  const size = 300, c = size / 2, R = 96, n = STATS.length;
+  const pt = (i, r) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / n; return [c + r * Math.cos(a), c + r * Math.sin(a)]; };
+  const poly = r => STATS.map((_, i) => pt(i, r).map(x => x.toFixed(1)).join(',')).join(' ');
+  const anillos = [2, 4, 6, 8, 10].map(v => `<polygon points="${poly((R * v) / 10)}" fill="none" stroke="#334155"/>`).join('');
+  const ejes = STATS.map((_, i) => { const [x, y] = pt(i, R); return `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" stroke="#334155"/>`; }).join('');
+  const datos = prom
+    ? `<polygon points="${STATS.map((s, i) => pt(i, (R * prom[s.k]) / 10).map(x => x.toFixed(1)).join(',')).join(' ')}" fill="rgba(16,185,129,.35)" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>`
     : '';
-  return `
-    <div class="flex items-start justify-between gap-4">
-      <div class="min-w-0">
-        <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
-        <div class="mt-1 text-slate-400 text-sm space-x-3">
-          ${p.cuando ? `<span>📅 ${esc(p.cuando)}</span>` : ''}
-          ${p.lugar ? `<span>📍 ${esc(p.lugar)}</span>` : ''}
-        </div>
-      </div>
-      <div class="text-right shrink-0">
-        <div class="text-3xl font-black ${faltan <= 0 ? 'text-emerald-400' : ''}">${d.titulares.length}<span class="text-slate-500 text-xl">/${d.cupo}</span></div>
-        <div class="text-xs text-slate-400">${faltan > 0 ? `faltan ${faltan}` : '¡completo!'}</div>
-      </div>
-    </div>
-    <div class="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
-      <div class="h-full bg-emerald-500 transition-all" style="width:${Math.min(100, (d.titulares.length / d.cupo) * 100)}%"></div>
-    </div>
-    ${aviso}`;
+  const etiquetas = STATS.map((s, i) => {
+    const [x, y] = pt(i, R + 26);
+    return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="700" fill="#94a3b8">${s.corto}${prom ? `<tspan fill="#e2e8f0"> ${prom[s.k].toFixed(1)}</tspan>` : ''}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" class="w-full max-w-[320px] mx-auto">${anillos}${ejes}${datos}${etiquetas}</svg>`;
 }
 
-function renderMe(d) {
-  const yo = S.players[ui.meId];
-  if (yo) {
-    const iT = d.titulares.findIndex(p => p.id === yo.id);
-    const iS = d.suplentes.findIndex(p => p.id === yo.id);
-    const anotado = iT >= 0 || iS >= 0;
-    const estado = iT >= 0 ? `<span class="text-emerald-400">✅ Estás anotado · titular #${iT + 1}</span>`
-      : iS >= 0 ? `<span class="text-amber-400">⏳ Estás de suplente S${iS + 1}</span>`
-      : `<span class="text-slate-400">No estás anotado para este partido</span>`;
-    const lleno = d.titulares.length >= d.cupo;
-    return card(`
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <p class="text-sm text-slate-400">Hola 👋</p>
-          <p class="text-xl font-bold truncate">${esc(yo.nombre)}</p>
-          <p class="text-sm mt-1">${estado}</p>
-        </div>
-        <button data-action="salir" class="text-xs text-slate-500 hover:text-slate-300 underline shrink-0">No soy yo</button>
-      </div>
-      <label class="block mt-4 text-sm text-slate-400">Mi posición
-        <select data-change="mi-pos" class="${INPUT} mt-1">${opcionesPos(yo.posicion)}</select>
-      </label>
-      ${anotado
-        ? `<button data-action="bajar" data-id="${yo.id}" class="${BTN} w-full mt-4 bg-slate-800 hover:bg-red-950 text-red-300 border border-red-900/50">Me bajo 😢</button>`
-        : `<button data-action="anotarme" class="${BTN} w-full mt-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>`}
-    `);
-  }
-  const existentes = Object.values(S.players).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  return card(`
-    <h2 class="text-lg font-bold">Armá tu ficha</h2>
-    <p class="text-sm text-slate-400 mb-4">Una sola vez: después este celu te recuerda.</p>
-    <form data-form="crear-ficha" class="space-y-3">
-      <input id="f-nombre" name="nombre" required maxlength="40" autocomplete="name" placeholder="Nombre y Apellido" class="${INPUT}">
-      <select id="f-pos" name="posicion" class="${INPUT}">${opcionesPos('comodin')}</select>
-      <label class="flex items-center gap-2 text-sm text-slate-300">
-        <input type="checkbox" name="anotar" checked class="w-4 h-4 accent-emerald-500"> Anotarme para este partido
-      </label>
-      <button class="${BTN} w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950">Crear ficha</button>
-    </form>
-    ${existentes.length ? `
-      <div class="mt-5 pt-4 border-t border-slate-800">
-        <label class="text-sm text-slate-400">¿Ya tenés ficha?
-          <select data-change="elegir-ficha" class="${INPUT} mt-1">
-            <option value="">Elegí tu nombre…</option>
-            ${existentes.map(p => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('')}
-          </select>
+// Campos de la ficha: se usan al registrarse, al completar y al editar.
+function camposPerfil(p = {}) {
+  const foto = ui.foto ?? p.foto ?? '';
+  return `
+    <div class="flex items-center gap-4">
+      ${avatar({ usuario: p.usuario || '?', foto }, 72)}
+      <div class="flex flex-col gap-1.5">
+        <label class="${BTN_SEC} text-sm cursor-pointer text-center">📷 ${foto ? 'Cambiar foto' : 'Subir foto'}
+          <input type="file" accept="image/*" data-change="foto" class="hidden">
         </label>
-      </div>` : ''}
+        ${foto ? `<button type="button" data-action="quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
+      </div>
+    </div>
+    <div class="grid grid-cols-[6rem_1fr] gap-3">
+      <label class="text-sm text-slate-400">Edad
+        <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1">
+      </label>
+      <label class="text-sm text-slate-400">Posición
+        <select id="pf-pos" name="posicion" class="${INPUT} mt-1">${opcionesPos(p.posicion || 'comodin')}</select>
+      </label>
+    </div>`;
+}
+
+// ---------------- Vistas ----------------
+function vistaLogin() {
+  const reg = ui.tab === 'registro';
+  const tab = (k, txt) => `<button type="button" data-action="tab" data-tab="${k}" class="rounded-lg py-2 text-sm font-semibold ${ui.tab === k ? 'bg-slate-950 text-white' : 'text-slate-400'}">${txt}</button>`;
+  const invitado = guardado.get(LS + 'inv');
+  return `
+    <div class="text-center pt-6">
+      <div class="text-6xl">⚽</div>
+      <h1 class="text-3xl font-black mt-2">Fulbo</h1>
+      <p class="text-slate-400 text-sm mt-1">Anotate, armá tu ficha y calificá a tus compañeros</p>
+    </div>
+    ${invitado ? `<p class="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-center">🎟️ Te invitaron a un grupo. Entrá o creá tu cuenta para sumarte.</p>` : ''}
+    ${card(`
+      <div class="grid grid-cols-2 gap-1 p-1 bg-slate-800 rounded-xl mb-4">${tab('entrar', 'Entrar')}${tab('registro', 'Crear cuenta')}</div>
+      <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
+        <input id="l-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" title="Letras, números, punto o guion bajo" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" class="${INPUT}">
+        <input id="l-pass" name="pass" type="password" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}" placeholder="Contraseña${reg ? ' (mínimo 6 caracteres)' : ''}" class="${INPUT}">
+        ${reg ? camposPerfil() : ''}
+        <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
+      </form>
+      ${reg ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
+    `)}`;
+}
+
+function vistaCompletar() {
+  return `
+    <h1 class="text-2xl font-black">Completá tu ficha</h1>
+    ${card(`
+      <form data-form="perfil" class="space-y-4">
+        ${camposPerfil({ usuario: usuarioDeAuth() })}
+        <button class="${BTN_OK} w-full">Guardar</button>
+      </form>`)}
+    <div class="text-center"><button data-action="logout" class="text-xs text-slate-500 underline">Salir</button></div>`;
+}
+
+const usuarioDeAuth = () => (D.user?.email || '').split('@')[0];
+
+function vistaGrupos(conVolver) {
+  const grupos = D.perfil.grupos || [];
+  return `
+    <div class="flex items-center justify-between">
+      ${conVolver ? `<a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>` : `<h1 class="text-2xl font-black">Hola, ${esc(D.perfil.usuario)} 👋</h1>`}
+      <div class="flex gap-3">
+        ${esSuper() ? `<a href="#/usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
+        <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
+      </div>
+    </div>
+    ${grupos.length ? card(`
+      <h2 class="text-lg font-bold mb-2">Tus grupos</h2>
+      <ul class="divide-y divide-slate-800">
+        ${grupos.map(g => `
+          <li class="flex items-center gap-2 py-2">
+            <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex-1 text-left font-medium hover:text-emerald-300">${g.id === D.gid ? '✅ ' : ''}${esc(g.nombre)}</button>
+            <button data-action="salir-grupo" data-gid="${g.id}" class="text-xs text-slate-500 hover:text-red-300">Salir del grupo</button>
+          </li>`).join('')}
+      </ul>`) : `<p class="text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`}
+    ${card(`
+      <h2 class="text-lg font-bold">🎟️ Unirme a un grupo</h2>
+      <p class="text-sm text-slate-400 mb-3">Abrí el link de invitación que te pasaron, o pegalo acá.</p>
+      <form data-form="unirse" class="flex gap-2">
+        <input id="u-link" name="link" required placeholder="Link de invitación" class="${INPUT}">
+        <button class="${BTN_OK} shrink-0">Unirme</button>
+      </form>`)}
+    ${card(`
+      <h2 class="text-lg font-bold">➕ Crear un grupo</h2>
+      <p class="text-sm text-slate-400 mb-3">Vas a ser el admin: armás los partidos, los equipos e invitás a los demás.</p>
+      <form data-form="crear-grupo" class="flex gap-2">
+        <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
+        <button class="${BTN_OK} shrink-0">Crear</button>
+      </form>`)}`;
+}
+
+function vistaPrincipal() {
+  const d = derivar();
+  return [topBar(), header(d), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+}
+
+function topBar() {
+  const yo = D.miembros[miUid()];
+  return `
+    <div class="flex items-center gap-3">
+      <a href="#/jugador/${miUid()}" title="Mi ficha">${avatar(yo, 40)}</a>
+      <a href="#/grupos" class="min-w-0 flex-1 group">
+        <span class="block text-xs text-slate-500 group-hover:text-slate-300">Grupo ▾</span>
+        <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
+      </a>
+      ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
+      <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
+    </div>`;
+}
+
+function header(d) {
+  const p = D.grupo.partido;
+  const faltan = d.cupo - d.titulares.length;
+  return `
+    <div>
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
+          <div class="mt-1 text-slate-400 text-sm space-x-3">
+            ${p.cuando ? `<span>📅 ${esc(p.cuando)}</span>` : ''}
+            ${p.lugar ? `<span>📍 ${esc(p.lugar)}</span>` : ''}
+          </div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="text-3xl font-black ${faltan <= 0 ? 'text-emerald-400' : ''}">${d.titulares.length}<span class="text-slate-500 text-xl">/${d.cupo}</span></div>
+          <div class="text-xs text-slate-400">${faltan > 0 ? `faltan ${faltan}` : '¡completo!'}</div>
+        </div>
+      </div>
+      <div class="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
+        <div class="h-full bg-emerald-500 transition-all" style="width:${Math.min(100, (d.titulares.length / d.cupo) * 100)}%"></div>
+      </div>
+    </div>`;
+}
+
+function miEstado(d) {
+  const uid = miUid();
+  const iT = d.titulares.findIndex(p => p.id === uid);
+  const iS = d.suplentes.findIndex(p => p.id === uid);
+  const anotado = iT >= 0 || iS >= 0;
+  const estado = iT >= 0 ? `<span class="text-emerald-400">✅ Estás anotado · titular #${iT + 1}</span>`
+    : iS >= 0 ? `<span class="text-amber-400">⏳ Estás de suplente S${iS + 1}</span>`
+    : `<span class="text-slate-400">No estás anotado para este partido</span>`;
+  const lleno = d.titulares.length >= d.cupo;
+  return card(`
+    <p class="text-sm">${estado}</p>
+    ${anotado
+      ? `<button data-action="bajar" data-id="${uid}" class="${BTN} w-full mt-3 bg-slate-800 hover:bg-red-950 text-red-300 border border-red-900/50">Me bajo 😢</button>`
+      : `<button data-action="anotarme" class="${BTN_OK} w-full mt-3 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>`}
   `);
 }
 
 function filaJugador(p, etiqueta, clase) {
-  const puedeBorrar = ui.admin || p.id === ui.meId;
+  const puedeBorrar = esAdmin() || p.id === miUid();
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
-      <span class="flex-1 min-w-0">
-        <span class="block font-medium truncate">${esc(p.nombre)}${p.id === ui.meId ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}</span>
+      ${avatar(p, 32)}
+      ${p.invitado ? `<span class="flex-1 min-w-0">${nombre}` : `<a href="#/jugador/${p.id}" class="flex-1 min-w-0 hover:text-emerald-300">${nombre}`}
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
-      </span>
-      ${ui.admin ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Nivel">${nivel(p)}</span>` : ''}
+      ${p.invitado ? '</span>' : '</a>'}
+      ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
       ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Bajar de la lista" class="w-8 h-8 rounded-lg hover:bg-red-950 grid place-items-center">❌</button>` : ''}
     </li>`;
 }
 
-function renderLista(d) {
+function lista(d) {
   const libres = Array.from({ length: Math.max(0, d.cupo - d.titulares.length) }, (_, i) => `
     <li class="flex items-center gap-3 py-2 opacity-40">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 border border-dashed border-slate-600">${d.titulares.length + i + 1}</span>
@@ -367,12 +646,12 @@ function renderLista(d) {
   `);
 }
 
-function renderEquipos(d) {
-  const eq = S.equipos;
-  const botones = ui.admin ? `
+function equipos(d) {
+  const eq = D.grupo.equipos;
+  const botones = esAdmin() ? `
     <div class="grid grid-cols-2 gap-2 mt-4">
-      <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm">⚖️ Armar equilibrados</button>
-      <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN} bg-slate-800 hover:bg-slate-700 text-sm">🎲 Aleatorio</button>
+      <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">⚖️ Armar equilibrados</button>
+      <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
     </div>
     ${eq ? `<button data-action="borrar-equipos" class="mt-2 text-xs text-slate-500 hover:text-red-300 underline">Borrar equipos</button>` : ''}` : '';
   if (!eq) {
@@ -382,16 +661,16 @@ function renderEquipos(d) {
       ${botones}`);
   }
   const columna = (titulo, color, ids) => {
-    const js = ids.map(id => S.players[id]).filter(Boolean);
-    const suma = js.reduce((t, p) => t + nivel(p), 0);
+    const js = ids.map(jugador).filter(Boolean);
+    const suma = js.reduce((t, p) => t + puntaje(p.id), 0);
     return `
       <div class="rounded-xl border ${color} p-3">
         <div class="flex items-baseline justify-between">
           <h3 class="font-bold">${titulo}</h3>
-          ${ui.admin ? `<span class="text-xs text-slate-400">Σ ${suma} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
+          ${esAdmin() ? `<span class="text-xs text-slate-400">Σ ${suma.toFixed(1)} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
         </div>
-        <ul class="mt-2 space-y-1 text-sm">
-          ${js.map(p => `<li class="flex justify-between gap-2"><span class="truncate">${pos(p).emoji} ${esc(p.nombre)}</span>${ui.admin ? `<span class="font-mono text-slate-500">${nivel(p)}</span>` : ''}</li>`).join('')}
+        <ul class="mt-2 space-y-1.5 text-sm">
+          ${js.map(p => `<li class="flex items-center gap-2">${avatar(p, 22)}<span class="truncate flex-1">${esc(p.usuario)}</span><span>${pos(p).emoji}</span></li>`).join('')}
         </ul>
       </div>`;
   };
@@ -400,7 +679,7 @@ function renderEquipos(d) {
       <h2 class="text-lg font-bold">🆚 Equipos</h2>
       <span class="text-xs text-slate-500">${eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado'}</span>
     </div>
-    ${equiposDesactualizados(d) ? `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${ui.admin ? 'Volvé a armarlos.' : 'El admin los va a rearmar.'}</p>` : ''}
+    ${equiposDesactualizados(d) ? `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${esAdmin() ? 'Volvé a armarlos.' : 'El admin los va a rearmar.'}</p>` : ''}
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
       ${columna('🔴 Equipo A', 'border-red-500/30 bg-red-500/5', eq.A)}
       ${columna('🔵 Equipo B', 'border-sky-500/30 bg-sky-500/5', eq.B)}
@@ -408,20 +687,119 @@ function renderEquipos(d) {
     ${botones}`);
 }
 
-function renderAdmin(d) {
-  if (!ui.admin) {
-    return `<div class="text-center pt-2"><button data-action="admin-entrar" class="text-xs text-slate-600 hover:text-slate-400">🔒 Admin</button></div>`;
-  }
-  const p = S.partido;
-  const anotados = new Set(S.anotados);
-  const fichas = Object.values(S.players).sort((a, b) => a.nombre.localeCompare(b.nombre));
+function jugadoresGrid() {
+  const uid = miUid();
+  const ps = Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario));
+  const pendientes = ps.filter(p => p.id !== uid && !D.votos[p.id]?.[uid]).length;
   return card(`
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold">🔧 Panel admin</h2>
-      <button data-action="admin-salir" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir de admin</button>
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-lg font-bold">👥 Jugadores <span class="text-slate-500 font-normal text-sm">(${ps.length})</span></h2>
+      ${pendientes ? `<span class="text-xs text-amber-300">Te faltan calificar ${pendientes}</span>` : ''}
+    </div>
+    <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      ${ps.map(p => {
+        const r = resumen(p.id);
+        const falta = p.id !== uid && !D.votos[p.id]?.[uid];
+        return `
+          <a href="#/jugador/${p.id}" class="relative flex flex-col items-center text-center gap-1 p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition">
+            ${falta ? '<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400" title="Calificalo"></span>' : ''}
+            ${avatar(p, 56)}
+            <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
+            <span class="text-xs text-slate-400">${pos(p).emoji} ${p.edad ? p.edad + ' años' : ''}</span>
+            <span class="text-lg font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</span>
+          </a>`;
+      }).join('')}
+    </div>`);
+}
+
+function vistaFicha(id) {
+  const p = D.miembros[id];
+  const r = resumen(id);
+  const esYo = id === miUid();
+  const miVoto = D.votos[id]?.[miUid()];
+  const admin = D.grupo.admins.includes(id);
+  return `
+    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
+      <div class="flex items-center gap-4">
+        ${avatar(p, 96)}
+        <div class="min-w-0 flex-1">
+          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : ''}</h1>
+          <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+          <p class="text-xs text-slate-500 mt-1">${r.n ? `Según ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Todavía nadie lo calificó'}</p>
+        </div>
+        <div class="text-center shrink-0">
+          <div class="text-5xl font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</div>
+          <div class="text-[10px] tracking-widest text-slate-500 mt-1">GENERAL</div>
+        </div>
+      </div>
+      <div class="mt-4">${radar(r.n ? r.prom : null)}</div>
+      <div class="space-y-2 mt-2">
+        ${STATS.map(s => {
+          const v = r.n ? r.prom[s.k] : 0;
+          return `
+            <div class="flex items-center gap-3 text-sm">
+              <span class="w-28 shrink-0 text-slate-300">${s.emoji} ${s.label}</span>
+              <span class="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden"><span class="block h-full ${bgNota(v)}" style="width:${v * 10}%"></span></span>
+              <span class="w-8 text-right font-mono ${r.n ? colorNota(v) : 'text-slate-600'}">${r.n ? v.toFixed(1) : '–'}</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>
+    ${esYo ? card(`
+      <h2 class="text-lg font-bold mb-3">✏️ Editar mi ficha</h2>
+      <form data-form="perfil" class="space-y-4">
+        ${camposPerfil(p)}
+        <button class="${BTN_OK} w-full">Guardar</button>
+      </form>
+      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) : card(`
+      <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
+      <p class="text-xs text-slate-500 mb-4">Del 1 al 10. Solo cuenta un voto tuyo: si lo cambiás, reemplaza al anterior.</p>
+      <form data-form="voto" data-id="${id}" class="space-y-3">
+        ${STATS.map(s => {
+          const v = miVoto?.[s.k] ?? 5;
+          return `
+            <label class="flex items-center gap-3 text-sm">
+              <span class="w-28 shrink-0 text-slate-300">${s.emoji} ${s.label}</span>
+              <input id="v-${id}-${s.k}" name="${s.k}" type="range" min="1" max="10" step="1" value="${v}" data-out="o-${id}-${s.k}" class="flex-1">
+              <span id="o-${id}-${s.k}" class="w-6 text-right font-mono font-bold">${v}</span>
+            </label>`;
+        }).join('')}
+        <button class="${BTN_OK} w-full">${miVoto ? 'Actualizar voto' : 'Guardar voto'}</button>
+      </form>`)}
+    ${esAdmin() && !esYo ? card(`
+      <h2 class="text-sm font-bold text-slate-400 mb-2">🔧 Admin</h2>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <label class="flex items-center gap-2">Nivel si no tiene votos
+          <select data-change="nivel" data-id="${id}" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 font-mono">${opcionesNivel(Number(D.niveles[id]) || NIVEL_DEFAULT)}</select>
+        </label>
+        ${admin ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
+        <button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>
+      </div>`) : ''}`;
+}
+
+function panelAdmin(d) {
+  if (!esAdmin()) return '';
+  const p = D.grupo.partido;
+  const anotados = new Set(D.grupo.anotados);
+  const filas = [
+    ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+    ...Object.keys(D.grupo.invitados).map(jugador),
+  ];
+  return card(`
+    <h2 class="text-lg font-bold">🔧 Panel admin</h2>
+
+    <div class="mt-4">
+      <h3 class="font-semibold text-sm text-slate-300">🎟️ Link de invitación</h3>
+      <p class="text-xs text-slate-500 mb-2">Solo entra al grupo quien tenga este link. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
+      <div class="flex gap-2">
+        <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
+        <button data-action="copiar-invitacion" class="${BTN_OK} text-sm shrink-0">Copiar</button>
+      </div>
+      <button data-action="nuevo-codigo" class="mt-2 text-xs text-slate-500 hover:text-amber-300 underline">Generar link nuevo</button>
     </div>
 
-    <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-4">
+    <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-6">
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Cuándo<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="Jueves 20:00" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
@@ -432,158 +810,384 @@ function renderAdmin(d) {
       </div>
     </form>
 
-    <h3 class="font-bold mt-6 mb-2">Fichas y puntajes <span class="text-slate-500 font-normal text-sm">(${fichas.length})</span></h3>
-    <p class="text-xs text-slate-500 mb-2">El nivel (1–10) solo lo ve el admin. Por defecto: ${NIVEL_DEFAULT}.</p>
+    <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
+    <p class="text-xs text-slate-500 mb-2">Para equilibrar se usa el promedio de votos (★). Si alguien no tiene votos, se usa el nivel que elijas acá (por defecto ${NIVEL_DEFAULT}). Los niveles solo los ven los admins.</p>
     <ul class="divide-y divide-slate-800">
-      ${fichas.map(j => `
-        <li class="py-2 flex flex-wrap items-center gap-2">
-          <span class="flex-1 min-w-[8rem] font-medium truncate">${esc(j.nombre)}</span>
-          <select data-change="pos" data-id="${j.id}" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm">${opcionesPos(j.posicion)}</select>
-          <select data-change="nivel" data-id="${j.id}" title="Nivel" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm font-mono">${opcionesNivel(nivel(j))}</select>
-          <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
-          <button data-action="borrar-ficha" data-id="${j.id}" title="Borrar ficha" class="rounded-lg px-2 py-1.5 hover:bg-red-950">🗑️</button>
-        </li>`).join('') || '<li class="py-2 text-sm text-slate-500">Todavía no hay fichas.</li>'}
+      ${filas.map(j => {
+        const r = resumen(j.id);
+        return `
+          <li class="py-2 flex flex-wrap items-center gap-2">
+            ${avatar(j, 28)}
+            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : ''}</span>
+            <span class="text-xs ${r.n ? 'text-emerald-300' : 'text-slate-500'}" title="Promedio de votos">${r.n ? `★ ${r.general.toFixed(1)} (${r.n})` : 'sin votos'}</span>
+            <select data-change="nivel" data-id="${j.id}" title="Nivel si no tiene votos" class="rounded-lg bg-slate-800 border border-slate-700 px-2 py-1.5 text-sm font-mono">${opcionesNivel(Number(D.niveles[j.id]) || NIVEL_DEFAULT)}</select>
+            <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
+            ${j.invitado ? `<button data-action="borrar-invitado" data-id="${j.id}" title="Borrar invitado" class="rounded-lg px-2 py-1.5 hover:bg-red-950">🗑️</button>` : ''}
+          </li>`;
+      }).join('')}
     </ul>
 
-    <form data-form="agregar" class="mt-4 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto_auto] gap-2">
-      <input id="a-nombre" name="nombre" required maxlength="40" placeholder="Agregar jugador (Nombre y Apellido)" class="${INPUT} col-span-2 sm:col-span-1">
-      <select id="a-pos" name="posicion" class="${INPUT} w-auto">${opcionesPos('comodin')}</select>
-      <select id="a-nivel" name="nivel" class="${INPUT} w-auto font-mono">${opcionesNivel(NIVEL_DEFAULT)}</select>
-      <button class="${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950 col-span-2 sm:col-span-1">+ Agregar y anotar</button>
+    <form data-form="invitado" class="mt-4 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto_auto] gap-2">
+      <input id="i-nombre" name="nombre" required maxlength="20" placeholder="Invitado sin cuenta (nombre)" class="${INPUT} col-span-2 sm:col-span-1">
+      <select id="i-pos" name="posicion" class="${INPUT} w-auto">${opcionesPos('comodin')}</select>
+      <select id="i-nivel" name="nivel" class="${INPUT} w-auto font-mono">${opcionesNivel(NIVEL_DEFAULT)}</select>
+      <button class="${BTN_OK} col-span-2 sm:col-span-1">+ Anotar invitado</button>
     </form>
+    <p class="text-xs text-slate-500 mt-2">Para expulsar a alguien o hacerlo admin, entrá a su ficha.</p>
   `);
 }
 
-// ---------------- Acciones ----------------
-function nuevaFicha(s, nombre, posicion, nivelInicial = NIVEL_DEFAULT) {
-  const id = uid();
-  s.players[id] = { id, nombre: nombre.trim(), posicion, nivel: nivelInicial };
-  return id;
+// ---------------- Superadmin: usuarios ----------------
+const SA = { usuarios: null, cargando: false, editando: null, foto: null, passSugerida: genId(8) };
+
+async function api(accion, datos = {}) {
+  if (!CONFIG.api) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
+  const r = await fetch(CONFIG.api, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await D.user.getIdToken() },
+    body: JSON.stringify({ accion, ...datos }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error), { mensaje: j.error || `Error del servidor (${r.status})` });
+  return j;
 }
-const anotar = (s, id) => { if (!s.anotados.includes(id)) s.anotados.push(id); };
-const buscarPorNombre = nombre => Object.values(S.players).find(p => normNombre(p.nombre) === normNombre(nombre));
-function setMe(id) { ui.meId = id; guardado.set(ME_KEY, id); render(); }
+
+async function cargarUsuarios() {
+  if (SA.cargando) return;
+  SA.cargando = true;
+  const ok = await act(async () => {
+    SA.usuarios = (await api('listar')).usuarios.sort((a, b) => a.usuario.localeCompare(b.usuario));
+  });
+  if (!ok) SA.usuarios ??= [];  // sin reintentos automáticos: está el botón Recargar
+  SA.cargando = false;
+  render();
+}
+
+const genPass = () => genId(8);
+const fecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' }) : '–';
+
+function vistaUsuarios() {
+  if (SA.usuarios === null) setTimeout(cargarUsuarios);
+  const us = SA.usuarios || [];
+  return `
+    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-black">👤 Usuarios</h1>
+      <button data-action="sa-recargar" class="text-xs text-slate-500 hover:text-slate-300 underline">Recargar</button>
+    </div>
+    ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">⚠️ Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
+    ${card(`
+      <h2 class="text-lg font-bold mb-3">➕ Crear usuario</h2>
+      <form data-form="sa-crear" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT} col-span-2 sm:col-span-1">
+        <input id="sa-pass" name="pass" required minlength="6" value="${SA.passSugerida}" class="${INPUT} col-span-2 sm:col-span-1 font-mono" title="Contraseña">
+        <input id="sa-edad" name="edad" type="number" min="10" max="99" required placeholder="Edad" class="${INPUT}">
+        <select id="sa-pos" name="posicion" class="${INPUT}">${opcionesPos('comodin')}</select>
+        <button class="${BTN_OK} col-span-2 sm:col-span-4">Crear y copiar datos de acceso</button>
+      </form>`)}
+    ${card(`
+      <h2 class="text-lg font-bold mb-2">Todos <span class="text-slate-500 font-normal text-sm">(${us.length})</span></h2>
+      ${SA.usuarios === null ? cargando() : `
+      <ul class="divide-y divide-slate-800">
+        ${us.map(u => SA.editando === u.uid ? filaUsuarioEditando(u) : `
+          <li class="py-3 flex items-center gap-3">
+            ${avatar(u, 40)}
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold truncate">${esc(u.usuario)}${u.sinFicha ? ' <span class="text-xs text-amber-300">(sin ficha)</span>' : ''}</div>
+              <div class="text-xs text-slate-400">${pos(u).emoji} ${u.edad ? u.edad + ' años · ' : ''}${(u.grupos || []).length} ${(u.grupos || []).length === 1 ? 'grupo' : 'grupos'} · último ingreso ${fecha(u.ultimoIngreso)}</div>
+            </div>
+            <div class="flex gap-1 shrink-0">
+              <button data-action="sa-editar" data-uid="${u.uid}" title="Editar" class="w-9 h-9 rounded-lg hover:bg-slate-800">✏️</button>
+              <button data-action="sa-pass" data-uid="${u.uid}" title="Nueva contraseña" class="w-9 h-9 rounded-lg hover:bg-slate-800">🔑</button>
+              ${u.uid === miUid() ? '' : `<button data-action="sa-borrar" data-uid="${u.uid}" title="Borrar usuario" class="w-9 h-9 rounded-lg hover:bg-red-950">🗑️</button>`}
+            </div>
+          </li>`).join('')}
+      </ul>`}`)}`;
+}
+
+function filaUsuarioEditando(u) {
+  const foto = SA.foto ?? u.foto ?? '';
+  return `
+    <li class="py-3">
+      <form data-form="sa-editar" data-uid="${u.uid}" class="space-y-3">
+        <div class="flex items-center gap-3">
+          ${avatar({ ...u, foto }, 48)}
+          <span class="font-semibold flex-1">${esc(u.usuario)}</span>
+          ${foto ? `<button type="button" data-action="sa-quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
+        </div>
+        <div class="grid grid-cols-[6rem_1fr] gap-2">
+          <input id="sae-edad-${u.uid}" name="edad" type="number" min="10" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT}">
+          <select id="sae-pos-${u.uid}" name="posicion" class="${INPUT}">${opcionesPos(u.posicion || 'comodin')}</select>
+        </div>
+        <div class="flex gap-2">
+          <button class="${BTN_OK} flex-1 text-sm">Guardar</button>
+          <button type="button" data-action="sa-cancelar" class="${BTN_SEC} text-sm">Cancelar</button>
+        </div>
+      </form>
+    </li>`;
+}
+
+// ---------------- Render ----------------
+// Re-renderiza sin perder lo que el usuario está escribiendo.
+function pintar(el, html) {
+  if (el._html === html) return;
+  const sucios = [...el.querySelectorAll('[data-dirty]')].map(i => [i.id, i.value]);
+  const foco = el.contains(document.activeElement) ? document.activeElement.id : null;
+  el.innerHTML = el._html = html;
+  sucios.forEach(([id, v]) => {
+    const i = document.getElementById(id);
+    if (!i) return;
+    i.value = v;
+    i.dataset.dirty = '1';
+    if (i.dataset.out) document.getElementById(i.dataset.out).textContent = v;
+  });
+  if (foco) document.getElementById(foco)?.focus();
+}
+
+function render() {
+  const el = $('#app');
+  if (D.user === undefined) return pintar(el, cargando());
+  if (!D.user) return pintar(el, vistaLogin());
+  if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
+  if (!D.perfil) return pintar(el, vistaCompletar());
+  if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
+  if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
+  if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
+  const m = location.hash.match(/^#\/jugador\/(.+)$/);
+  if (m && D.miembros[m[1]]) return pintar(el, vistaFicha(m[1]));
+  pintar(el, vistaPrincipal());
+}
+
+window.addEventListener('hashchange', () => {
+  leerInvitacion();
+  procesarInvitacion();
+  ui.foto = null;
+  render();
+  scrollTo(0, 0);
+});
+
+// ---------------- Acciones ----------------
+async function guardarPerfil(f) {
+  const edad = parseInt(f.get('edad'));
+  if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+  const uid = miUid();
+  const actual = D.perfil || {};
+  const datos = {
+    usuario: actual.usuario || usuarioDeAuth(),
+    edad,
+    posicion: f.get('posicion'),
+    foto: ui.foto ?? actual.foto ?? '',
+  };
+  const ok = await act(async () => {
+    await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now() });
+    // La ficha se copia en cada grupo para que solo la vean sus miembros.
+    await Promise.allSettled((actual.grupos || []).map(g => F.updateDoc(F.doc(colMiembros(g.id), uid), datos)));
+  }, '💾 Ficha guardada');
+  if (ok) ui.foto = null;
+  return ok;
+}
 
 const acciones = {
-  anotarme: () => act(s => anotar(s, ui.meId), '⚽ ¡Anotado!'),
+  tab: ({ tab }) => { ui.tab = tab; ui.foto = null; render(); },
+  logout: () => A.signOut(auth),
+  anotarme: () => actualizarGrupo(s => { if (!s.anotados.includes(miUid())) s.anotados.push(miUid()); }, '⚽ ¡Anotado!'),
   bajar: ({ id }) => {
-    const p = S.players[id];
-    if (!p || !confirm(id === ui.meId ? '¿Seguro que te bajás?' : `¿Bajar a ${p.nombre} de la lista?`)) return;
-    act(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista');
+    const p = jugador(id);
+    if (!p || !confirm(id === miUid() ? '¿Seguro que te bajás?' : `¿Bajar a ${p.usuario} de la lista?`)) return;
+    actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista');
   },
-  salir: () => setMe(null),
   copiar: () => copiar(mensajeWsp()),
-  armar: ({ modo }) => act(s => {
-    const { titulares } = derivar(s);
+  'copiar-invitacion': () => copiar(`⚽ Sumate al grupo *${D.grupo.nombre}* para anotarte al fulbo:\n${linkInvitacion()}`, '📋 Link copiado'),
+  'nuevo-codigo': () => {
+    if (!confirm('¿Generar un link nuevo? El actual deja de funcionar (los que ya están en el grupo siguen adentro).')) return;
+    actualizarGrupo(s => { s.codigo = genId(12); }, '🎟️ Link nuevo generado');
+  },
+  armar: ({ modo }) => actualizarGrupo(s => {
+    const titulares = s.anotados.map(jugador).filter(Boolean).slice(0, Number(s.partido.cupo) || 10);
     s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
   }, '🆚 Equipos armados'),
-  'borrar-equipos': () => act(s => { s.equipos = null; }),
-  'admin-entrar': async () => {
-    const pin = prompt('PIN de admin:');
-    if (pin == null) return;
-    if (await sha256(pin.trim()) !== CONFIG.adminPinHash) return toast('PIN incorrecto');
-    ui.admin = true;
-    try { sessionStorage.setItem('f5_admin', '1'); } catch {}
-    render();
-  },
-  'admin-salir': () => {
-    ui.admin = false;
-    try { sessionStorage.removeItem('f5_admin'); } catch {}
-    render();
-  },
+  'borrar-equipos': () => actualizarGrupo(s => { s.equipos = null; }),
   'nueva-fecha': () => {
-    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y puntajes se mantienen.')) return;
-    act(s => { s.anotados = []; s.equipos = null; }, '🗓️ Lista nueva');
+    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen.')) return;
+    actualizarGrupo(s => { s.anotados = []; s.equipos = null; }, '🗓️ Lista nueva');
   },
-  'toggle-anotado': ({ id }) => act(s => {
+  'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
   }),
-  'borrar-ficha': ({ id }) => {
-    const p = S.players[id];
-    if (!p || !confirm(`¿Borrar la ficha de ${p.nombre}? Se pierde su puntaje.`)) return;
-    act(s => { delete s.players[id]; s.anotados = s.anotados.filter(x => x !== id); }, 'Ficha borrada');
+  'borrar-invitado': ({ id }) => {
+    if (!confirm(`¿Borrar a ${jugador(id)?.usuario}?`)) return;
+    actualizarGrupo(s => { delete s.invitados[id]; s.anotados = s.anotados.filter(x => x !== id); }, 'Invitado borrado');
+  },
+  'hacer-admin': ({ id }) => {
+    if (!confirm(`¿Hacer admin a ${jugador(id)?.usuario}? Va a poder hacer todo lo que hacés vos.`)) return;
+    actualizarGrupo(s => { if (!s.admins.includes(id)) s.admins.push(id); }, 'Ahora es admin');
+  },
+  expulsar: async ({ id }) => {
+    const p = jugador(id);
+    if (!p || !confirm(`¿Expulsar a ${p.usuario}? No va a poder volver a entrar con el link.`)) return;
+    const ok = await actualizarGrupo(s => {
+      s.anotados = s.anotados.filter(x => x !== id);
+      s.admins = s.admins.filter(x => x !== id);
+      if (!s.baneados.includes(id)) s.baneados.push(id);
+    });
+    if (ok && await act(() => F.deleteDoc(F.doc(colMiembros(D.gid), id)), `${p.usuario} fue expulsado`)) location.hash = '';
+  },
+  'cambiar-grupo': ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = ''; render(); },
+  'salir-grupo': async ({ gid }) => {
+    const g = D.perfil.grupos.find(x => x.id === gid);
+    if (gid === D.gid && esAdmin() && D.grupo.admins.length === 1) return toast('Sos el único admin: nombrá a otro antes de salir');
+    if (!confirm(`¿Salir de ${g?.nombre}? Para volver vas a necesitar el link de invitación.`)) return;
+    await act(async () => {
+      if (gid === D.gid) await F.runTransaction(db, async tx => {
+        const s = normGrupo((await tx.get(refGrupo(gid))).data());
+        if (s.anotados.includes(miUid())) tx.update(refGrupo(gid), { anotados: s.anotados.filter(x => x !== miUid()) });
+      });
+      await F.deleteDoc(F.doc(colMiembros(gid), miUid()));
+      if (guardado.get(LS + 'gid') === gid) guardado.set(LS + 'gid', null);
+      await F.updateDoc(refUsuario(miUid()), { grupos: D.perfil.grupos.filter(x => x.id !== gid) });
+    }, 'Saliste del grupo');
+  },
+  'quitar-foto': () => { ui.foto = ''; render(); },
+
+  'sa-recargar': () => { SA.usuarios = null; render(); },
+  'sa-editar': ({ uid }) => { SA.editando = uid; SA.foto = null; render(); },
+  'sa-cancelar': () => { SA.editando = null; SA.foto = null; render(); },
+  'sa-quitar-foto': () => { SA.foto = ''; render(); },
+  'sa-pass': async ({ uid }) => {
+    const u = SA.usuarios.find(x => x.uid === uid);
+    const pass = prompt(`Nueva contraseña para ${u.usuario} (mínimo 6 caracteres):`, genPass());
+    if (pass == null) return;
+    if (await act(() => api('password', { uid, password: pass }))) {
+      copiar(`⚽ Tus datos para entrar a ${urlBase()}\nUsuario: ${u.usuario}\nContraseña: ${pass}`, '🔑 Contraseña cambiada. Datos copiados para mandarle');
+    }
+  },
+  'sa-borrar': async ({ uid }) => {
+    const u = SA.usuarios.find(x => x.uid === uid);
+    if (!confirm(`¿Borrar a ${u.usuario} para siempre? Se borra su cuenta, su ficha, sus votos y sale de todos sus grupos.`)) return;
+    if (await act(() => api('borrar', { uid }), `${u.usuario} fue borrado`)) {
+      SA.usuarios = SA.usuarios.filter(x => x.uid !== uid);
+      render();
+    }
   },
 };
 
 const cambios = {
-  'mi-pos': v => act(s => { if (s.players[ui.meId]) s.players[ui.meId].posicion = v; }, 'Posición actualizada'),
-  'elegir-ficha': v => v && setMe(v),
-  pos: (v, { id }) => act(s => { if (s.players[id]) s.players[id].posicion = v; }),
-  nivel: (v, { id }) => act(s => { if (s.players[id]) s.players[id].nivel = Number(v); }),
+  nivel: (el, { id }) => act(() => F.setDoc(refNiveles(D.gid), { [id]: Number(el.value) }, { merge: true })),
+  foto: async el => {
+    const file = el.files?.[0];
+    if (!file) return;
+    try {
+      ui.foto = await procesarFoto(file);
+      render();
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo leer esa imagen, probá con otra (JPG o PNG)');
+    }
+  },
 };
 
 const formularios = {
-  'crear-ficha': f => {
-    const nombre = f.get('nombre').trim();
-    if (!nombre) return;
-    const anotarse = f.get('anotar') === 'on';
-    const existe = buscarPorNombre(nombre);
-    if (existe && confirm(`Ya hay una ficha de "${existe.nombre}". ¿Sos vos?`)) {
-      setMe(existe.id);
-      if (anotarse) act(s => anotar(s, existe.id), '⚽ ¡Anotado!');
-      return true;
+  entrar: f => act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass'))),
+  registro: async f => {
+    const usuario = f.get('usuario').trim();
+    if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
+    const edad = parseInt(f.get('edad'));
+    if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+    const datos = { usuario, edad, posicion: f.get('posicion'), foto: ui.foto || '', grupos: [], creado: Date.now() };
+    D.registrando = true;
+    render();
+    const ok = await act(async () => {
+      const cred = await A.createUserWithEmailAndPassword(auth, emailDe(usuario), f.get('pass'));
+      await F.setDoc(refUsuario(cred.user.uid), datos);
+    }, `¡Bienvenido, ${usuario}! ⚽`);
+    D.registrando = false;
+    if (ok) ui.foto = null;
+    render();
+    return ok;
+  },
+  perfil: guardarPerfil,
+  'crear-grupo': f => crearGrupo(f.get('nombre').trim()),
+  unirse: f => {
+    const m = f.get('link').match(/unirse\/([^/\s]+)\/([^/\s#?]+)/);
+    if (!m) return toast('Ese no parece un link de invitación');
+    if (D.perfil.grupos?.some(g => g.id === m[1])) { acciones['cambiar-grupo']({ gid: m[1] }); return true; }
+    return unirse(m[1], m[2]).then(ok => { if (ok) location.hash = ''; return ok; });
+  },
+  voto: (f, { id }) => {
+    const stats = Object.fromEntries(STATS.map(s => [s.k, parseInt(f.get(s.k))]));
+    return act(() => F.setDoc(F.doc(colVotos(D.gid), `${miUid()}_${id}`), { voter: miUid(), target: id, stats, ts: Date.now() }), '⭐ Voto guardado');
+  },
+  'sa-crear': async f => {
+    const usuario = f.get('usuario').trim(), pass = f.get('pass');
+    const datos = { usuario, password: pass, edad: parseInt(f.get('edad')), posicion: f.get('posicion') };
+    const ok = await act(() => api('crear', datos));
+    if (ok) {
+      copiar(`⚽ Tus datos para entrar a ${urlBase()}\nUsuario: ${usuario}\nContraseña: ${pass}`, `✅ ${usuario} creado. Datos copiados para mandarle`);
+      SA.usuarios = null;
+      SA.passSugerida = genPass();
     }
-    let id;
-    act(s => {
-      id = nuevaFicha(s, nombre, f.get('posicion'));
-      if (anotarse) anotar(s, id);
-    }, anotarse ? '⚽ ¡Ficha creada y anotado!' : 'Ficha creada').then(ok => ok && setMe(id));
-    return true;
+    return ok;
+  },
+  'sa-editar': async (f, { uid }) => {
+    const datos = { uid, edad: parseInt(f.get('edad')), posicion: f.get('posicion') };
+    if (SA.foto !== null) datos.foto = SA.foto;
+    const ok = await act(() => api('editar', datos), '💾 Usuario actualizado');
+    if (ok) {
+      Object.assign(SA.usuarios.find(x => x.uid === uid), datos);
+      SA.editando = null;
+      SA.foto = null;
+    }
+    return ok;
   },
   partido: f => {
     const cupo = Math.max(2, Math.min(30, parseInt(f.get('cupo')) || 10));
-    act(s => {
-      s.partido = {
-        titulo: f.get('titulo').trim(),
-        cuando: f.get('cuando').trim(),
-        lugar: f.get('lugar').trim(),
-        cupo,
-      };
+    return actualizarGrupo(s => {
+      s.partido = { titulo: f.get('titulo').trim(), cuando: f.get('cuando').trim(), lugar: f.get('lugar').trim(), cupo };
     }, '💾 Partido guardado');
-    return true;
   },
-  agregar: f => {
-    const nombre = f.get('nombre').trim();
-    if (!nombre) return;
-    const existe = buscarPorNombre(nombre);
-    if (existe) {
-      act(s => anotar(s, existe.id), `${existe.nombre} ya tenía ficha: anotado`);
-    } else {
-      act(s => anotar(s, nuevaFicha(s, nombre, f.get('posicion'), Number(f.get('nivel')))), 'Jugador agregado');
-    }
-    return true;
+  invitado: f => {
+    const id = 'inv_' + genId(10);
+    const nivel = Number(f.get('nivel'));
+    return actualizarGrupo(s => {
+      s.invitados[id] = { nombre: f.get('nombre').trim(), posicion: f.get('posicion') };
+      s.anotados.push(id);
+    }, 'Invitado anotado').then(ok => ok && nivel !== NIVEL_DEFAULT ? cambios.nivel({ value: nivel }, { id }).then(() => ok) : ok);
   },
 };
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-action]');
-  if (b && cargado) acciones[b.dataset.action]?.(b.dataset);
+  if (b) acciones[b.dataset.action]?.(b.dataset);
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]');
-  if (el && cargado) cambios[el.dataset.change]?.(el.value, el.dataset);
+  if (el) cambios[el.dataset.change]?.(el, el.dataset);
 });
-document.addEventListener('input', e => { if (e.target.id) e.target.dataset.dirty = '1'; });
-document.addEventListener('submit', e => {
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id) t.dataset.dirty = '1';
+  if (t.dataset.out) document.getElementById(t.dataset.out).textContent = t.value;
+});
+document.addEventListener('submit', async e => {
   const form = e.target.closest('[data-form]');
   if (!form) return;
   e.preventDefault();
-  if (!cargado) return;
-  if (formularios[form.dataset.form]?.(new FormData(form))) {
-    form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-    if (form.dataset.form !== 'partido') form.reset();
+  const btn = form.querySelector('button:not([type=button])');
+  if (btn) btn.disabled = true;
+  try {
+    if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
+      form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
+      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear'].includes(form.dataset.form)) form.reset();
+      form._html = null;
+      render();
+    }
+  } finally {
+    if (btn && btn.isConnected) btn.disabled = false;
   }
 });
 
-// ---------------- Inicio ----------------
-try {
-  store = CONFIG.firebase ? await crearStoreFirebase(CONFIG.firebase) : crearStoreLocal();
-} catch (e) {
-  console.error(e);
-  store = crearStoreLocal();
-  setTimeout(() => toast('No se pudo conectar a Firebase: modo local'), 300);
-}
-store.subscribe(s => { S = s; cargado = true; render(); });
+leerInvitacion();
+render();
 </script>
 </body>
 </html>
