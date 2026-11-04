@@ -59,19 +59,6 @@ python -m http.server 8791
 
 Abrí <http://localhost:8791>. Usa la misma base de Firebase que la versión online.
 
-## Publicidad y dominio propio
-
-En `index.html`, `CONFIG.publicidad` define un único banner abajo de la página:
-
-- **Sponsor propio** (gratis, no hace falta dominio): completá `sponsor` con `texto`, `link` y opcionalmente `imagen` (URL de un logo).
-- **Google AdSense**: necesita dominio propio (AdSense no acepta `github.io`).
-  1. Comprá un dominio (por ejemplo `.com.ar` en NIC Argentina).
-  2. GitHub → repo → **Settings → Pages → Custom domain** → escribí el dominio y seguí los pasos (registros DNS en NIC). GitHub crea el archivo `CNAME`.
-  3. Pedí AdSense con ese dominio. Cuando te aprueben, poné el `client` (`ca-pub-…`) y el `slot` del bloque en `CONFIG.publicidad.adsense`, y creá en la raíz del repo un archivo `ads.txt` con la línea que te da AdSense.
-  4. Completá `CONFIG.contacto` con un mail para la página de privacidad.
-
-La página **Privacidad y términos** (`#/privacidad`) está linkeada abajo de todo y en el registro. La edad mínima es 13 (app, reglas y servidor).
-
 ## Limitaciones
 
 - Con varias cuentas, una persona podría votar más de una vez al mismo compañero. El admin puede expulsar esas cuentas y el superadmin, borrarlas.
