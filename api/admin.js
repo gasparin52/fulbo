@@ -63,7 +63,7 @@ function validarPassword(p) {
   if (typeof p !== 'string' || p.length < 6) throw new ErrorApi(400, 'La contraseña tiene que tener al menos 6 caracteres');
 }
 function validarPerfil({ edad, posicion }) {
-  if (!Number.isInteger(edad) || edad < 10 || edad > 99) throw new ErrorApi(400, 'Poné una edad entre 10 y 99');
+  if (!Number.isInteger(edad) || edad < 13 || edad > 99) throw new ErrorApi(400, 'Poné una edad entre 13 y 99');
   if (!POSICIONES.includes(posicion)) throw new ErrorApi(400, 'Posición inválida');
 }
 

@@ -14,6 +14,11 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
   <div id="app" class="max-w-2xl mx-auto px-4 py-6 space-y-5"><p class="text-slate-400">Cargando…</p></div>
+  <!-- Fuera de #app para que el banner no se vuelva a cargar con cada cambio de pantalla. -->
+  <footer class="max-w-2xl mx-auto px-4 pb-8 space-y-3">
+    <div id="banner"></div>
+    <p class="text-center text-xs text-slate-600"><a href="#/privacidad" class="hover:text-slate-400 underline">Privacidad y términos</a></p>
+  </footer>
   <div id="modal"></div>
   <div id="toast" class="fixed z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
 
@@ -37,6 +42,14 @@ const CONFIG = {
   api: 'https://fulbo-one.vercel.app/api/admin',
   // Días que dura la sesión antes de pedir la contraseña de nuevo.
   diasSesion: 30,
+  // Mail de contacto que aparece en "Privacidad y términos" (vacío: no se muestra).
+  contacto: '',
+  // Banner abajo de la página. Se muestra uno solo: AdSense si tiene client y slot;
+  // si no, el sponsor si tiene link; si no, nada.
+  publicidad: {
+    adsense: { client: '', slot: '' },             // 'ca-pub-…' y el id del bloque de anuncios
+    sponsor: { texto: '', imagen: '', link: '' },  // banner propio (ej. una cancha de la zona)
+  },
 };
 // =============================================================
 
@@ -819,7 +832,7 @@ function camposPerfil(p = {}) {
       </div>
     </div>
     <label class="block text-sm text-slate-400">Edad
-      <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1 block !w-28">
+      <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="13" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1 block !w-28">
     </label>
     <div>
       <p class="text-sm text-slate-400 mb-1">Posición</p>
@@ -830,9 +843,7 @@ function camposPerfil(p = {}) {
 // La gente tiende a poner el mail del trabajo: acá va solo un nombre de usuario.
 function avisoMail(usuario) {
   if (!usuario.includes('@')) return '';
-  return /@uade\.edu\.ar/i.test(usuario)
-    ? '⚠️ No pongas tu mail de UADE. Acá va solo un nombre de usuario (ej: juanp), sin @.'
-    : '⚠️ Acá va un nombre de usuario, no un mail (sin @).';
+  return '⚠️ Acá va un nombre de usuario (ej: juanp), no un mail. Sin @.';
 }
 function actualizarAvisoUsuario() {
   const input = $('#l-usuario'), aviso = $('#aviso-usuario');
@@ -881,6 +892,7 @@ function vistaLogin() {
           <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ui.verPass ? '🙈' : '👁️'}</button>
         </div>
         ${reg ? camposPerfil() : ''}
+        ${reg ? '<p class="text-xs text-slate-400">Al crear tu cuenta aceptás los <a href="#/privacidad" class="underline">términos y la política de privacidad</a>. Tenés que tener 13 años o más.</p>' : ''}
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
       ${reg ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
@@ -954,6 +966,49 @@ function topBar() {
       ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
     </div>`;
+}
+
+// ---------------- Privacidad y términos ----------------
+function vistaPrivacidad() {
+  const seccion = (titulo, items) => card(`
+    <h2 class="text-lg font-bold mb-2">${titulo}</h2>
+    <ul class="space-y-2 text-sm text-slate-300 list-disc pl-5 marker:text-slate-600">
+      ${items.map(i => `<li>${i}</li>`).join('')}
+    </ul>`);
+  const contacto = CONFIG.contacto
+    ? `escribí a <a href="mailto:${esc(CONFIG.contacto)}" class="underline">${esc(CONFIG.contacto)}</a>`
+    : 'pedíselo al admin de tu grupo';
+  return `
+    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <div>
+      <h1 class="text-2xl font-black">🔒 Privacidad y términos</h1>
+      <p class="text-sm text-slate-400 mt-1">Qué datos guardamos, para qué, y las reglas de uso.</p>
+    </div>
+    ${seccion('📋 Qué datos guardamos', [
+      'Tu <b>nombre de usuario</b>, <b>edad</b>, <b>posición</b> y, si la subís, tu <b>foto</b>. No pedimos mail, nombre real ni teléfono.',
+      'Lo que hacés en cada grupo: si te anotás, las <b>calificaciones</b> que ponés, tus votos al jugador del partido, los reportes de faltas y si te marcaste lesionado.',
+      'Los datos se guardan en <b>Google Firebase</b> (servidores de Google).',
+    ])}
+    ${seccion('👀 Quién los ve', [
+      'Solo los miembros de cada grupo ven las fichas, la lista y los equipos de ese grupo. Para entrar a un grupo hace falta su link de invitación.',
+      'Las calificaciones se muestran como promedios. Los reportes de faltas los ven solo los admins del grupo.',
+      'El administrador del sitio puede ver la lista de usuarios para dar soporte (por ejemplo, cambiar una contraseña olvidada).',
+      'No vendemos ni compartimos tus datos con nadie.',
+    ])}
+    ${seccion('🍪 Cookies y publicidad', [
+      'La página guarda en tu navegador tu sesión y algunas preferencias.',
+      'Puede mostrar un banner de publicidad. Si es de Google, Google puede usar cookies para elegir los anuncios. Más info en <a href="https://policies.google.com/technologies/ads?hl=es" target="_blank" rel="noopener" class="underline">policies.google.com/technologies/ads</a>. Podés desactivar los anuncios personalizados en <a href="https://adssettings.google.com" target="_blank" rel="noopener" class="underline">adssettings.google.com</a>.',
+    ])}
+    ${seccion('🗑️ Tus derechos', [
+      `Podés pedir ver, corregir o borrar tus datos en cualquier momento: ${contacto}. Tu edad, posición y foto las cambiás vos desde tu ficha.`,
+      'Según la Ley 25.326 de Protección de Datos Personales, si no te responden podés reclamar ante la Agencia de Acceso a la Información Pública.',
+    ])}
+    ${seccion('📜 Términos de uso', [
+      'Tenés que tener <b>13 años o más</b> para usar la página.',
+      'Usala con respeto: las calificaciones son solo para armar equipos parejos. No pongas fotos ni nombres ofensivos o de otra persona.',
+      'Los admins de cada grupo pueden sacar o expulsar a quien no respete las reglas, y el administrador del sitio puede borrar cuentas.',
+      'La página es gratuita y se ofrece tal cual, sin garantías. Puede cambiar o dejar de funcionar.',
+    ])}`;
 }
 
 // ---------------- Reglas ----------------
@@ -1737,7 +1792,7 @@ function vistaUsuarios() {
           <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT}">
           <input id="sa-pass" name="pass" required minlength="6" value="${SA.passSugerida}" class="${INPUT} font-mono" title="Contraseña">
         </div>
-        <input id="sa-edad" name="edad" type="number" min="10" max="99" required placeholder="Edad" class="${INPUT} !w-28">
+        <input id="sa-edad" name="edad" type="number" min="13" max="99" required placeholder="Edad" class="${INPUT} !w-28">
         ${selectorPos('sa-pos')}
         <button class="${BTN_OK} w-full">Crear y copiar datos de acceso</button>
       </form>`)}
@@ -1771,7 +1826,7 @@ function filaUsuarioEditando(u) {
           <span class="font-semibold flex-1">${esc(u.usuario)}</span>
           ${foto ? `<button type="button" data-action="sa-quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
         </div>
-        <input id="sae-edad-${u.uid}" name="edad" type="number" min="10" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT} !w-28">
+        <input id="sae-edad-${u.uid}" name="edad" type="number" min="13" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT} !w-28">
         ${selectorPos(`sae-pos-${u.uid}`, u.posicion || 'comodin')}
         <div class="flex gap-2">
           <button class="${BTN_OK} flex-1 text-sm">Guardar</button>
@@ -1811,6 +1866,7 @@ function render() {
 
 function renderVistas() {
   const el = $('#app');
+  if (location.hash === '#/privacidad') return pintar(el, vistaPrivacidad());
   if (D.user === undefined) return pintar(el, cargando());
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
@@ -1835,7 +1891,7 @@ window.addEventListener('hashchange', () => {
 // ---------------- Acciones ----------------
 async function guardarPerfil(f) {
   const edad = parseInt(f.get('edad'));
-  if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+  if (!(edad >= 13 && edad <= 99)) return toast('Poné una edad entre 13 y 99');
   const uid = miUid();
   const actual = D.perfil || {};
   const datos = {
@@ -2051,7 +2107,7 @@ const formularios = {
     if (avisoMail(usuario)) return toast(avisoMail(usuario));
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
     const edad = parseInt(f.get('edad'));
-    if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+    if (!(edad >= 13 && edad <= 99)) return toast('Poné una edad entre 13 y 99');
     const datos = { usuario, edad, posicion: f.get('posicion'), foto: ui.foto || '', grupos: [], creado: Date.now() };
     D.registrando = true;
     render();
@@ -2218,7 +2274,28 @@ document.addEventListener('submit', async e => {
   }
 });
 
+// ---------------- Banner ----------------
+function mostrarBanner() {
+  const el = $('#banner'), { adsense, sponsor } = CONFIG.publicidad;
+  if (adsense.client && adsense.slot) {
+    el.innerHTML = `
+      <p class="text-[10px] text-center text-slate-600 mb-1">Publicidad</p>
+      <ins class="adsbygoogle" style="display:block;max-height:100px" data-ad-client="${esc(adsense.client)}" data-ad-slot="${esc(adsense.slot)}" data-ad-format="horizontal" data-full-width-responsive="true"></ins>`;
+    const s = Object.assign(document.createElement('script'), { async: true, crossOrigin: 'anonymous', src: `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(adsense.client)}` });
+    document.head.append(s);
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+  } else if (sponsor.link) {
+    el.innerHTML = `
+      <a href="${esc(sponsor.link)}" target="_blank" rel="noopener sponsored" class="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 hover:bg-slate-900 p-3 transition">
+        ${sponsor.imagen ? `<img src="${esc(sponsor.imagen)}" alt="" class="h-12 w-auto max-w-[40%] object-contain rounded-lg">` : ''}
+        <span class="flex-1 min-w-0 text-sm text-slate-300">${esc(sponsor.texto)}</span>
+        <span class="text-[10px] text-slate-600 shrink-0">Publicidad</span>
+      </a>`;
+  }
+}
+
 leerInvitacion();
+mostrarBanner();
 render();
 // La votación abre y cierra por horario: revisar cada medio minuto.
 setInterval(() => { actualizarSubsMvp(); cargarHistorialMvp(); render(); }, 30000);
