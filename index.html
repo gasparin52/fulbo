@@ -1031,7 +1031,6 @@ function filaJugador(p, etiqueta, clase) {
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
       </a>
       ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
-      ${puedeBorrar ? `<button data-action="reemplazar" data-id="${p.id}" title="Reemplazar por otro" aria-label="Reemplazar a ${esc(p.usuario)} por otro" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-sky-300 hover:bg-sky-500/10 transition shrink-0">${ICONO_REEMPLAZAR}</button>` : ''}
       ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Sacar de la lista" aria-label="Sacar a ${esc(p.usuario)} de la lista" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition shrink-0">${ICONO_SACAR}</button>` : ''}
     </li>`;
 }
@@ -1056,6 +1055,7 @@ function lista(d) {
       <ul class="divide-y divide-slate-800">
         ${d.suplentes.map((p, i) => filaJugador(p, 'S' + (i + 1), 'bg-amber-500/15 text-amber-300')).join('')}
       </ul>` : ''}
+    ${esAdmin() && D.grupo.anotados.length ? `<button data-action="reemplazar" class="${BTN_SEC} w-full mt-4 text-sm inline-flex items-center justify-center gap-2">${ICONO_REEMPLAZAR} Reemplazar a alguien</button>` : ''}
   `);
 }
 
@@ -1279,6 +1279,24 @@ function modalFaltas() {
 
 // Admin: cambiar a alguien de la lista por otro que entra en su mismo lugar (y equipo).
 function modalReemplazar() {
+  if (!ui.reemplazar) {
+    const d = derivar();
+    const fila = (p, etiqueta, clase) => `
+      <li class="flex items-center gap-3 py-2">
+        <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
+        ${avatar(p, 28)}
+        <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}</span>
+        <button data-action="reemplazar" data-id="${p.id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 shrink-0">Reemplazar</button>
+      </li>`;
+    return modal(`
+      <h2 class="text-lg font-black">⇄ ¿A quién reemplazás?</h2>
+      <p class="text-sm text-slate-400 mb-3">El que pongas entra en su mismo lugar de la lista y en su mismo equipo.</p>
+      <ul class="divide-y divide-slate-800 max-h-[55vh] overflow-y-auto">
+        ${d.titulares.map((p, i) => fila(p, i + 1, 'bg-emerald-500/15 text-emerald-300')).join('')}
+        ${d.suplentes.map((p, i) => fila(p, 'S' + (i + 1), 'bg-amber-500/15 text-amber-300')).join('')}
+      </ul>
+      <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
+  }
   const sale = jugador(ui.reemplazar);
   const anotados = new Set(D.grupo.anotados);
   const libres = [
@@ -1304,7 +1322,7 @@ function modalReemplazar() {
       <input id="reemp-nuevo" name="nuevo" maxlength="20" placeholder="O alguien sin cuenta (nombre)" class="${INPUT}">
       <button class="${BTN} w-full bg-sky-500 hover:bg-sky-400 text-slate-950">Reemplazar</button>
     </form>
-    <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
+    <button data-action="reemplazar" class="w-full mt-2 py-2 text-sm text-slate-400">← Elegir a otro</button>`);
 }
 
 // Al lado del nombre: 🟥 (o 🟥2) mientras tenga faltas vigentes.
@@ -1421,7 +1439,8 @@ function renderModal() {
   if (ui.modal?.startsWith('mvp-') && (!m || estadoMvp() === 'cerrada')) ui.modal = null;
   if (ui.modal === 'faltas' && !m) ui.modal = null;
   if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
-  if (ui.modal === 'reemplazar' && (!esAdmin() || !D.grupo.anotados.includes(ui.reemplazar))) ui.modal = null;
+  if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
+  if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
     : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : '';
 }
@@ -1806,7 +1825,8 @@ const acciones = {
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
-  reemplazar: ({ id }) => { ui.modal = 'reemplazar'; ui.reemplazar = id; render(); },
+  // Sin id: lista de anotados para elegir a quién; con id: a quién poner en su lugar.
+  reemplazar: ({ id }) => { ui.modal = 'reemplazar'; ui.reemplazar = id || null; render(); },
   lesion: () => {
     const uid = miUid(), lesionado = !D.perfil?.lesionado;
     act(async () => {
