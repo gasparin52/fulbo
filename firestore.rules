@@ -29,7 +29,8 @@ service cloud.firestore {
         && d.edad is int && d.edad >= 10 && d.edad <= 99
         && d.posicion in ['comodin', 'arquero', 'defensor', 'medio', 'delantero']
         && d.foto is string && d.foto.size() < 200000
-        && (d.foto == '' || d.foto.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+'));
+        && (d.foto == '' || d.foto.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+'))
+        && d.get('lesionado', false) is bool;
     }
     function nota(s, k) { return s[k] is int && s[k] >= 1 && s[k] <= 10; }
     function statsValidas(s) {
@@ -42,7 +43,7 @@ service cloud.firestore {
     match /usuarios/{u} {
       allow read: if logueado() && uid() == u;
       allow create, update: if logueado() && uid() == u
-        && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'grupos', 'creado'])
+        && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'grupos', 'creado'])
         && perfilValido(request.resource.data)
         && request.resource.data.grupos is list && request.resource.data.grupos.size() <= 20;
     }
@@ -66,15 +67,16 @@ service cloud.firestore {
       allow delete: if esAdmin(g);
 
       // Para entrar hay que tener el código del link de invitación y no estar expulsado.
+      // "lesionado" lo pone solo el propio jugador (ningún admin puede tocar esta ficha).
       match /miembros/{m} {
         allow read: if esMiembro(g);
         allow create: if logueado() && uid() == m
-          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'codigo', 'unido'])
+          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'codigo', 'unido'])
           && perfilValido(request.resource.data)
           && request.resource.data.codigo == grupo(g).codigo
           && !(m in grupo(g).get('baneados', []));
         allow update: if logueado() && uid() == m
-          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'codigo', 'unido'])
+          && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'codigo', 'unido'])
           && perfilValido(request.resource.data)
           && request.resource.data.codigo == resource.data.codigo;
         allow delete: if logueado() && (uid() == m || esAdmin(g));

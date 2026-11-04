@@ -196,7 +196,7 @@ const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
 const cortar = arr => { arr.forEach(f => f()); arr.length = 0; };
 const urlBase = () => location.origin + location.pathname;
 const linkInvitacion = () => `${urlBase()}#/unirse/${D.gid}/${D.grupo.codigo}`;
-const datosPerfil = p => ({ usuario: p.usuario, edad: p.edad, posicion: p.posicion, foto: p.foto || '' });
+const datosPerfil = p => ({ usuario: p.usuario, edad: p.edad, posicion: p.posicion, foto: p.foto || '', lesionado: !!p.lesionado });
 
 let toastTimer;
 function toast(msg) {
@@ -938,6 +938,7 @@ function vistaReglas() {
     ])}
     ${seccion('👤 Tu cuenta y el grupo', [
       'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición y foto.',
+      'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
       '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
       'El grupo es privado: solo entra quien tiene el link de invitación. No lo compartas fuera del grupo.',
@@ -989,7 +990,7 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaRoja(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -1278,6 +1279,9 @@ function esHater(id) {
   }
   return haterCache.ids.has(id);
 }
+// 🤕 Lesionado: lo marca (y lo saca) solo el propio jugador desde su ficha.
+const marcaLesion = id => jugador(id)?.lesionado ? ' <span class="text-xs" title="Lesionado">🤕</span>' : '';
+
 const marcaHater = id => esHater(id)
   ? ' <span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 whitespace-nowrap" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : '';
 
@@ -1383,7 +1387,7 @@ function jugadoresGrid() {
           <a href="#/jugador/${p.id}" class="relative flex flex-col items-center text-center gap-1 p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition">
             ${falta ? '<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400" title="Calificalo"></span>' : ''}
             ${avatar(p, 56)}
-            <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
+            <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}${marcaLesion(p.id)}</span>
             ${esHater(p.id) ? '<span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 -mt-0.5" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : ''}
             ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
             <span class="text-xs text-slate-400">${pos(p).emoji} ${p.invitado ? 'invitado' : p.edad ? p.edad + ' años' : ''}${marcaRoja(p.id)}</span>
@@ -1418,6 +1422,8 @@ function vistaFicha(id) {
               ${'🟥'.repeat(Math.min(rojas.length, 3))} Faltó sin avisar${rojas.length > 1 ? ` · ${rojas.length} veces` : ''}
             </p>
             ${castigado(id) ? '<p class="text-xs text-red-300/80 mt-1">Esta fecha, si se llena la lista, queda de suplente.</p>' : ''}` : ''}
+          ${p.lesionado ? `
+            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-orange-500/15 border border-orange-500/30 px-2.5 py-0.5 text-xs font-bold text-orange-200">🤕 Lesionado</p>` : ''}
           ${esHater(id) ? `
             <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-fuchsia-500/15 border border-fuchsia-500/30 px-2.5 py-0.5 text-xs font-bold text-fuchsia-200">😈 Hater</p>
             <p class="text-xs text-fuchsia-300/80 mt-1">${esYo ? 'Calificás' : 'Califica'} a todos muy por debajo que el resto.${esYo ? ' Si ajustás tus votos, la etiqueta se va sola.' : ''}</p>` : ''}
@@ -1441,6 +1447,11 @@ function vistaFicha(id) {
         }).join('')}
       </div>
     </div>
+    ${esYo ? card(`
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale al grupo.'}</p>
+        <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
+      </div>`) : ''}
     ${esYo ? card(`
       <h2 class="text-lg font-bold mb-3">✏️ Editar mi ficha</h2>
       <form data-form="perfil" class="space-y-4">
@@ -1712,6 +1723,7 @@ async function guardarPerfil(f) {
     edad,
     posicion: f.get('posicion'),
     foto: ui.foto ?? actual.foto ?? '',
+    lesionado: !!actual.lesionado,
   };
   const ok = await act(async () => {
     await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now() });
@@ -1728,6 +1740,14 @@ const acciones = {
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
+  lesion: () => {
+    const uid = miUid(), lesionado = !D.perfil?.lesionado;
+    act(async () => {
+      await F.updateDoc(refUsuario(uid), { lesionado });
+      // La ficha de cada grupo es una copia: se actualiza en todos.
+      await Promise.allSettled((D.perfil.grupos || []).map(g => F.updateDoc(F.doc(colMiembros(g.id), uid), { lesionado })));
+    }, lesionado ? '🤕 Marcado como lesionado. ¡Que te recuperes!' : '💪 ¡Bienvenido de vuelta!');
+  },
   'faltas-reportar': () => { ui.modal = 'faltas'; render(); },
   'aprobar-falta': ({ k }) => {
     const rs = D.reportes.filter(r => `${r.fecha}_${r.target}` === k);
