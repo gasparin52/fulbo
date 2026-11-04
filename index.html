@@ -199,15 +199,19 @@ function moverDeEquipo(s, id, a) {
   }
 }
 
-// Cada suplente queda asignado a un equipo (SA / SB) por si le toca entrar.
-// Van alternados empezando por el más flojo; los que se anotan después, al que tiene menos.
+// Cada suplente queda asignado a un equipo (SA / SB) por si le toca entrar. Se
+// equilibran aparte de los titulares: cada uno va al lado con menos suplentes y, si
+// empatan, al de suplentes más flojos. En modo equilibrado se reparten de mejor a peor
+// (queda en serpentina); los que se anotan después se suman con la misma cuenta.
 function repartirSuplentes(s) {
   const eq = s.equipos;
   const sups = dividir(s).suplentes.map(p => p.id);
   eq.SA = (eq.SA || []).filter(id => sups.includes(id));
   eq.SB = (eq.SB || []).filter(id => sups.includes(id));
-  const fuerza = e => eq[e].reduce((t, id) => t + puntaje(id), 0);
-  sups.filter(id => !eq.SA.includes(id) && !eq.SB.includes(id)).forEach(id => {
+  const fuerza = e => eq['S' + e].reduce((t, id) => t + puntaje(id), 0);
+  const nuevos = sups.filter(id => !eq.SA.includes(id) && !eq.SB.includes(id));
+  if (eq.modo !== 'aleatorio') nuevos.sort((a, b) => puntaje(b) - puntaje(a));
+  nuevos.forEach(id => {
     const e = eq.SA.length !== eq.SB.length ? (eq.SA.length < eq.SB.length ? 'A' : 'B') : fuerza('A') <= fuerza('B') ? 'A' : 'B';
     eq['S' + e].push(id);
   });
@@ -740,6 +744,7 @@ const limitarNivel = n => Math.max(1, Math.min(10, n));
 const colorNota = v => v >= 8 ? 'text-emerald-400' : v >= 6.5 ? 'text-lime-400' : v >= 5 ? 'text-amber-400' : 'text-red-400';
 const bgNota = v => v >= 8 ? 'bg-emerald-500' : v >= 6.5 ? 'bg-lime-500' : v >= 5 ? 'bg-amber-500' : 'bg-red-500';
 // Persona con un "menos" (estilo Lucide): sacar a alguien de la lista.
+const ICONO_REEMPLAZAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>';
 const ICONO_SACAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="22" x2="16" y1="11" y2="11"/></svg>';
 const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-center">${msg}</p>`;
 
@@ -940,7 +945,7 @@ function vistaReglas() {
     ${seccion('🆚 Equipos', [
       'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). Se reparten en serpentina para que los dos queden parejos, y si hay 2 arqueros va uno a cada lado.',
-      'Los suplentes también quedan asignados a un equipo, por si les toca entrar.',
+      'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
@@ -1026,6 +1031,7 @@ function filaJugador(p, etiqueta, clase) {
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
       </a>
       ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
+      ${puedeBorrar ? `<button data-action="reemplazar" data-id="${p.id}" title="Reemplazar por otro" aria-label="Reemplazar a ${esc(p.usuario)} por otro" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-sky-300 hover:bg-sky-500/10 transition shrink-0">${ICONO_REEMPLAZAR}</button>` : ''}
       ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Sacar de la lista" aria-label="Sacar a ${esc(p.usuario)} de la lista" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition shrink-0">${ICONO_SACAR}</button>` : ''}
     </li>`;
 }
@@ -1271,6 +1277,36 @@ function modalFaltas() {
     <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
 }
 
+// Admin: cambiar a alguien de la lista por otro que entra en su mismo lugar (y equipo).
+function modalReemplazar() {
+  const sale = jugador(ui.reemplazar);
+  const anotados = new Set(D.grupo.anotados);
+  const libres = [
+    ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+    ...Object.keys(D.grupo.invitados).map(jugador).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+  ].filter(p => !anotados.has(p.id));
+  return modal(`
+    <h2 class="text-lg font-black">⇄ Reemplazar a ${esc(sale.usuario)}</h2>
+    <p class="text-sm text-slate-400 mb-3">El que elijas entra en su mismo lugar de la lista${equipoDe(sale.id) || (D.grupo.equipos?.SA || []).concat(D.grupo.equipos?.SB || []).includes(sale.id) ? ' y en su mismo equipo' : ''}.</p>
+    <form data-form="reemplazar" class="space-y-3">
+      ${libres.length ? `
+        <ul class="divide-y divide-slate-800 max-h-[40vh] overflow-y-auto">
+          ${libres.map(p => `
+            <li>
+              <label class="flex items-center gap-3 py-2 cursor-pointer">
+                <input type="radio" id="reemp-${p.id}" name="entra" value="${p.id}" class="w-5 h-5 accent-sky-400">
+                ${avatar(p, 28)}
+                <span class="flex-1 truncate">${esc(p.usuario)}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>
+                <span class="text-xs text-slate-400">${pos(p).emoji}</span>
+              </label>
+            </li>`).join('')}
+        </ul>` : '<p class="text-sm text-slate-500">Ya están todos anotados.</p>'}
+      <input id="reemp-nuevo" name="nuevo" maxlength="20" placeholder="O alguien sin cuenta (nombre)" class="${INPUT}">
+      <button class="${BTN} w-full bg-sky-500 hover:bg-sky-400 text-slate-950">Reemplazar</button>
+    </form>
+    <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
+}
+
 // Al lado del nombre: 🟥 (o 🟥2) mientras tenga faltas vigentes.
 function marcaRoja(id) {
   const n = rojasDe(id).length;
@@ -1385,7 +1421,9 @@ function renderModal() {
   if (ui.modal?.startsWith('mvp-') && (!m || estadoMvp() === 'cerrada')) ui.modal = null;
   if (ui.modal === 'faltas' && !m) ui.modal = null;
   if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
-  return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp() : ui.modal === 'faltas' ? modalFaltas() : '';
+  if (ui.modal === 'reemplazar' && (!esAdmin() || !D.grupo.anotados.includes(ui.reemplazar))) ui.modal = null;
+  return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : '';
 }
 
 const avisoCalificaciones = `
@@ -1768,6 +1806,7 @@ const acciones = {
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
+  reemplazar: ({ id }) => { ui.modal = 'reemplazar'; ui.reemplazar = id; render(); },
   lesion: () => {
     const uid = miUid(), lesionado = !D.perfil?.lesionado;
     act(async () => {
@@ -2021,6 +2060,28 @@ const formularios = {
     if (!voto) return toast('Elegí a alguien');
     const m = D.mvp;
     const ok = await act(() => F.setDoc(F.doc(colVotosMvp(D.gid, m.id), miUid()), { voto, ts: Date.now() }), `🏆 Votaste a ${nombreCandidato(m, voto)}`);
+    if (ok) { ui.modal = null; render(); }
+    return ok;
+  },
+  reemplazar: async f => {
+    const sale = ui.reemplazar, nombre = (f.get('nuevo') || '').trim();
+    let entra = f.get('entra');
+    if (!entra && !nombre) return toast('Elegí a alguien o escribí un nombre');
+    if (nombre) entra = 'inv_' + genId(10);
+    const ok = await actualizarGrupo(s => {
+      const i = s.anotados.indexOf(sale);
+      if (i < 0 || s.anotados.includes(entra)) return;
+      if (nombre) s.invitados[entra] = { nombre, posicion: 'comodin' };
+      const titulares = dividir(s).titulares;
+      const alDia = s.equipos && s.equipos.base === baseKey(titulares);
+      s.anotados[i] = entra;
+      delete s.solicitudes[sale];
+      // Entra en el mismo equipo; si los equipos estaban al día, siguen al día.
+      if (s.equipos) {
+        for (const k of ['A', 'B', 'SA', 'SB']) if (s.equipos[k]) s.equipos[k] = s.equipos[k].map(x => (x === sale ? entra : x));
+        if (alDia) s.equipos.base = baseKey(titulares.map(p => ({ id: p.id === sale ? entra : p.id })));
+      }
+    }, `⇄ ${jugador(sale)?.usuario || 'Jugador'} reemplazado`);
     if (ok) { ui.modal = null; render(); }
     return ok;
   },
