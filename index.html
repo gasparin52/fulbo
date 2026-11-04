@@ -236,7 +236,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null });
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {} });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -257,7 +257,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null });
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {} });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -279,14 +279,51 @@ function elegirGrupo() {
     D.votos = v;
     render();
   }, e => console.warn(e.code)));
-  subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc'), F.limit(1)), qs => {
-    const d = qs.docs[0];
+  subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc')), qs => {
+    D.mvps = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    const d = D.mvps[0];
     const misma = d && D.mvp?.id === d.id;
-    D.mvp = d ? { id: d.id, ...d.data(), miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
+    D.mvp = d ? { ...d, miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
     actualizarSubsMvp();
+    cargarHistorialMvp();
     render();
   }, e => console.warn(e.code)));
 }
+
+// ⭐ Estrellas: cuántas veces fue jugador del partido cada uno (empates incluidos).
+// Una votación cerrada ya no cambia, así que su resultado se guarda en el celular.
+const historialMvp = {};
+let cargandoHistorial = false;
+async function cargarHistorialMvp() {
+  const gid = D.gid, docs = D.mvps || [];
+  if (cargandoHistorial || !gid) return;
+  cargandoHistorial = true;
+  for (const m of docs) {
+    const k = `${gid}/${m.id}`;
+    if (estadoMvp(m) !== 'cerrada' || historialMvp[k]) continue;
+    const clave = `${LS}mvp_res_${gid}_${m.id}`;
+    let ganadores = null;
+    try { ganadores = JSON.parse(guardado.get(clave)); } catch {}
+    if (!Array.isArray(ganadores)) {
+      try {
+        const qs = await F.getDocs(colVotosMvp(gid, m.id));
+        ganadores = resultadoMvp({ votos: Object.fromEntries(qs.docs.map(d => [d.id, d.data().voto])) }).ganadores;
+        guardado.set(clave, JSON.stringify(ganadores));
+      } catch (e) {
+        console.warn(e.code);
+        continue;
+      }
+    }
+    historialMvp[k] = ganadores;
+  }
+  cargandoHistorial = false;
+  if (D.gid !== gid) return;
+  const estrellas = {};
+  docs.forEach(m => (historialMvp[`${gid}/${m.id}`] || []).forEach(id => (estrellas[id] = (estrellas[id] || 0) + 1)));
+  D.estrellas = estrellas;
+  render();
+}
+const estrellasDe = id => D.estrellas?.[id] || 0;
 
 // ---------------- Jugador del partido ----------------
 const estadoMvp = (m = D.mvp, ahora = Date.now()) => !m ? null : ahora < m.abre ? 'pendiente' : ahora < m.cierra ? 'abierta' : 'cerrada';
@@ -562,6 +599,8 @@ const nivelDe = id => Number(D.niveles[id]) || NIVEL_DEFAULT;
 const limitarNivel = n => Math.max(1, Math.min(10, n));
 const colorNota = v => v >= 8 ? 'text-emerald-400' : v >= 6.5 ? 'text-lime-400' : v >= 5 ? 'text-amber-400' : 'text-red-400';
 const bgNota = v => v >= 8 ? 'bg-emerald-500' : v >= 6.5 ? 'bg-lime-500' : v >= 5 ? 'bg-amber-500' : 'bg-red-500';
+// Persona con un "menos" (estilo Lucide): sacar a alguien de la lista.
+const ICONO_SACAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="22" x2="16" y1="11" y2="11"/></svg>';
 const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-center">${msg}</p>`;
 
 function avatar(p, size = 40) {
@@ -780,8 +819,9 @@ function miEstado(d) {
 }
 
 function filaJugador(p, etiqueta, clase) {
-  const puedeBorrar = esAdmin() || p.id === miUid();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
+  const puedeBorrar = esAdmin();
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -790,7 +830,7 @@ function filaJugador(p, etiqueta, clase) {
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
       ${p.invitado ? '</span>' : '</a>'}
       ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
-      ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Bajar de la lista" class="w-8 h-8 rounded-lg hover:bg-red-950 grid place-items-center">❌</button>` : ''}
+      ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Sacar de la lista" aria-label="Sacar a ${esc(p.usuario)} de la lista" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition shrink-0">${ICONO_SACAR}</button>` : ''}
     </li>`;
 }
 
@@ -1051,6 +1091,7 @@ function jugadoresGrid() {
             ${falta ? '<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400" title="Calificalo"></span>' : ''}
             ${avatar(p, 56)}
             <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
+            ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
             <span class="text-xs text-slate-400">${pos(p).emoji} ${p.edad ? p.edad + ' años' : ''}</span>
             <span class="text-lg font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</span>
           </a>`;
@@ -1072,6 +1113,10 @@ function vistaFicha(id) {
         <div class="min-w-0 flex-1">
           <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">🛠️ armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+          ${estrellasDe(id) ? `
+            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">
+              ${'⭐'.repeat(Math.min(estrellasDe(id), 5))}${estrellasDe(id) > 5 ? ` ×${estrellasDe(id)}` : ''} Jugador del partido${estrellasDe(id) > 1 ? ` · ${estrellasDe(id)} veces` : ''}
+            </p>` : ''}
           <p class="text-xs text-slate-500 mt-1">${r.n ? `Según ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Todavía nadie lo calificó'}</p>
         </div>
         <div class="text-center shrink-0">
@@ -1648,7 +1693,7 @@ document.addEventListener('submit', async e => {
 leerInvitacion();
 render();
 // La votación abre y cierra por horario: revisar cada medio minuto.
-setInterval(() => { actualizarSubsMvp(); render(); }, 30000);
+setInterval(() => { actualizarSubsMvp(); cargarHistorialMvp(); render(); }, 30000);
 </script>
 </body>
 </html>
