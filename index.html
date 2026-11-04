@@ -919,7 +919,7 @@ function vistaReglas() {
     ])}
     ${seccion('📊 Calificaciones', [
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
-      'Las ponen los compañeros: <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
+      'Las ponen los compañeros (también a los invitados sin cuenta que anota el admin): <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
       'En la app no se muestra quién votó qué: solo los promedios.',
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
     ])}
@@ -993,9 +993,9 @@ function filaJugador(p, etiqueta, clase) {
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
       ${avatar(p, 32)}
-      ${p.invitado ? `<span class="flex-1 min-w-0">${nombre}` : `<a href="#/jugador/${p.id}" class="flex-1 min-w-0 hover:text-emerald-300">${nombre}`}
+      <a href="#/jugador/${p.id}" class="flex-1 min-w-0 hover:text-emerald-300">${nombre}
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
-      ${p.invitado ? '</span>' : '</a>'}
+      </a>
       ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
       ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Sacar de la lista" aria-label="Sacar a ${esc(p.usuario)} de la lista" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition shrink-0">${ICONO_SACAR}</button>` : ''}
     </li>`;
@@ -1332,7 +1332,10 @@ const avisoCalificaciones = `
 
 function jugadoresGrid() {
   const uid = miUid();
-  const ps = Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario));
+  const ps = [
+    ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+    ...Object.keys(D.grupo.invitados).map(jugador).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+  ];
   const pendientes = ps.filter(p => p.id !== uid && !D.votos[p.id]?.[uid]).length;
   return card(`
     <div class="flex items-baseline justify-between mb-3">
@@ -1350,7 +1353,7 @@ function jugadoresGrid() {
             ${avatar(p, 56)}
             <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
             ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
-            <span class="text-xs text-slate-400">${pos(p).emoji} ${p.edad ? p.edad + ' años' : ''}${marcaRoja(p.id)}</span>
+            <span class="text-xs text-slate-400">${pos(p).emoji} ${p.invitado ? 'invitado' : p.edad ? p.edad + ' años' : ''}${marcaRoja(p.id)}</span>
             <span class="text-lg font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</span>
           </a>`;
       }).join('')}
@@ -1358,7 +1361,7 @@ function jugadoresGrid() {
 }
 
 function vistaFicha(id) {
-  const p = D.miembros[id];
+  const p = jugador(id);
   const r = resumen(id);
   const esYo = id === miUid();
   const miVoto = D.votos[id]?.[miUid()];
@@ -1372,7 +1375,7 @@ function vistaFicha(id) {
         ${avatar(p, 96)}
         <div class="min-w-0 flex-1">
           <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">🛠️ armador</span>' : ''}</h1>
-          <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+          <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}${p.invitado ? ' · invitado (sin cuenta)' : ''}</p>
           ${estrellasDe(id) ? `
             <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">
               ${'⭐'.repeat(Math.min(estrellasDe(id), 5))}${estrellasDe(id) > 5 ? ` ×${estrellasDe(id)}` : ''} Jugador del partido${estrellasDe(id) > 1 ? ` · ${estrellasDe(id)} veces` : ''}
@@ -1430,9 +1433,11 @@ function vistaFicha(id) {
         <label class="flex items-center gap-2">Nivel si no tiene votos
           ${stepper(nivelDe(id), `data-action="nivel" data-id="${id}"`)}
         </label>
-        ${admin ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">🛠️ ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
-        ${admin ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
-        <button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>
+        ${admin || p.invitado ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">🛠️ ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
+        ${admin || p.invitado ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
+        ${p.invitado
+          ? `<button data-action="borrar-invitado" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Borrar invitado</button>`
+          : `<button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>`}
       </div>
       <div class="mt-3 pt-3 border-t border-slate-800 text-sm space-y-2">
         ${rojas.map(f => `
@@ -1648,7 +1653,7 @@ function renderVistas() {
   if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
-  if (m && D.miembros[m[1]]) return pintar(el, vistaFicha(m[1]));
+  if (m && jugador(m[1])) return pintar(el, vistaFicha(m[1]));
   pintar(el, vistaPrincipal());
 }
 

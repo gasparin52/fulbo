@@ -81,14 +81,18 @@ service cloud.firestore {
       }
 
       // Un voto por persona y por compañero: el id del documento es "quienVota_aQuien".
+      // Se puede calificar a miembros y a invitados (gente sin cuenta que anotó el admin).
       match /votos/{v} {
         allow read: if esMiembro(g);
         allow create, update: if esMiembro(g)
           && request.resource.data.keys().hasOnly(['voter', 'target', 'stats', 'ts'])
           && request.resource.data.voter == uid()
+          && request.resource.data.target is string
           && request.resource.data.target != uid()
           && v == uid() + '_' + request.resource.data.target
-          && exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(request.resource.data.target))
+          && (exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(request.resource.data.target))
+            || (request.resource.data.target.matches('inv_.+')
+              && grupo(g).get('invitados', {}).keys().hasAny([request.resource.data.target])))
           && statsValidas(request.resource.data.stats);
         allow delete: if logueado() && (resource.data.voter == uid() || esAdmin(g));
       }
