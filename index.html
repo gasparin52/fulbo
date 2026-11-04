@@ -217,6 +217,14 @@ function repartirSuplentes(s) {
   });
 }
 
+// Puntaje al lado de cada uno en los equipos. Admins y armadores ven el que se usa para
+// equilibrar (con el nivel del admin si no tiene votos); el resto, el promedio de votos.
+function chipNota(id) {
+  const r = resumen(id);
+  const v = puedeEditarEquipos() ? puntaje(id) : r.n ? r.general : null;
+  return `<span class="w-8 shrink-0 text-right text-xs font-mono font-bold ${v === null ? 'text-slate-600' : colorNota(v)}" title="${r.n ? `Promedio de ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Sin votos todavía'}">${v === null ? '–' : v.toFixed(1)}</span>`;
+}
+
 // Suplentes vigentes de un equipo, en el orden de la lista (S1, S2…).
 const suplentesDe = (e, d) => d.suplentes.filter(p => (D.grupo.equipos?.['S' + e] || []).includes(p.id));
 const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
@@ -626,10 +634,36 @@ function armarEquipos(jugadores, modo) {
     mezclados.forEach((p, i) => (i % 2 ? B : A).push(p.id));
     return { A, B };
   }
-  // Mayor a menor; el sort es estable, así que los empates quedan al azar.
-  const orden = mezclados.sort((a, b) => puntaje(b.id) - puntaje(a.id));
+  // Equilibrado: prueba todas las formas de partir en dos (mismo tamaño, ±1) y se queda
+  // con la de menor diferencia de puntaje. Los arqueros quedan repartidos mitad y mitad.
+  // Entre las que empatan elige una al azar, así "Armar equilibrados" puede variar.
+  const n = mezclados.length;
+  const pts = mezclados.map(p => puntaje(p.id));
+  const total = pts.reduce((a, b) => a + b, 0);
+  const arq = mezclados.map(p => p.posicion === 'arquero');
+  const nArq = arq.filter(Boolean).length;
+  const tam = Math.floor(n / 2);
+  if (n > 20) return serpentina(mezclados);
+  let mejor = Infinity, mejores = [];
+  for (let m = 0; m < 1 << n; m++) {
+    let cant = 0, suma = 0, arqs = 0;
+    for (let i = 0; i < n; i++) if (m & (1 << i)) { cant++; suma += pts[i]; if (arq[i]) arqs++; }
+    if (cant !== tam) continue;
+    if (nArq >= 2 && (arqs < Math.floor(nArq / 2) || arqs > Math.ceil(nArq / 2))) continue;
+    const dif = Math.abs(total - 2 * suma);
+    if (dif < mejor - 1e-9) { mejor = dif; mejores = [m]; }
+    else if (dif < mejor + 1e-9) mejores.push(m);
+  }
+  const m = mejores[Math.floor(Math.random() * mejores.length)];
+  mezclados.forEach((p, i) => (m & (1 << i) ? B : A).push(p.id));
+  return Math.random() < 0.5 ? { A, B } : { A: B, B: A };
+}
+
+// Para listas muy largas: de mayor a menor en serpentina A, B, B, A… (arqueros uno por lado).
+function serpentina(jugadores) {
+  const A = [], B = [];
+  const orden = jugadores.sort((a, b) => puntaje(b.id) - puntaje(a.id));
   let resto = orden, offset = 0;
-  // Si hay 2+ arqueros, uno para cada lado; la serpentina sigue compensando.
   const arqueros = orden.filter(p => p.posicion === 'arquero');
   if (arqueros.length >= 2) {
     A.push(arqueros[0].id);
@@ -637,7 +671,6 @@ function armarEquipos(jugadores, modo) {
     resto = orden.filter(p => p !== arqueros[0] && p !== arqueros[1]);
     offset = 2;
   }
-  // Serpentina: A, B, B, A, A, B, B, A…
   resto.forEach((p, i) => (['A', 'B', 'B', 'A'][(i + offset) % 4] === 'A' ? A : B).push(p.id));
   return { A, B };
 }
@@ -944,7 +977,7 @@ function vistaReglas() {
     ])}
     ${seccion('🆚 Equipos', [
       'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
-      'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). Se reparten en serpentina para que los dos queden parejos, y si hay 2 arqueros va uno a cada lado.',
+      'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
@@ -1093,6 +1126,7 @@ function equipos(d) {
               ${avatar(p, 22)}
               <span class="truncate flex-1">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse">🔄</span>' : ''}</span>
               <span>${pos(p).emoji}</span>
+              ${chipNota(p.id)}
               ${mover(p)}
             </li>`).join('')}
         </ul>
@@ -1105,6 +1139,7 @@ function equipos(d) {
                 ${avatar(p, 22)}
                 <span class="truncate flex-1">${esc(p.usuario)}</span>
                 <span>${pos(p).emoji}</span>
+                ${chipNota(p.id)}
                 ${mover(p)}
               </li>`).join('')}
           </ul>` : ''}
