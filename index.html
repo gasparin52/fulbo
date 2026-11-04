@@ -14,7 +14,8 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
   <div id="app" class="max-w-2xl mx-auto px-4 py-6 space-y-5"><p class="text-slate-400">Cargando…</p></div>
-  <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
+  <div id="modal"></div>
+  <div id="toast" class="fixed z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
 
 <script type="module">
 // ======================= CONFIGURACIÓN =======================
@@ -52,7 +53,7 @@ const STATS = [
   { k: 'pase',      label: 'Pase',      corto: 'PAS', emoji: '🎯' },
   { k: 'remate',    label: 'Remate',    corto: 'REM', emoji: '💥' },
   { k: 'defensa',   label: 'Defensa',   corto: 'DEF', emoji: '🛡️' },
-  { k: 'fisico',    label: 'Físico',    corto: 'FÍS', emoji: '💪' },
+  { k: 'fisico',    label: 'Resistencia', corto: 'RES', emoji: '🔋' },  // la clave sigue siendo "fisico" para no perder votos
   { k: 'arquero',   label: 'Arquero',   corto: 'ARQ', emoji: '🧤' },
 ];
 const CAMPO = STATS.filter(s => s.k !== 'arquero').map(s => s.k);
@@ -90,10 +91,24 @@ const refGrupo = g => F.doc(db, 'grupos', g);
 const colMiembros = g => F.collection(db, 'grupos', g, 'miembros');
 const colVotos = g => F.collection(db, 'grupos', g, 'votos');
 const refNiveles = g => F.doc(db, 'grupos', g, 'privado', 'niveles');
+const colMvp = g => F.collection(db, 'grupos', g, 'mvp');
+const refMvp = (g, fecha) => F.doc(db, 'grupos', g, 'mvp', fecha);
+const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'votos');
+
+// Jugador del partido: se vota el día siguiente al partido, de 00:00 a 23:59 (hora argentina, UTC-3).
+const TZ = 'America/Argentina/Buenos_Aires';
+const DIA = 864e5;
+const MIN_VOTOS_MVP = 3;
+const abreVotacion = fecha => Date.parse(`${fecha}T00:00:00-03:00`) + DIA;
+const fechaLinda = f => {
+  if (!f) return '';
+  const d = new Date(`${f}T12:00:00-03:00`);
+  return `${d.toLocaleDateString('es-AR', { weekday: 'long', timeZone: TZ })} ${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
+};
 
 // ---------------- Estado ----------------
 const datosGrupoIniciales = () => ({
-  partido: { titulo: 'Fulbo ⚽', cuando: '', lugar: '', cupo: 10 },
+  partido: { titulo: 'Fulbo ⚽', fecha: '', cuando: '', lugar: '', cupo: 10 },  // fecha: "AAAA-MM-DD"
   anotados: [],                // uids e ids de invitados ("inv_…"), en orden de llegada
   invitados: {},               // id -> { nombre, posicion } (gente sin cuenta)
   equipos: null,               // { A: [ids], B: [ids], modo, base, editado }
@@ -114,9 +129,10 @@ const D = {
   votos: {},           // target -> { voter -> stats }
   niveles: {},         // solo admins: id -> 1..10
   registrando: false,
+  mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
 const ui = { tab: 'entrar', foto: null };  // foto: null = sin cambios, '' = quitar, dataURL = nueva
-let subsUser = [], subsGrupo = [], nivelesDe = null;
+let subsUser = [], subsGrupo = [], subsMvp = [], nivelesDe = null, mvpDe = null;
 
 // ---------------- Utilidades ----------------
 const $ = s => document.querySelector(s);
@@ -218,8 +234,9 @@ A.onAuthStateChanged(auth, user => {
   }
   cortar(subsUser);
   cortar(subsGrupo);
-  nivelesDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {} });
+  cortar(subsMvp);
+  nivelesDe = mvpDe = null;
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -238,8 +255,9 @@ function elegirGrupo() {
   const gid = ids.includes(quiero) ? quiero : ids.includes(D.gid) ? D.gid : ids[0] || null;
   if (gid === D.gid) return;
   cortar(subsGrupo);
-  nivelesDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {} });
+  cortar(subsMvp);
+  nivelesDe = mvpDe = null;
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -261,7 +279,86 @@ function elegirGrupo() {
     D.votos = v;
     render();
   }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc'), F.limit(1)), qs => {
+    const d = qs.docs[0];
+    const misma = d && D.mvp?.id === d.id;
+    D.mvp = d ? { id: d.id, ...d.data(), miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
+    actualizarSubsMvp();
+    render();
+  }, e => console.warn(e.code)));
 }
+
+// ---------------- Jugador del partido ----------------
+const estadoMvp = (m = D.mvp, ahora = Date.now()) => !m ? null : ahora < m.abre ? 'pendiente' : ahora < m.cierra ? 'abierta' : 'cerrada';
+
+// Mi voto se lee siempre; los votos de todos, recién cuando cierra (así lo exigen las reglas).
+function actualizarSubsMvp() {
+  const m = D.mvp;
+  const clave = m ? `${D.gid}/${m.id}/${estadoMvp() === 'cerrada'}` : null;
+  if (clave === mvpDe) return;
+  cortar(subsMvp);
+  mvpDe = clave;
+  if (!m) return;
+  const gid = D.gid;
+  subsMvp.push(F.onSnapshot(F.doc(colVotosMvp(gid, m.id), miUid()), s => {
+    if (D.mvp?.id !== m.id) return;
+    D.mvp.miVoto = s.exists() ? s.data().voto : null;
+    render();
+  }, e => console.warn(e.code)));
+  if (estadoMvp() === 'cerrada') {
+    subsMvp.push(F.onSnapshot(colVotosMvp(gid, m.id), qs => {
+      if (D.mvp?.id !== m.id) return;
+      D.mvp.votos = Object.fromEntries(qs.docs.map(d => [d.id, d.data().voto]));
+      render();
+    }, e => console.warn(e.code)));
+  }
+}
+
+// Candidatos: los titulares del partido (con nombre guardado por si después se van del grupo).
+function datosVotacion(s, fecha) {
+  const candidatos = s.anotados.filter(id => jugador(id)).slice(0, Number(s.partido.cupo) || 10);
+  const abre = abreVotacion(fecha);
+  return {
+    fecha,
+    candidatos,
+    nombres: Object.fromEntries(candidatos.map(id => [id, jugador(id).usuario])),
+    abre,
+    cierra: abre + DIA,
+    creado: Date.now(),
+  };
+}
+
+function crearVotacion(fecha) {
+  const datos = datosVotacion(D.grupo, fecha);
+  if (!datos.candidatos.length) return Promise.resolve(false);
+  const ref = refMvp(D.gid, fecha);
+  return act(() => F.runTransaction(db, async tx => {
+    if (!(await tx.get(ref)).exists()) tx.set(ref, datos);
+  }));
+}
+
+// El día siguiente al partido, el primero que abre la app crea la votación.
+let mvpIntentado = null;
+function asegurarVotacion() {
+  const f = D.grupo?.partido.fecha;
+  if (!f || !D.miembros || D.mvp?.id === f || mvpIntentado === `${D.gid}/${f}`) return;
+  const abre = abreVotacion(f);
+  if (Date.now() < abre || Date.now() >= abre + DIA) return;
+  mvpIntentado = `${D.gid}/${f}`;
+  crearVotacion(f);
+}
+
+function resultadoMvp(m) {
+  const conteo = {};
+  Object.values(m.votos || {}).forEach(id => (conteo[id] = (conteo[id] || 0) + 1));
+  const total = Object.values(conteo).reduce((a, b) => a + b, 0);
+  const max = Math.max(0, ...Object.values(conteo));
+  const ganadores = total >= MIN_VOTOS_MVP ? Object.keys(conteo).filter(id => conteo[id] === max) : [];
+  return { conteo, total, max, ganadores };
+}
+
+const nombreCandidato = (m, id) => jugador(id)?.usuario || m.nombres?.[id] || '?';
+const fichaCandidato = (m, id) => jugador(id) || { id, usuario: m.nombres?.[id] || '?', posicion: 'comodin' };
 
 function suscribirNiveles() {
   if (!puedeEditarEquipos() || nivelesDe === D.gid) return;
@@ -389,7 +486,7 @@ function mensajeWsp() {
   const d = derivar();
   const p = D.grupo.partido;
   const L = [`⚽ *${p.titulo || 'Fulbo'}*`];
-  if (p.cuando) L.push(`📅 ${p.cuando}`);
+  if (p.fecha || p.cuando) L.push(`📅 ${[fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ')}`);
   if (p.lugar) L.push(`📍 ${p.lugar}`);
   L.push('', `✅ *TITULARES (${d.titulares.length}/${d.cupo})*`);
   for (let i = 0; i < d.cupo; i++) {
@@ -624,7 +721,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), header(d), tarjetaMvp(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
 }
 
 function topBar() {
@@ -650,7 +747,7 @@ function header(d) {
         <div class="min-w-0">
           <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
           <div class="mt-1 text-slate-400 text-sm space-x-3">
-            ${p.cuando ? `<span>📅 ${esc(p.cuando)}</span>` : ''}
+            ${p.fecha || p.cuando ? `<span>📅 ${esc([fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · '))}</span>` : ''}
             ${p.lugar ? `<span>📍 ${esc(p.lugar)}</span>` : ''}
           </div>
         </div>
@@ -798,6 +895,143 @@ function equipos(d) {
     ${botones}`);
 }
 
+function tarjetaMvp() {
+  const m = D.mvp, estado = estadoMvp();
+  if (!m) return '';
+  const quien = id => `${avatar(fichaCandidato(m, id), 28)}<b class="truncate">${esc(nombreCandidato(m, id))}</b>`;
+  const editar = esAdmin() && estado !== 'cerrada'
+    ? `<button data-action="mvp-editar" class="text-xs text-slate-400 underline">Editar candidatos</button>` : '';
+
+  if (estado === 'pendiente') {
+    if (!esAdmin()) return '';
+    return card(`
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-sm">🏆 La votación del jugador del partido abre el ${esc(fechaLinda(new Date(m.abre + DIA / 2).toISOString().slice(0, 10)))} a las 00:00.</p>
+        ${editar}
+      </div>`);
+  }
+
+  if (estado === 'abierta') {
+    const voto = m.miVoto;
+    return `
+      <div class="${CARD} border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-slate-900">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h2 class="text-lg font-black">🏆 Jugador del partido</h2>
+            <p class="text-xs text-slate-400">Del ${esc(fechaLinda(m.id))} · se vota hasta hoy a las 23:59</p>
+          </div>
+          ${editar}
+        </div>
+        ${voto
+          ? `<div class="mt-3 flex items-center gap-2 text-sm">✅ Votaste a ${quien(voto)}
+               <button data-action="mvp-votar" class="ml-auto text-xs text-slate-400 underline shrink-0">Cambiar</button></div>`
+          : `<p class="mt-3 text-sm text-amber-200">⚠️ Todavía no votaste.</p>
+             <button data-action="mvp-votar" class="${BTN} w-full mt-2 bg-amber-400 hover:bg-amber-300 text-slate-950">🏆 Votar al mejor del partido</button>`}
+      </div>`;
+  }
+
+  // Cerrada: el resultado se muestra 3 días.
+  if (Date.now() > m.cierra + 3 * DIA || !m.votos) return '';
+  const r = resultadoMvp(m);
+  const cuerpo = !r.ganadores.length
+    ? `<p class="mt-2 text-sm text-slate-400">Hubo ${r.total} ${r.total === 1 ? 'voto' : 'votos'}: hacen falta al menos ${MIN_VOTOS_MVP}, así que esta vez quedó desierto.</p>`
+    : `<div class="mt-3 flex flex-wrap justify-center gap-4">
+         ${r.ganadores.map(id => `
+           <div class="flex flex-col items-center gap-1">
+             ${avatar(fichaCandidato(m, id), 72)}
+             <b>${esc(nombreCandidato(m, id))}</b>
+           </div>`).join('')}
+       </div>
+       <p class="text-center text-xs text-slate-400 mt-2">${r.ganadores.length > 1 ? 'Empate con' : 'Con'} ${r.max} de ${r.total} votos</p>
+       <button data-action="mvp-copiar" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">📋 Copiar resultado para WhatsApp</button>`;
+  return `
+    <div class="${CARD} border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-slate-900">
+      <h2 class="text-lg font-black">🏆 Jugador del partido</h2>
+      <p class="text-xs text-slate-400">Del ${esc(fechaLinda(m.id))}</p>
+      ${cuerpo}
+    </div>`;
+}
+
+function modal(html) {
+  return `
+    <div class="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" data-action="cerrar-modal" data-fondo>
+      <div class="w-full sm:max-w-md max-h-[90vh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5" data-modal-cuerpo>
+        ${html}
+      </div>
+    </div>`;
+}
+
+function modalVotarMvp() {
+  const m = D.mvp;
+  return modal(`
+    <div class="text-center">
+      <div class="text-4xl">🏆</div>
+      <h2 class="text-xl font-black mt-1">¿Quién fue el mejor del partido?</h2>
+      <p class="text-sm text-slate-400">${esc(fechaLinda(m.id))} · votás hasta hoy a las 23:59</p>
+    </div>
+    <form data-form="mvp-votar" class="mt-4">
+      <div class="grid grid-cols-3 gap-2">
+        ${m.candidatos.map(id => {
+          const yo = id === miUid();
+          return `
+            <label class="${yo ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} min-w-0">
+              <input type="radio" id="mvp-${id}" name="voto" value="${id}" ${m.miVoto === id ? 'checked' : ''} ${yo ? 'disabled' : ''} class="peer sr-only">
+              <span class="flex flex-col items-center gap-1 rounded-2xl border border-slate-700 bg-slate-800 p-2 text-center transition peer-checked:border-amber-400 peer-checked:bg-amber-400/15">
+                ${avatar(fichaCandidato(m, id), 48)}
+                <span class="text-xs font-semibold truncate max-w-full">${esc(nombreCandidato(m, id))}</span>
+                ${yo ? '<span class="text-[10px] text-slate-400">(vos)</span>' : ''}
+              </span>
+            </label>`;
+        }).join('')}
+      </div>
+      <button class="${BTN} w-full mt-4 bg-amber-400 hover:bg-amber-300 text-slate-950">Votar</button>
+    </form>
+    <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Después</button>`);
+}
+
+function modalEditarMvp() {
+  const m = D.mvp;
+  const ids = [...new Set([...m.candidatos, ...Object.keys(D.miembros), ...Object.keys(D.grupo.invitados)])];
+  return modal(`
+    <h2 class="text-lg font-black">Candidatos al jugador del partido</h2>
+    <p class="text-sm text-slate-400 mb-3">Marcá a los que jugaron el ${esc(fechaLinda(m.id))}.</p>
+    <form data-form="mvp-candidatos" class="space-y-3">
+      <ul class="divide-y divide-slate-800 max-h-[45vh] overflow-y-auto">
+        ${ids.map(id => `
+          <li>
+            <label class="flex items-center gap-3 py-2 cursor-pointer">
+              <input type="checkbox" id="cand-${id}" name="cand" value="${id}" ${m.candidatos.includes(id) ? 'checked' : ''} class="w-5 h-5 accent-amber-400">
+              ${avatar(fichaCandidato(m, id), 28)}
+              <span class="flex-1 truncate">${esc(nombreCandidato(m, id))}${id.startsWith('inv_') ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>
+            </label>
+          </li>`).join('')}
+      </ul>
+      <input id="cand-nuevo" name="nuevo" maxlength="20" placeholder="Agregar a alguien sin cuenta (nombre)" class="${INPUT}">
+      <button class="${BTN_OK} w-full">Guardar candidatos</button>
+    </form>
+    <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
+}
+
+function renderModal() {
+  const m = D.mvp;
+  // Se abre solo una vez por votación si todavía no votaste.
+  const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
+  const enPrincipal = !/^#\/(jugador|grupos|usuarios)/.test(location.hash);
+  let visto = false;
+  try { visto = !!sessionStorage.getItem(clave); } catch {}
+  if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
+    ui.modal = 'mvp-votar';
+  }
+  if (ui.modal && (!m || estadoMvp() === 'cerrada')) ui.modal = null;
+  if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
+  return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp() : '';
+}
+
+const avisoCalificaciones = `
+  <p class="text-xs text-sky-200 bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2 mb-3">
+    ℹ️ Las calificaciones sirven <b>solo para armar equipos equilibrados</b>. No son un ranking ni se usan para nada más.
+  </p>`;
+
 function jugadoresGrid() {
   const uid = miUid();
   const ps = Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario));
@@ -807,6 +1041,7 @@ function jugadoresGrid() {
       <h2 class="text-lg font-bold">👥 Jugadores <span class="text-slate-500 font-normal text-sm">(${ps.length})</span></h2>
       ${pendientes ? `<span class="text-xs text-amber-300">Te faltan calificar ${pendientes}</span>` : ''}
     </div>
+    ${avisoCalificaciones}
     <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
       ${ps.map(p => {
         const r = resumen(p.id);
@@ -865,6 +1100,7 @@ function vistaFicha(id) {
       </form>
       <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) : card(`
       <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
+      ${avisoCalificaciones}
       <p class="text-xs text-slate-500 mb-4">Del 1 al 10. Solo cuenta un voto tuyo: si lo cambiás, reemplaza al anterior.</p>
       <form data-form="voto" data-id="${id}" class="space-y-3">
         ${STATS.map(s => {
@@ -913,7 +1149,8 @@ function panelAdmin(d) {
 
     <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-6">
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
-      <label class="text-sm text-slate-400">Cuándo<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="Jueves 20:00" maxlength="40" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Fecha del partido<input id="p-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Cupo titulares<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
       <div class="sm:col-span-2 flex gap-2">
@@ -1073,6 +1310,13 @@ function pintar(el, html) {
 }
 
 function render() {
+  renderVistas();
+  const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
+  pintar($('#modal'), listo ? renderModal() : '');
+  if (listo) asegurarVotacion();
+}
+
+function renderVistas() {
   const el = $('#app');
   if (D.user === undefined) return pintar(el, cargando());
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
@@ -1118,6 +1362,14 @@ async function guardarPerfil(f) {
 const acciones = {
   tab: ({ tab }) => { ui.tab = tab; ui.foto = null; render(); },
   'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
+  'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
+  'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
+  'cerrar-modal': () => { ui.modal = null; render(); },
+  'mvp-copiar': () => {
+    const m = D.mvp, r = resultadoMvp(m);
+    const nombres = r.ganadores.map(id => `*${nombreCandidato(m, id)}*`).join(' y ');
+    copiar(`🏆 *JUGADOR DEL PARTIDO* (${fechaLinda(m.id)})\n${r.ganadores.length > 1 ? '🤝 Empate: ' : '👑 '}${nombres} con ${r.max} de ${r.total} votos`);
+  },
   logout: () => A.signOut(auth),
   anotarme: () => actualizarGrupo(s => { if (!s.anotados.includes(miUid())) s.anotados.push(miUid()); }, '⚽ ¡Anotado!'),
   bajar: ({ id }) => {
@@ -1156,9 +1408,12 @@ const acciones = {
   'toggle-armador': ({ id }) => actualizarGrupo(s => {
     s.armadores = s.armadores.includes(id) ? s.armadores.filter(x => x !== id) : [...s.armadores, id];
   }, esArmador(id) ? 'Ya no puede editar equipos' : '🛠️ Ahora puede armar y editar equipos'),
-  'nueva-fecha': () => {
-    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen.')) return;
-    actualizarGrupo(s => { s.anotados = []; s.equipos = null; }, '🗓️ Lista nueva');
+  'nueva-fecha': async () => {
+    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen, y la votación del jugador del partido queda guardada con los que jugaron.')) return;
+    // Antes de vaciar, deja armada la votación con los titulares de este partido.
+    const f = D.grupo.partido.fecha;
+    if (f && Date.now() < abreVotacion(f) + DIA) await crearVotacion(f);
+    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.partido.fecha = ''; }, '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
@@ -1318,10 +1573,29 @@ const formularios = {
     }
     return ok;
   },
+  'mvp-votar': async f => {
+    const voto = f.get('voto');
+    if (!voto) return toast('Elegí a alguien');
+    const m = D.mvp;
+    const ok = await act(() => F.setDoc(F.doc(colVotosMvp(D.gid, m.id), miUid()), { voto, ts: Date.now() }), `🏆 Votaste a ${nombreCandidato(m, voto)}`);
+    if (ok) { ui.modal = null; render(); }
+    return ok;
+  },
+  'mvp-candidatos': async f => {
+    const m = D.mvp;
+    const candidatos = f.getAll('cand');
+    const nuevo = (f.get('nuevo') || '').trim();
+    if (nuevo) candidatos.push('inv_' + genId(10));
+    if (!candidatos.length) return toast('Tiene que haber al menos un candidato');
+    const nombres = Object.fromEntries(candidatos.map(id => [id, id === candidatos.at(-1) && nuevo ? nuevo : nombreCandidato(m, id)]));
+    const ok = await act(() => F.updateDoc(refMvp(D.gid, m.id), { candidatos, nombres }), '💾 Candidatos actualizados');
+    if (ok) { ui.modal = null; render(); }
+    return ok;
+  },
   partido: f => {
     const cupo = Math.max(2, Math.min(30, parseInt(f.get('cupo')) || 10));
     return actualizarGrupo(s => {
-      s.partido = { titulo: f.get('titulo').trim(), cuando: f.get('cuando').trim(), lugar: f.get('lugar').trim(), cupo };
+      s.partido = { titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: f.get('cuando').trim(), lugar: f.get('lugar').trim(), cupo };
     }, '💾 Partido guardado');
   },
   invitado: f => {
@@ -1336,7 +1610,9 @@ const formularios = {
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-action]');
-  if (b) acciones[b.dataset.action]?.(b.dataset);
+  if (!b) return;
+  if ('fondo' in b.dataset && e.target !== b) return;  // clic dentro del modal: no lo cierra
+  acciones[b.dataset.action]?.(b.dataset);
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]');
@@ -1371,6 +1647,8 @@ document.addEventListener('submit', async e => {
 
 leerInvitacion();
 render();
+// La votación abre y cierra por horario: revisar cada medio minuto.
+setInterval(() => { actualizarSubsMvp(); render(); }, 30000);
 </script>
 </body>
 </html>
