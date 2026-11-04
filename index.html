@@ -1063,7 +1063,7 @@ function filaJugador(p, etiqueta, clase) {
       <a href="#/jugador/${p.id}" class="flex-1 min-w-0 hover:text-emerald-300">${nombre}
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
       </a>
-      ${esAdmin() ? `<span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
+      ${esAdmin() ? `<span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-800 ${colorNota(puntaje(p.id))}" title="Puntaje para equilibrar">${puntaje(p.id).toFixed(1)}</span>` : ''}
       ${puedeBorrar ? `<button data-action="bajar" data-id="${p.id}" title="Sacar de la lista" aria-label="Sacar a ${esc(p.usuario)} de la lista" class="w-8 h-8 rounded-lg grid place-items-center text-slate-500 hover:text-red-300 hover:bg-red-500/10 transition shrink-0">${ICONO_SACAR}</button>` : ''}
     </li>`;
 }
