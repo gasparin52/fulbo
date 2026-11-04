@@ -885,9 +885,62 @@ function topBar() {
         <span class="block text-xs text-slate-500 group-hover:text-slate-300">Grupo ▾</span>
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
+      <a href="#/reglas" class="text-xs text-amber-300 hover:text-amber-200 underline">📖 Reglas</a>
       ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
     </div>`;
+}
+
+// ---------------- Reglas ----------------
+function vistaReglas() {
+  const seccion = (titulo, items) => card(`
+    <h2 class="text-lg font-bold mb-2">${titulo}</h2>
+    <ul class="space-y-2 text-sm text-slate-300 list-disc pl-5 marker:text-slate-600">
+      ${items.map(i => `<li>${i}</li>`).join('')}
+    </ul>`);
+  return `
+    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <div>
+      <h1 class="text-2xl font-black">📖 Reglas y cómo funciona</h1>
+      <p class="text-sm text-slate-400 mt-1">Todo lo que tenés que saber para usar la app.</p>
+    </div>
+    ${seccion('⚽ Anotarse', [
+      'Tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido.',
+      'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
+      'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
+      'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
+    ])}
+    ${seccion('🆚 Equipos', [
+      'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
+      'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). Se reparten en serpentina para que los dos queden parejos, y si hay 2 arqueros va uno a cada lado.',
+      'Los suplentes también quedan asignados a un equipo, por si les toca entrar.',
+      'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
+      'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
+    ])}
+    ${seccion('📊 Calificaciones', [
+      'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
+      'Las ponen los compañeros: <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
+      'En la app no se muestra quién votó qué: solo los promedios.',
+      '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
+    ])}
+    ${seccion('🏆 Jugador del partido', [
+      'El día siguiente al partido se vota al mejor, de 00:00 a 23:59. Al entrar te aparece un cartel para votar.',
+      'Votan todos los del grupo, uno por persona (lo podés cambiar mientras esté abierta), y nadie se puede votar a sí mismo.',
+      `Los votos se ven recién al cierre. Con menos de ${MIN_VOTOS_MVP} votos queda desierto.`,
+      'El que gana (o los que empatan primero) suma una <b>⭐</b> que queda en su ficha.',
+    ])}
+    ${seccion('🟥 Faltó sin avisar', [
+      'Si alguien estaba anotado, <b>no fue y no avisó</b>, los que jugaron lo pueden reportar durante 3 días desde el día siguiente al partido.',
+      '<b>Solo cuenta si un admin lo aprueba.</b> El reportado no ve quién lo reportó. No es para joder ni vengarse de nadie: los reportes truchos se rechazan.',
+      'El que tiene una falta aprobada lleva una <b>🟥</b> en su ficha y en la lista. La tarjeta <b>se va cuando se anotó en 2 fechas</b> más.',
+      '<b>Castigo:</b> en la primera fecha en que se anota después de la falta, si se llena la lista, los que se anotan después le pasan adelante y queda de suplente. Si no se llena, juega igual.',
+    ])}
+    ${seccion('👤 Tu cuenta y el grupo', [
+      'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición y foto.',
+      'La sesión dura 30 días; después te pide entrar de nuevo.',
+      '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
+      'El grupo es privado: solo entra quien tiene el link de invitación. No lo compartas fuera del grupo.',
+    ])}`;
 }
 
 function header(d) {
@@ -1260,7 +1313,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|usuarios)/.test(location.hash);
+  const enPrincipal = !/^#\/(jugador|grupos|usuarios|reglas)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -1591,6 +1644,7 @@ function renderVistas() {
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
   if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
+  if (location.hash === '#/reglas') return pintar(el, vistaReglas());
   if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
