@@ -534,14 +534,28 @@ function mensajeWsp() {
     L.push('', '🔁 *SUPLENTES*');
     d.suplentes.forEach((j, i) => L.push(`S${i + 1}. ${j.usuario} ${pos(j).emoji}`));
   }
-  if (D.grupo.equipos && !equiposDesactualizados(d)) {
-    L.push('', '🆚 *EQUIPOS*');
-    [['🔴', 'Equipo A', D.grupo.equipos.A], ['🔵', 'Equipo B', D.grupo.equipos.B]].forEach(([e, nom, ids]) => {
-      L.push('', `${e} *${nom}*`);
-      ids.map(jugador).filter(Boolean).forEach(j => L.push(`• ${j.usuario} ${pos(j).emoji}`));
-    });
-  }
+  if (D.grupo.equipos && !equiposDesactualizados(d)) L.push('', ...lineasEquipos());
   L.push('', `👉 Anotate acá: ${urlBase()}`);
+  return L.join('\n');
+}
+
+function lineasEquipos() {
+  const L = ['🆚 *EQUIPOS*'];
+  [['🔴', 'Equipo A', D.grupo.equipos.A], ['🔵', 'Equipo B', D.grupo.equipos.B]].forEach(([e, nom, ids]) => {
+    const js = ids.map(jugador).filter(Boolean);
+    L.push('', `${e} *${nom}* (${js.length})`);
+    js.forEach(j => L.push(`• ${j.usuario} ${pos(j).emoji}`));
+  });
+  return L;
+}
+
+// Solo los equipos, para mandar cuando ya se armaron.
+function mensajeEquipos() {
+  const p = D.grupo.partido;
+  const L = [`⚽ *${p.titulo || 'Fulbo'}*`];
+  if (p.fecha || p.cuando) L.push(`📅 ${[fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ')}`);
+  if (p.lugar) L.push(`📍 ${p.lugar}`);
+  L.push('', ...lineasEquipos());
   return L.join('\n');
 }
 
@@ -931,6 +945,7 @@ function equipos(d) {
       ${columna('B', 'border-sky-500/30 bg-sky-500/5')}
     </div>
     ${editor && vigentes ? '<p class="text-xs text-slate-500 mt-2">Tocá → o ← para pasar a alguien al otro equipo.</p>' : ''}
+    ${vigentes ? `<button data-action="copiar-equipos" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">📋 Copiar equipos para WhatsApp</button>` : ''}
     ${pedido}
     ${botones}`);
 }
@@ -1423,6 +1438,7 @@ const acciones = {
     actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista');
   },
   copiar: () => copiar(mensajeWsp()),
+  'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
   'copiar-invitacion': () => copiar(`⚽ Sumate al grupo *${D.grupo.nombre}* para anotarte al fulbo:\n${linkInvitacion()}`, '📋 Link copiado'),
   'nuevo-codigo': () => {
     if (!confirm('¿Generar un link nuevo? El actual deja de funcionar (los que ya están en el grupo siguen adentro).')) return;
