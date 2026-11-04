@@ -97,11 +97,34 @@ const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'v
 const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
 const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
 
-// Jugador del partido: se vota el día siguiente al partido, de 00:00 a 23:59 (hora argentina, UTC-3).
+// Jugador del partido: se vota desde una hora después de que empieza el partido (si no
+// tiene hora, desde las 00:00 del día siguiente) hasta las 23:59 del día siguiente.
+// Todo en hora argentina (UTC-3). Las reglas de Firestore hacen la misma cuenta.
 const TZ = 'America/Argentina/Buenos_Aires';
 const DIA = 864e5;
 const MIN_VOTOS_MVP = 3;
-const abreVotacion = fecha => Date.parse(`${fecha}T00:00:00-03:00`) + DIA;
+const inicioDia = fecha => Date.parse(`${fecha}T00:00:00-03:00`);
+const horaValida = c => /^([01]\d|2[0-3]):[0-5]\d$/.test(c || '');
+const abreVotacion = (fecha, hora) => horaValida(hora) ? Date.parse(`${fecha}T${hora}:00-03:00`) + 3600e3 : inicioDia(fecha) + DIA;
+const cierraVotacion = fecha => inicioDia(fecha) + 2 * DIA;
+// "20", "20hs", "8:30", "20.30 hs" → "20:00", "08:30", "20:30". Si no se entiende, queda como está.
+function normalizarHora(t) {
+  const m = t.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?\s*(?:h|hs|hrs?)?\.?$/i);
+  if (!m || +m[1] > 23 || +(m[2] || 0) > 59) return t;
+  return `${m[1].padStart(2, '0')}:${m[2] || '00'}`;
+}
+// Fecha y hora argentinas de un momento: "martes 3/11 a las 21:00".
+const momentoLindo = ms => {
+  const iso = new Date(ms - 3 * 3600e3).toISOString();
+  return `${fechaLinda(iso.slice(0, 10))} a las ${iso.slice(11, 16)}`;
+};
+// Hasta cuándo se vota: "hoy a las 23:59", "mañana a las 23:59" o la fecha.
+const hastaCuando = m => {
+  const hoy = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  const ultimo = new Date(m.cierra - 1 - 3 * 3600e3).toISOString().slice(0, 10);
+  const manana = new Date(Date.parse(hoy + 'T12:00:00Z') + DIA).toISOString().slice(0, 10);
+  return `${ultimo === hoy ? 'hoy' : ultimo === manana ? 'mañana' : 'el ' + fechaLinda(ultimo)} a las 23:59`;
+};
 const fechaLinda = f => {
   if (!f) return '';
   const d = new Date(`${f}T12:00:00-03:00`);
@@ -345,7 +368,12 @@ function suscribirReportes() {
 // los que llegan después le pasan por delante y él queda de suplente.
 const fechasDespues = (f, id) => D.mvps.filter(m => m.id > f.fecha && (m.anotados || m.candidatos || []).includes(id)).length;
 const rojasDe = id => D.faltas.filter(f => f.target === id && fechasDespues(f, id) < 2);
-const castigado = id => rojasDe(id).some(f => fechasDespues(f, id) === 0 && D.grupo?.partido.fecha !== f.fecha);
+// La fecha en curso no cuenta para levantar el castigo: dura hasta que se pasa a la próxima.
+const castigado = id => {
+  const actual = D.grupo?.partido.fecha;
+  return rojasDe(id).some(f => actual !== f.fecha
+    && !D.mvps.some(m => m.id > f.fecha && m.id !== actual && (m.anotados || m.candidatos || []).includes(id)));
+};
 const hoyAR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 
 // ⭐ Estrellas: cuántas veces fue jugador del partido cada uno (empates incluidos).
@@ -412,14 +440,13 @@ function actualizarSubsMvp() {
 // Candidatos: los titulares del partido (con nombre guardado por si después se van del grupo).
 function datosVotacion(s, fecha) {
   const candidatos = dividir(s).titulares.map(p => p.id);
-  const abre = abreVotacion(fecha);
   return {
     fecha,
     candidatos,
     anotados: s.anotados,
     nombres: Object.fromEntries(candidatos.map(id => [id, jugador(id).usuario])),
-    abre,
-    cierra: abre + DIA,
+    abre: abreVotacion(fecha, s.partido.cuando),
+    cierra: cierraVotacion(fecha),
     creado: Date.now(),
   };
 }
@@ -433,13 +460,13 @@ function crearVotacion(fecha) {
   }));
 }
 
-// El día siguiente al partido, el primero que abre la app crea la votación.
+// Una hora después de que empieza el partido, el primero que abre la app crea la votación.
 let mvpIntentado = null;
 function asegurarVotacion() {
   const f = D.grupo?.partido.fecha;
-  if (!f || !D.miembros || D.mvp?.id === f || mvpIntentado === `${D.gid}/${f}`) return;
-  const abre = abreVotacion(f);
-  if (Date.now() < abre || Date.now() >= abre + DIA) return;
+  // Espera a tener las votaciones y las 🟥, que deciden quiénes fueron titulares.
+  if (!f || !D.miembros || !D.cargado.mvps || !D.cargado.faltas || D.mvp?.id === f || mvpIntentado === `${D.gid}/${f}`) return;
+  if (Date.now() < abreVotacion(f, D.grupo.partido.cuando) || Date.now() >= cierraVotacion(f)) return;
   mvpIntentado = `${D.gid}/${f}`;
   crearVotacion(f);
 }
@@ -925,7 +952,7 @@ function vistaReglas() {
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
     ])}
     ${seccion('🏆 Jugador del partido', [
-      'El día siguiente al partido se vota al mejor, de 00:00 a 23:59. Al entrar te aparece un cartel para votar.',
+      'La votación al mejor se habilita <b>una hora después de que empieza el partido</b> y dura <b>hasta el final del día siguiente</b> (23:59). Al entrar te aparece un cartel para votar.',
       'Votan todos los del grupo, uno por persona (lo podés cambiar mientras esté abierta), y nadie se puede votar a sí mismo.',
       `Los votos se ven recién al cierre. Con menos de ${MIN_VOTOS_MVP} votos queda desierto.`,
       'El que gana (o los que empatan primero) suma una <b>⭐</b> que queda en su ficha.',
@@ -1130,7 +1157,7 @@ function tarjetaMvp() {
     if (!esAdmin()) return '';
     return card(`
       <div class="flex items-center justify-between gap-2">
-        <p class="text-sm">🏆 La votación del jugador del partido abre el ${esc(fechaLinda(new Date(m.abre + DIA / 2).toISOString().slice(0, 10)))} a las 00:00.</p>
+        <p class="text-sm">🏆 La votación del jugador del partido abre el ${esc(momentoLindo(m.abre))}.</p>
         ${editar}
       </div>`);
   }
@@ -1142,7 +1169,7 @@ function tarjetaMvp() {
         <div class="flex items-start justify-between gap-2">
           <div>
             <h2 class="text-lg font-black">🏆 Jugador del partido</h2>
-            <p class="text-xs text-slate-400">Del ${esc(fechaLinda(m.id))} · se vota hasta hoy a las 23:59</p>
+            <p class="text-xs text-slate-400">Del ${esc(fechaLinda(m.id))} · se vota hasta ${hastaCuando(m)}</p>
           </div>
           ${editar}
         </div>
@@ -1300,7 +1327,7 @@ function modalVotarMvp() {
     <div class="text-center">
       <div class="text-4xl">🏆</div>
       <h2 class="text-xl font-black mt-1">¿Quién fue el mejor del partido?</h2>
-      <p class="text-sm text-slate-400">${esc(fechaLinda(m.id))} · votás hasta hoy a las 23:59</p>
+      <p class="text-sm text-slate-400">${esc(fechaLinda(m.id))} · votás hasta ${hastaCuando(m)}</p>
     </div>
     <form data-form="mvp-votar" class="mt-4">
       <div class="grid grid-cols-3 gap-2">
@@ -1521,6 +1548,7 @@ function panelAdmin(d) {
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Fecha del partido<input id="p-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
+      ${p.fecha && !horaValida(p.cuando) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Cupo titulares<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
       <div class="sm:col-span-2 flex gap-2">
@@ -1827,7 +1855,7 @@ const acciones = {
     if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen, y la votación del jugador del partido queda guardada con los que jugaron.')) return;
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
-    if (f && Date.now() < abreVotacion(f) + DIA) await crearVotacion(f);
+    if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
     actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.partido.fecha = ''; }, '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
@@ -2024,7 +2052,7 @@ const formularios = {
   partido: f => {
     const cupo = Math.max(2, Math.min(30, parseInt(f.get('cupo')) || 10));
     return actualizarGrupo(s => {
-      s.partido = { titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: f.get('cuando').trim(), lugar: f.get('lugar').trim(), cupo };
+      s.partido = { titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo };
     }, '💾 Partido guardado');
   },
   invitado: f => {
