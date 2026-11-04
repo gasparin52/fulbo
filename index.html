@@ -921,6 +921,7 @@ function vistaReglas() {
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
       'Las ponen los compañeros (también a los invitados sin cuenta que anota el admin): <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
       'En la app no se muestra quién votó qué: solo los promedios.',
+      'Al que califica a todos muy bajo le aparece la etiqueta <b>😈 hater</b>: si con 3 o más compañeros calificados pone en promedio 3 o menos, o pone 2,5 puntos o más por debajo de lo que les ponen los demás. Se va sola si ajusta sus votos.',
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
     ])}
     ${seccion('🏆 Jugador del partido', [
@@ -988,7 +989,7 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaRoja(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaRoja(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -1249,6 +1250,37 @@ function marcaRoja(id) {
   return ` <span class="text-xs" title="Faltó sin avisar${n > 1 ? ` ${n} veces` : ''}${castigado(id) ? '. Esta fecha, si se llena la lista, queda de suplente' : ''}">🟥${n > 1 ? n : ''}</span>`;
 }
 
+// 😈 Hater: con al menos 3 compañeros calificados, en promedio pone 3 o menos, o
+// califica 2,5 puntos o más por debajo de lo que les ponen los demás a los mismos.
+// Se miran solo las 6 habilidades de campo (Arquero baja a casi todos y no cuenta).
+const HATER = { minVotos: 3, maxPromedio: 3, maxDiferencia: -2.5 };
+let haterCache = { votos: null, ids: new Set() };
+function esHater(id) {
+  if (haterCache.votos !== D.votos) {
+    const prom = s => CAMPO.reduce((t, k) => t + (s[k] || 0), 0) / CAMPO.length;
+    const por = {};
+    for (const vs of Object.values(D.votos)) {
+      const voters = Object.keys(vs).filter(v => D.miembros?.[v]);
+      for (const v of voters) {
+        const otros = voters.filter(o => o !== v);
+        (por[v] ||= []).push({ mio: prom(vs[v]), otros: otros.length ? otros.reduce((t, o) => t + prom(vs[o]), 0) / otros.length : null });
+      }
+    }
+    const ids = new Set();
+    for (const [v, xs] of Object.entries(por)) {
+      if (xs.length < HATER.minVotos) continue;
+      const media = xs.reduce((t, x) => t + x.mio, 0) / xs.length;
+      const comp = xs.filter(x => x.otros !== null);
+      const dif = comp.length >= HATER.minVotos ? comp.reduce((t, x) => t + x.mio - x.otros, 0) / comp.length : 0;
+      if (media <= HATER.maxPromedio || dif <= HATER.maxDiferencia) ids.add(v);
+    }
+    haterCache = { votos: D.votos, ids };
+  }
+  return haterCache.ids.has(id);
+}
+const marcaHater = id => esHater(id)
+  ? ' <span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 whitespace-nowrap" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : '';
+
 function modal(html) {
   return `
     <div class="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" data-action="cerrar-modal" data-fondo>
@@ -1352,6 +1384,7 @@ function jugadoresGrid() {
             ${falta ? '<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400" title="Calificalo"></span>' : ''}
             ${avatar(p, 56)}
             <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
+            ${esHater(p.id) ? '<span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 -mt-0.5" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : ''}
             ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
             <span class="text-xs text-slate-400">${pos(p).emoji} ${p.invitado ? 'invitado' : p.edad ? p.edad + ' años' : ''}${marcaRoja(p.id)}</span>
             <span class="text-lg font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</span>
@@ -1385,6 +1418,9 @@ function vistaFicha(id) {
               ${'🟥'.repeat(Math.min(rojas.length, 3))} Faltó sin avisar${rojas.length > 1 ? ` · ${rojas.length} veces` : ''}
             </p>
             ${castigado(id) ? '<p class="text-xs text-red-300/80 mt-1">Esta fecha, si se llena la lista, queda de suplente.</p>' : ''}` : ''}
+          ${esHater(id) ? `
+            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-fuchsia-500/15 border border-fuchsia-500/30 px-2.5 py-0.5 text-xs font-bold text-fuchsia-200">😈 Hater</p>
+            <p class="text-xs text-fuchsia-300/80 mt-1">${esYo ? 'Calificás' : 'Califica'} a todos muy por debajo que el resto.${esYo ? ' Si ajustás tus votos, la etiqueta se va sola.' : ''}</p>` : ''}
           <p class="text-xs text-slate-500 mt-1">${r.n ? `Según ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Todavía nadie lo calificó'}</p>
         </div>
         <div class="text-center shrink-0">
