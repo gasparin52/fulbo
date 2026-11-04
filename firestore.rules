@@ -103,9 +103,11 @@ service cloud.firestore {
         }
         allow read: if esMiembro(g);
         // La crea cualquier miembro (con los anotados del partido) o un admin.
+        // "anotados" guarda quiénes se anotaron esa fecha (para que venzan las 🟥).
         allow create: if esMiembro(g)
           && fecha.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
-          && request.resource.data.keys().hasOnly(['fecha', 'candidatos', 'nombres', 'abre', 'cierra', 'creado'])
+          && request.resource.data.keys().hasOnly(['fecha', 'candidatos', 'nombres', 'abre', 'cierra', 'creado', 'anotados'])
+          && request.resource.data.get('anotados', []) is list && request.resource.data.get('anotados', []).size() <= 60
           && request.resource.data.fecha == fecha
           && request.resource.data.abre == abreDe(fecha)
           && request.resource.data.cierra == request.resource.data.abre + 86400000
@@ -114,10 +116,11 @@ service cloud.firestore {
           && (esAdmin(g) || (
             grupo(g).partido.get('fecha', '') == fecha
             && grupo(g).anotados.hasAll(request.resource.data.candidatos)
+            && request.resource.data.get('anotados', grupo(g).anotados) == grupo(g).anotados
           ));
         // Solo un admin cambia los candidatos (alguien que se sumó de imprevisto).
         allow update: if esAdmin(g)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['candidatos', 'nombres'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['candidatos', 'nombres', 'anotados'])
           && request.resource.data.candidatos.size() > 0 && request.resource.data.candidatos.size() <= 30;
         allow delete: if esAdmin(g);
 
@@ -134,6 +137,36 @@ service cloud.firestore {
             && request.time.toMillis() < mvp().cierra;
           allow delete: if esAdmin(g);
         }
+      }
+
+      // 🟥 Faltó sin avisar: lo reporta alguien que jugó esa fecha, a otro que estaba en
+      // la lista, desde el día siguiente y durante una semana. El id es "fecha_aQuien_quienReporta".
+      // Quién reportó lo ven solo los admins (y cada uno sus propios reportes).
+      match /reportes/{r} {
+        function mvpDe(f) { return get(/databases/$(database)/documents/grupos/$(g)/mvp/$(f)).data; }
+        allow read: if esAdmin(g) || (logueado() && resource.data.por == uid());
+        allow create: if esMiembro(g)
+          && request.resource.data.keys().hasOnly(['fecha', 'target', 'por', 'ts'])
+          && request.resource.data.por == uid()
+          && request.resource.data.target is string
+          && request.resource.data.target != uid()
+          && request.resource.data.fecha is string
+          && request.resource.data.fecha.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+          && r == request.resource.data.fecha + '_' + request.resource.data.target + '_' + uid()
+          && uid() in mvpDe(request.resource.data.fecha).candidatos
+          && request.resource.data.target in mvpDe(request.resource.data.fecha).candidatos
+          && request.time.toMillis() >= mvpDe(request.resource.data.fecha).abre
+          && request.time.toMillis() < mvpDe(request.resource.data.fecha).abre + 7 * 86400000;
+        allow delete: if esAdmin(g) || (logueado() && resource.data.por == uid());
+      }
+
+      // Faltas aprobadas: las ve todo el grupo, las pone o las saca solo un admin.
+      match /faltas/{f} {
+        allow read: if esMiembro(g);
+        allow create, update: if esAdmin(g)
+          && request.resource.data.keys().hasOnly(['fecha', 'target', 'nombre', 'por', 'ts'])
+          && f == request.resource.data.fecha + '_' + request.resource.data.target;
+        allow delete: if esAdmin(g);
       }
 
       // Niveles que pone el admin: los ven admins y armadores (para equilibrar), los cambian solo los admins.

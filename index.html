@@ -94,6 +94,8 @@ const refNiveles = g => F.doc(db, 'grupos', g, 'privado', 'niveles');
 const colMvp = g => F.collection(db, 'grupos', g, 'mvp');
 const refMvp = (g, fecha) => F.doc(db, 'grupos', g, 'mvp', fecha);
 const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'votos');
+const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
+const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
 
 // Jugador del partido: se vota el día siguiente al partido, de 00:00 a 23:59 (hora argentina, UTC-3).
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -128,7 +130,9 @@ const D = {
   miembros: null,      // uid -> ficha dentro del grupo
   votos: {},           // target -> { voter -> stats }
   niveles: {},         // solo admins: id -> 1..10
-  cargado: {},         // { votos, niveles }: ya llegó la primera lectura
+  cargado: {},         // { votos, niveles, mvps, faltas }: ya llegó la primera lectura
+  faltas: [],          // 🟥 aprobadas: { id, fecha, target, nombre }
+  reportes: [],        // admins: todos los pendientes; los demás, solo los suyos
   registrando: false,
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
@@ -176,7 +180,7 @@ function moverDeEquipo(s, id, a) {
 // Van alternados empezando por el más flojo; los que se anotan después, al que tiene menos.
 function repartirSuplentes(s) {
   const eq = s.equipos;
-  const sups = s.anotados.map(jugador).filter(Boolean).slice(Number(s.partido.cupo) || 10).map(p => p.id);
+  const sups = dividir(s).suplentes.map(p => p.id);
   eq.SA = (eq.SA || []).filter(id => sups.includes(id));
   eq.SB = (eq.SB || []).filter(id => sups.includes(id));
   const fuerza = e => eq[e].reduce((t, id) => t + puntaje(id), 0);
@@ -258,7 +262,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {} });
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -279,13 +283,14 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {} });
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
     if (!s.exists()) return olvidarGrupo(gid, 'Ese grupo ya no existe');
     D.grupo = normGrupo(s.data());
     suscribirNiveles();
+    suscribirReportes();
     render();
   }, e => {
     if (e.code === 'permission-denied') olvidarGrupo(gid, 'Ya no sos parte de ese grupo');
@@ -304,6 +309,7 @@ function elegirGrupo() {
   }, e => console.warn(e.code)));
   subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc')), qs => {
     D.mvps = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    D.cargado.mvps = true;
     const d = D.mvps[0];
     const misma = d && D.mvp?.id === d.id;
     D.mvp = d ? { ...d, miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
@@ -311,7 +317,36 @@ function elegirGrupo() {
     cargarHistorialMvp();
     render();
   }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(colFaltas(gid), qs => {
+    D.faltas = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    D.cargado.faltas = true;
+    render();
+  }, e => { console.warn(e.code); D.cargado.faltas = true; }));
 }
+
+// Reportes de faltazos: los admins ven todos; los demás, solo los que mandaron.
+let reportesDe = null, cortarReportes = null;
+function suscribirReportes() {
+  const clave = `${D.gid}/${esAdmin()}`;
+  if (clave === reportesDe) return;
+  cortarReportes?.();
+  reportesDe = clave;
+  const q = esAdmin() ? colReportes(D.gid) : F.query(colReportes(D.gid), F.where('por', '==', miUid()));
+  cortarReportes = F.onSnapshot(q, qs => {
+    D.reportes = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  }, e => console.warn(e.code));
+  subsGrupo.push(() => { cortarReportes?.(); cortarReportes = reportesDe = null; });
+}
+
+// ---------------- 🟥 Faltó sin avisar ----------------
+// Una falta vence cuando el jugador se anotó en 2 fechas posteriores. En la primera
+// fecha en que se anota después de la falta queda castigado: si se llena la lista,
+// los que llegan después le pasan por delante y él queda de suplente.
+const fechasDespues = (f, id) => D.mvps.filter(m => m.id > f.fecha && (m.anotados || m.candidatos || []).includes(id)).length;
+const rojasDe = id => D.faltas.filter(f => f.target === id && fechasDespues(f, id) < 2);
+const castigado = id => rojasDe(id).some(f => fechasDespues(f, id) === 0 && D.grupo?.partido.fecha !== f.fecha);
+const hoyAR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 
 // ⭐ Estrellas: cuántas veces fue jugador del partido cada uno (empates incluidos).
 // Una votación cerrada ya no cambia, así que su resultado se guarda en el celular.
@@ -376,11 +411,12 @@ function actualizarSubsMvp() {
 
 // Candidatos: los titulares del partido (con nombre guardado por si después se van del grupo).
 function datosVotacion(s, fecha) {
-  const candidatos = s.anotados.filter(id => jugador(id)).slice(0, Number(s.partido.cupo) || 10);
+  const candidatos = dividir(s).titulares.map(p => p.id);
   const abre = abreVotacion(fecha);
   return {
     fecha,
     candidatos,
+    anotados: s.anotados,
     nombres: Object.fromEntries(candidatos.map(id => [id, jugador(id).usuario])),
     abre,
     cierra: abre + DIA,
@@ -510,11 +546,15 @@ function puntaje(id) {
   return r.n ? r.general : Number(D.niveles[id]) || NIVEL_DEFAULT;
 }
 
-function derivar() {
-  const lista = D.grupo.anotados.map(jugador).filter(Boolean);
-  const cupo = Number(D.grupo.partido.cupo) || 10;
-  return { cupo, titulares: lista.slice(0, cupo), suplentes: lista.slice(cupo) };
+// Titulares y suplentes de un estado de grupo. Los castigados (🟥) entran de titular
+// solo si sobra lugar; entre los suplentes se respeta el orden de llegada.
+function dividir(s) {
+  const lista = s.anotados.map(jugador).filter(Boolean);
+  const cupo = Number(s.partido.cupo) || 10;
+  const entran = new Set([...lista.filter(p => !castigado(p.id)), ...lista.filter(p => castigado(p.id))].slice(0, cupo));
+  return { cupo, titulares: lista.filter(p => entran.has(p)), suplentes: lista.filter(p => !entran.has(p)) };
 }
+const derivar = () => dividir(D.grupo);
 const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
 const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== baseKey(d.titulares);
 
@@ -522,7 +562,8 @@ const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== 
 // los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
 let autoArmado = null, supsRepartidos = null;
 function asegurarEquipos() {
-  if (!puedeEditarEquipos() || !D.miembros || !D.cargado.votos || !D.cargado.niveles) return;
+  const c = D.cargado;
+  if (!puedeEditarEquipos() || !D.miembros || !c.votos || !c.niveles || !c.mvps || !c.faltas) return;
   const d = derivar(), eq = D.grupo.equipos;
   // Suplentes que se anotaron después de armar: se suman solos a un equipo.
   if (eq && !equiposDesactualizados(d) && d.suplentes.some(p => ![...(eq.SA || []), ...(eq.SB || [])].includes(p.id))) {
@@ -538,9 +579,9 @@ function asegurarEquipos() {
   autoArmado = clave;
   if (D.grupo.equipos && !equiposDesactualizados(d)) return;
   actualizarGrupo(s => {
-    const titulares = s.anotados.map(jugador).filter(Boolean).slice(0, Number(s.partido.cupo) || 10);
+    const { titulares, cupo } = dividir(s);
     const base = baseKey(titulares);
-    if (titulares.length < (Number(s.partido.cupo) || 10) || s.equipos?.base === base) return;
+    if (titulares.length < cupo || s.equipos?.base === base) return;
     s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base };
     repartirSuplentes(s);
     s.solicitudes = {};
@@ -832,7 +873,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), tarjetaMvp(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), header(d), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
 }
 
 function topBar() {
@@ -884,6 +925,7 @@ function miEstado(d) {
   const lleno = d.titulares.length >= d.cupo;
   return card(`
     <p class="text-sm">${estado}</p>
+    ${castigado(uid) ? `<p class="mt-2 text-xs text-red-200 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">🟥 Tenés una tarjeta roja por faltar sin avisar: esta fecha, si se llena la lista, los que se anoten después te pasan adelante y quedás de suplente.</p>` : ''}
     ${anotado
       ? `<button data-action="bajar" data-id="${uid}" class="${BTN} w-full mt-3 bg-slate-800 hover:bg-red-950 text-red-300 border border-red-900/50">Me bajo 😢</button>`
       : `<button data-action="anotarme" class="${BTN_OK} w-full mt-3 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>`}
@@ -893,7 +935,7 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaRoja(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -1079,6 +1121,81 @@ function tarjetaMvp() {
     </div>`;
 }
 
+// 🟥 Admins: reportes pendientes. Los que jugaron: botón para reportar (3 días después del partido).
+function tarjetaFaltas() {
+  let html = '';
+  if (esAdmin() && D.reportes.length) {
+    const pend = {};
+    D.reportes.forEach(r => (pend[`${r.fecha}_${r.target}`] ||= { fecha: r.fecha, target: r.target, por: [] }).por.push(r.por));
+    html += card(`
+      <h2 class="text-lg font-bold">🟥 Faltazos reportados <span class="text-sm font-normal text-slate-500">(${Object.keys(pend).length})</span></h2>
+      <p class="text-xs text-slate-400 mb-3">Solo cuentan si los aprobás. El reportado no ve quién lo reportó.</p>
+      <ul class="space-y-3">
+        ${Object.entries(pend).map(([k, r]) => {
+          const m = D.mvps.find(x => x.id === r.fecha);
+          const p = m ? fichaCandidato(m, r.target) : jugador(r.target) || { id: r.target, usuario: '?', posicion: 'comodin' };
+          return `
+            <li class="flex items-center gap-2 text-sm">
+              ${avatar(p, 32)}
+              <div class="flex-1 min-w-0">
+                <b class="block truncate">${esc(p.usuario)}</b>
+                <span class="text-xs text-slate-400">${esc(fechaLinda(r.fecha))} · lo reportó ${r.por.map(id => esc(jugador(id)?.usuario || '?')).join(', ')}</span>
+              </div>
+              <button data-action="aprobar-falta" data-k="${esc(k)}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-red-600 text-white shrink-0">Aprobar</button>
+              <button data-action="rechazar-falta" data-k="${esc(k)}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800 text-slate-300 shrink-0">Rechazar</button>
+            </li>`;
+        }).join('')}
+      </ul>`);
+  }
+  const m = D.mvp, ahora = Date.now();
+  if (m && m.candidatos.includes(miUid()) && ahora >= m.abre && ahora < m.abre + 3 * DIA) {
+    const mios = D.reportes.filter(r => r.fecha === m.id && r.por === miUid()).length;
+    html += card(`
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold">🟥 ¿Alguien faltó sin avisar el ${esc(fechaLinda(m.id))}?</p>
+          <p class="text-xs text-slate-400">${mios ? `Reportaste a ${mios}. ` : ''}Un admin lo revisa antes de que cuente.</p>
+        </div>
+        <button data-action="faltas-reportar" class="${BTN_SEC} text-sm shrink-0">${mios ? 'Ver' : 'Reportar'}</button>
+      </div>`);
+  }
+  return html;
+}
+
+function modalFaltas() {
+  const m = D.mvp;
+  const mios = new Set(D.reportes.filter(r => r.fecha === m.id && r.por === miUid()).map(r => r.target));
+  return modal(`
+    <h2 class="text-lg font-black">🟥 ¿Quién faltó sin avisar?</h2>
+    <p class="text-sm text-slate-400">Partido del ${esc(fechaLinda(m.id))}. Marcá solo a los que no fueron y no avisaron.</p>
+    <p class="text-xs text-amber-200 mt-1 mb-3">Un admin lo revisa antes de que cuente. No es para joder a nadie 😉</p>
+    <form data-form="faltas" class="space-y-3">
+      <ul class="divide-y divide-slate-800 max-h-[45vh] overflow-y-auto">
+        ${m.candidatos.filter(id => id !== miUid()).map(id => {
+          const ya = D.faltas.some(f => f.fecha === m.id && f.target === id);
+          return `
+            <li>
+              <label class="flex items-center gap-3 py-2 ${ya ? 'opacity-50' : 'cursor-pointer'}">
+                <input type="checkbox" id="falta-${id}" name="falta" value="${id}" ${mios.has(id) || ya ? 'checked' : ''} ${ya ? 'disabled' : ''} class="w-5 h-5 accent-red-500">
+                ${avatar(fichaCandidato(m, id), 28)}
+                <span class="flex-1 truncate">${esc(nombreCandidato(m, id))}</span>
+                ${ya ? '<span class="text-xs text-red-300">🟥 aprobada</span>' : ''}
+              </label>
+            </li>`;
+        }).join('')}
+      </ul>
+      <button class="${BTN} w-full bg-red-600 hover:bg-red-500 text-white">Guardar</button>
+    </form>
+    <button data-action="cerrar-modal" class="w-full mt-2 py-2 text-sm text-slate-400">Cancelar</button>`);
+}
+
+// Al lado del nombre: 🟥 (o 🟥2) mientras tenga faltas vigentes.
+function marcaRoja(id) {
+  const n = rojasDe(id).length;
+  if (!n) return '';
+  return ` <span class="text-xs" title="Faltó sin avisar${n > 1 ? ` ${n} veces` : ''}${castigado(id) ? '. Esta fecha, si se llena la lista, queda de suplente' : ''}">🟥${n > 1 ? n : ''}</span>`;
+}
+
 function modal(html) {
   return `
     <div class="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" data-action="cerrar-modal" data-fondo>
@@ -1149,9 +1266,10 @@ function renderModal() {
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
     ui.modal = 'mvp-votar';
   }
-  if (ui.modal && (!m || estadoMvp() === 'cerrada')) ui.modal = null;
+  if (ui.modal?.startsWith('mvp-') && (!m || estadoMvp() === 'cerrada')) ui.modal = null;
+  if (ui.modal === 'faltas' && !m) ui.modal = null;
   if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
-  return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp() : '';
+  return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp() : ui.modal === 'faltas' ? modalFaltas() : '';
 }
 
 const avisoCalificaciones = `
@@ -1179,7 +1297,7 @@ function jugadoresGrid() {
             ${avatar(p, 56)}
             <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}</span>
             ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
-            <span class="text-xs text-slate-400">${pos(p).emoji} ${p.edad ? p.edad + ' años' : ''}</span>
+            <span class="text-xs text-slate-400">${pos(p).emoji} ${p.edad ? p.edad + ' años' : ''}${marcaRoja(p.id)}</span>
             <span class="text-lg font-black leading-none ${r.n ? colorNota(r.general) : 'text-slate-600'}">${r.n ? r.general.toFixed(1) : '–'}</span>
           </a>`;
       }).join('')}
@@ -1192,6 +1310,8 @@ function vistaFicha(id) {
   const esYo = id === miUid();
   const miVoto = D.votos[id]?.[miUid()];
   const admin = D.grupo.admins.includes(id);
+  const rojas = rojasDe(id);
+  const restan = Math.max(0, ...rojas.map(f => 2 - fechasDespues(f, id)));
   return `
     <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
     <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
@@ -1204,6 +1324,11 @@ function vistaFicha(id) {
             <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">
               ${'⭐'.repeat(Math.min(estrellasDe(id), 5))}${estrellasDe(id) > 5 ? ` ×${estrellasDe(id)}` : ''} Jugador del partido${estrellasDe(id) > 1 ? ` · ${estrellasDe(id)} veces` : ''}
             </p>` : ''}
+          ${rojas.length ? `
+            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-red-500/15 border border-red-500/30 px-2.5 py-0.5 text-xs font-bold text-red-200" title="Se va cuando se anote a ${restan} ${restan === 1 ? 'fecha' : 'fechas'} más">
+              ${'🟥'.repeat(Math.min(rojas.length, 3))} Faltó sin avisar${rojas.length > 1 ? ` · ${rojas.length} veces` : ''}
+            </p>
+            ${castigado(id) ? '<p class="text-xs text-red-300/80 mt-1">Esta fecha, si se llena la lista, queda de suplente.</p>' : ''}` : ''}
           <p class="text-xs text-slate-500 mt-1">${r.n ? `Según ${r.n} ${r.n === 1 ? 'voto' : 'votos'}` : 'Todavía nadie lo calificó'}</p>
         </div>
         <div class="text-center shrink-0">
@@ -1255,6 +1380,14 @@ function vistaFicha(id) {
         ${admin ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">🛠️ ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
         ${admin ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
         <button data-action="expulsar" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Expulsar del grupo</button>
+      </div>
+      <div class="mt-3 pt-3 border-t border-slate-800 text-sm space-y-2">
+        ${rojas.map(f => `
+          <div class="flex items-center gap-2">
+            <span class="flex-1">🟥 Faltó el ${esc(fechaLinda(f.fecha))} · se va en ${2 - fechasDespues(f, id)} ${2 - fechasDespues(f, id) === 1 ? 'fecha' : 'fechas'} que se anote</span>
+            <button data-action="quitar-falta" data-k="${esc(f.id)}" class="text-xs text-slate-400 underline shrink-0">Quitar</button>
+          </div>`).join('')}
+        <button data-action="marcar-falta" data-id="${id}" class="${BTN} text-xs py-1.5 bg-slate-800 hover:bg-slate-700">🟥 Marcar que faltó sin avisar</button>
       </div>`) : ''}`;
 }
 
@@ -1500,6 +1633,36 @@ const acciones = {
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
+  'faltas-reportar': () => { ui.modal = 'faltas'; render(); },
+  'aprobar-falta': ({ k }) => {
+    const rs = D.reportes.filter(r => `${r.fecha}_${r.target}` === k);
+    if (!rs.length) return;
+    const { fecha, target } = rs[0];
+    const m = D.mvps.find(x => x.id === fecha);
+    const nombre = m ? nombreCandidato(m, target) : jugador(target)?.usuario || '?';
+    act(async () => {
+      const b = F.writeBatch(db);
+      b.set(F.doc(colFaltas(D.gid), k), { fecha, target, nombre, por: miUid(), ts: Date.now() });
+      rs.forEach(r => b.delete(F.doc(colReportes(D.gid), r.id)));
+      await b.commit();
+    }, `🟥 Tarjeta roja para ${nombre}`);
+  },
+  'rechazar-falta': ({ k }) => act(async () => {
+    const b = F.writeBatch(db);
+    D.reportes.filter(r => `${r.fecha}_${r.target}` === k).forEach(r => b.delete(F.doc(colReportes(D.gid), r.id)));
+    await b.commit();
+  }, 'Reporte rechazado'),
+  'marcar-falta': ({ id }) => {
+    // La fecha del último partido si fue hace menos de una semana; si no, hoy.
+    const fecha = D.mvp && Date.now() < D.mvp.abre + 7 * DIA ? D.mvp.id : hoyAR();
+    const nombre = jugador(id)?.usuario || '?';
+    if (!confirm(`¿Marcar que ${nombre} faltó sin avisar el ${fechaLinda(fecha)}?`)) return;
+    act(() => F.setDoc(F.doc(colFaltas(D.gid), `${fecha}_${id}`), { fecha, target: id, nombre, por: miUid(), ts: Date.now() }), `🟥 Tarjeta roja para ${nombre}`);
+  },
+  'quitar-falta': ({ k }) => {
+    if (!confirm('¿Sacar esta tarjeta roja?')) return;
+    act(() => F.deleteDoc(F.doc(colFaltas(D.gid), k)), 'Tarjeta roja sacada');
+  },
   'mvp-copiar': () => {
     const m = D.mvp, r = resultadoMvp(m);
     const nombres = r.ganadores.map(id => `*${nombreCandidato(m, id)}*`).join(' y ');
@@ -1520,7 +1683,7 @@ const acciones = {
     actualizarGrupo(s => { s.codigo = genId(12); }, '🎟️ Link nuevo generado');
   },
   armar: ({ modo }) => actualizarGrupo(s => {
-    const titulares = s.anotados.map(jugador).filter(Boolean).slice(0, Number(s.partido.cupo) || 10);
+    const { titulares } = dividir(s);
     s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
     repartirSuplentes(s);
     s.solicitudes = {};
@@ -1715,6 +1878,20 @@ const formularios = {
     if (!voto) return toast('Elegí a alguien');
     const m = D.mvp;
     const ok = await act(() => F.setDoc(F.doc(colVotosMvp(D.gid, m.id), miUid()), { voto, ts: Date.now() }), `🏆 Votaste a ${nombreCandidato(m, voto)}`);
+    if (ok) { ui.modal = null; render(); }
+    return ok;
+  },
+  faltas: async f => {
+    const m = D.mvp, uid = miUid();
+    const marcados = new Set(f.getAll('falta'));
+    const mios = D.reportes.filter(r => r.fecha === m.id && r.por === uid);
+    const ok = await act(async () => {
+      const b = F.writeBatch(db);
+      m.candidatos.filter(id => marcados.has(id) && !mios.some(r => r.target === id))
+        .forEach(id => b.set(F.doc(colReportes(D.gid), `${m.id}_${id}_${uid}`), { fecha: m.id, target: id, por: uid, ts: Date.now() }));
+      mios.filter(r => !marcados.has(r.target)).forEach(r => b.delete(F.doc(colReportes(D.gid), r.id)));
+      await b.commit();
+    }, marcados.size ? '🟥 Enviado. Lo revisa un admin' : 'Listo');
     if (ok) { ui.modal = null; render(); }
     return ok;
   },
