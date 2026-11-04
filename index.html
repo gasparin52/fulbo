@@ -128,6 +128,7 @@ const D = {
   miembros: null,      // uid -> ficha dentro del grupo
   votos: {},           // target -> { voter -> stats }
   niveles: {},         // solo admins: id -> 1..10
+  cargado: {},         // { votos, niveles }: ya llegó la primera lectura
   registrando: false,
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
@@ -236,7 +237,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {} });
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {} });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -257,7 +258,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {} });
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {} });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -277,6 +278,7 @@ function elegirGrupo() {
     const v = {};
     qs.docs.forEach(d => { const x = d.data(); (v[x.target] ||= {})[x.voter] = x.stats; });
     D.votos = v;
+    D.cargado.votos = true;
     render();
   }, e => console.warn(e.code)));
   subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc')), qs => {
@@ -400,7 +402,7 @@ const fichaCandidato = (m, id) => jugador(id) || { id, usuario: m.nombres?.[id] 
 function suscribirNiveles() {
   if (!puedeEditarEquipos() || nivelesDe === D.gid) return;
   nivelesDe = D.gid;
-  subsGrupo.push(F.onSnapshot(refNiveles(D.gid), s => { D.niveles = s.data() || {}; render(); }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(refNiveles(D.gid), s => { D.niveles = s.data() || {}; D.cargado.niveles = true; render(); }, e => console.warn(e.code)));
 }
 
 // Saca un grupo de mi lista (me expulsaron o lo borraron).
@@ -494,6 +496,26 @@ function derivar() {
 }
 const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
 const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== baseKey(d.titulares);
+
+// Cuando se llena el cupo, el primer admin o armador que tiene la app abierta arma
+// los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
+let autoArmado = null;
+function asegurarEquipos() {
+  if (!puedeEditarEquipos() || !D.miembros || !D.cargado.votos || !D.cargado.niveles) return;
+  const d = derivar();
+  if (d.titulares.length < d.cupo) return;
+  const clave = `${D.gid}/${baseKey(d.titulares)}`;
+  if (autoArmado === clave) return;
+  autoArmado = clave;
+  if (D.grupo.equipos && !equiposDesactualizados(d)) return;
+  actualizarGrupo(s => {
+    const titulares = s.anotados.map(jugador).filter(Boolean).slice(0, Number(s.partido.cupo) || 10);
+    const base = baseKey(titulares);
+    if (titulares.length < (Number(s.partido.cupo) || 10) || s.equipos?.base === base) return;
+    s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base };
+    s.solicitudes = {};
+  }, '⚖️ Se llenó el cupo: equipos equilibrados armados');
+}
 
 function armarEquipos(jugadores, modo) {
   const mezclados = shuffle([...jugadores]);
@@ -1373,7 +1395,10 @@ function render() {
   renderVistas();
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
   pintar($('#modal'), listo ? renderModal() : '');
-  if (listo) asegurarVotacion();
+  if (listo) {
+    asegurarVotacion();
+    asegurarEquipos();
+  }
 }
 
 function renderVistas() {
