@@ -96,6 +96,8 @@ const refMvp = (g, fecha) => F.doc(db, 'grupos', g, 'mvp', fecha);
 const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'votos');
 const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
 const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
+const colRehacer = g => F.collection(db, 'grupos', g, 'rehacer');
+const refRehacer = (g, u) => F.doc(db, 'grupos', g, 'rehacer', u);
 
 // Jugador del partido: se vota desde una hora después de que empieza el partido (si no
 // tiene hora, desde las 00:00 del día siguiente) hasta las 23:59 del día siguiente.
@@ -136,8 +138,9 @@ const datosGrupoIniciales = () => ({
   partido: { titulo: 'Fulbo ⚽', fecha: '', cuando: '', lugar: '', cupo: 10 },  // fecha: "AAAA-MM-DD"
   anotados: [],                // uids e ids de invitados ("inv_…"), en orden de llegada
   invitados: {},               // id -> { nombre, posicion } (gente sin cuenta)
-  equipos: null,               // { A: [ids], B: [ids], modo, base, editado }
+  equipos: null,               // { A: [ids], B: [ids], modo, base, editado, ronda }
   solicitudes: {},             // uid -> { a: 'A'|'B', ts } pedidos para cambiarse de equipo
+  rehacer: null,               // { ronda, n }: cuántos pidieron rehacer los equipos de esta ronda
 });
 const normGrupo = d => {
   const g = { nombre: '', admins: [], armadores: [], codigo: '', baneados: [], ...datosGrupoIniciales(), ...(d || {}) };
@@ -156,6 +159,7 @@ const D = {
   cargado: {},         // { votos, niveles, mvps, faltas }: ya llegó la primera lectura
   faltas: [],          // 🟥 aprobadas: { id, fecha, target, nombre }
   reportes: [],        // admins: todos los pendientes; los demás, solo los suyos
+  rehacer: [],         // pedidos para rehacer los equipos: admins, todos; los demás, solo el suyo
   registrando: false,
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
@@ -297,7 +301,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [] });
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -318,7 +322,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [] });
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -326,6 +330,7 @@ function elegirGrupo() {
     D.grupo = normGrupo(s.data());
     suscribirNiveles();
     suscribirReportes();
+    suscribirRehacer();
     render();
   }, e => {
     if (e.code === 'permission-denied') olvidarGrupo(gid, 'Ya no sos parte de ese grupo');
@@ -372,6 +377,114 @@ function suscribirReportes() {
     render();
   }, e => console.warn(e.code));
   subsGrupo.push(() => { cortarReportes?.(); cortarReportes = reportesDe = null; });
+}
+
+// ---------------- 🙋 Pedir rehacer los equipos ----------------
+// Cada jugador anotado puede pedir que se rehagan los equipos. Todos ven cuántos lo
+// pidieron (grupo.rehacer.n); quiénes, solo los admins. Los pedidos valen para una
+// "ronda" de equipos: cuando se vuelven a armar, empieza una ronda nueva desde cero.
+let rehacerDe = null, cortarRehacer = null;
+function suscribirRehacer() {
+  const clave = `${D.gid}/${esAdmin()}`;
+  if (clave === rehacerDe) return;
+  cortarRehacer?.();
+  rehacerDe = clave;
+  const guardar = docs => { D.rehacer = docs.map(d => ({ id: d.id, ...d.data() })); render(); };
+  cortarRehacer = esAdmin()
+    ? F.onSnapshot(colRehacer(D.gid), qs => guardar(qs.docs), e => console.warn(e.code))
+    : F.onSnapshot(refRehacer(D.gid, miUid()), d => guardar(d.exists() ? [d] : []), e => console.warn(e.code));
+  subsGrupo.push(() => { cortarRehacer?.(); cortarRehacer = rehacerDe = null; });
+}
+const rondaActual = () => {
+  const eq = D.grupo?.equipos, rh = D.grupo?.rehacer;
+  return eq?.ronda && rh?.ronda === eq.ronda ? eq.ronda : null;
+};
+const pedidosRehacer = () => (rondaActual() ? D.grupo.rehacer.n : 0);
+const quienesRehacer = () => D.rehacer.filter(r => r.ronda && r.ronda === rondaActual()).map(r => r.id);
+// Al armar equipos nuevos empieza otra ronda y los pedidos vuelven a cero.
+function nuevaRonda(s) {
+  if (!s.equipos) { s.rehacer = null; return; }
+  s.equipos.ronda = genId(8);
+  s.rehacer = { ronda: s.equipos.ronda, n: 0 };
+}
+// El pedido y el contador se escriben juntos: las reglas chequean que cuadren.
+function pedirRehacer(quiero) {
+  const gid = D.gid, uid = miUid();
+  return act(() => F.runTransaction(db, async tx => {
+    const g = normGrupo((await tx.get(refGrupo(gid))).data());
+    const mio = await tx.get(refRehacer(gid, uid));
+    const ronda = g.equipos?.ronda;
+    if (!ronda || g.rehacer?.ronda !== ronda) return;
+    if ((mio.exists() && mio.data().ronda === ronda) === quiero) return;
+    if (quiero) tx.set(refRehacer(gid, uid), { ronda, ts: Date.now() });
+    else tx.delete(refRehacer(gid, uid));
+    tx.update(refGrupo(gid), { rehacer: { ronda, n: g.rehacer.n + (quiero ? 1 : -1) } });
+  }), quiero ? '🙋 Pedido enviado' : 'Pedido cancelado');
+}
+
+// ---------------- 🌦️ Clima ----------------
+// Pronóstico de Open-Meteo (gratis, sin clave) para la hora del partido en la ciudad
+// que eligió el admin. Solo hay pronóstico para los próximos 16 días.
+const CLIMA_TTL = 30 * 60e3, CLIMA_REINTENTO = 10 * 60e3, HORA_CLIMA_DEFAULT = '20:00';
+let clima = { clave: null, t: 0, datos: null, cargando: false };
+const hoyArg = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+function estadoClima() {
+  const p = D.grupo?.partido, c = D.grupo?.ciudad;
+  if (!c?.lat || !p?.fecha) return null;
+  const dias = Math.round((Date.parse(p.fecha + 'T12:00:00Z') - Date.parse(hoyArg() + 'T12:00:00Z')) / DIA);
+  if (dias < 0) return null;
+  if (dias > 15) return { lejos: true };
+  const hora = horaValida(p.cuando) ? p.cuando : HORA_CLIMA_DEFAULT;
+  const clave = `${c.lat},${c.lon},${p.fecha},${hora}`;
+  const vence = clima.datos ? CLIMA_TTL : CLIMA_REINTENTO;
+  if (!clima.cargando && (clima.clave !== clave || Date.now() - clima.t > vence)) cargarClima(clave, c, p.fecha, hora);
+  return clima.clave === clave && clima.datos ? { ...clima.datos, hora } : null;
+}
+async function cargarClima(clave, c, fecha, hora) {
+  if (clima.clave !== clave) clima.datos = null;
+  Object.assign(clima, { clave, t: Date.now(), cargando: true });
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}`
+      + '&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m,is_day'
+      + `&timezone=${encodeURIComponent(TZ)}&start_date=${fecha}&end_date=${fecha}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('clima ' + r.status);
+    const h = (await r.json()).hourly;
+    const i = h.time.indexOf(`${fecha}T${hora.slice(0, 2)}:00`);
+    if (i < 0) throw new Error('clima sin hora');
+    if (clima.clave === clave) clima.datos = {
+      temp: h.temperature_2m[i], lluvia: h.precipitation_probability[i], viento: h.wind_speed_10m[i],
+      codigo: h.weather_code[i], dia: h.is_day[i] === 1,
+    };
+  } catch (e) {
+    console.warn(e);  // Sin clima no pasa nada (por ejemplo, si la red lo bloquea).
+  } finally {
+    clima.cargando = false;
+    render();
+  }
+}
+// Códigos del tiempo de la OMM (los que usa Open-Meteo).
+function cieloDe(codigo, dia) {
+  if (codigo === 0) return dia ? ['☀️', 'Despejado'] : ['🌙', 'Despejado'];
+  if (codigo <= 2) return dia ? ['🌤️', 'Algo nublado'] : ['☁️', 'Algo nublado'];
+  if (codigo === 3) return ['☁️', 'Nublado'];
+  if (codigo <= 48) return ['🌫️', 'Niebla'];
+  if (codigo <= 57) return ['🌦️', 'Llovizna'];
+  if (codigo <= 67) return ['🌧️', 'Lluvia'];
+  if (codigo <= 77) return ['🌨️', 'Nieve'];
+  if (codigo <= 82) return ['🌦️', 'Chaparrones'];
+  if (codigo <= 86) return ['🌨️', 'Nieve'];
+  return ['⛈️', 'Tormenta'];
+}
+// Busca la ciudad que escribió el admin (prefiere Argentina si hay varias con el mismo nombre).
+async function buscarCiudad(texto) {
+  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(texto)}&count=10&language=es&format=json`);
+  if (!r.ok) throw Object.assign(new Error('geo'), { mensaje: 'No se pudo buscar la ciudad. Probá de nuevo más tarde' });
+  const res = (await r.json()).results || [];
+  const c = res.find(x => x.country_code === 'AR') || res[0];
+  if (!c) throw Object.assign(new Error('geo'), { mensaje: `No encontré la ciudad "${texto}"` });
+  const redondear = x => Math.round(x * 1e4) / 1e4;
+  return { nombre: [c.name, c.admin1, c.country_code !== 'AR' && c.country].filter(Boolean).join(', '), lat: redondear(c.latitude), lon: redondear(c.longitude) };
 }
 
 // ---------------- 🟥 Faltó sin avisar ----------------
@@ -599,11 +712,16 @@ const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== 
 
 // Cuando se llena el cupo, el primer admin o armador que tiene la app abierta arma
 // los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
-let autoArmado = null, supsRepartidos = null;
+let autoArmado = null, supsRepartidos = null, rondaIniciada = null;
 function asegurarEquipos() {
   const c = D.cargado;
   if (!puedeEditarEquipos() || !D.miembros || !c.votos || !c.niveles || !c.mvps || !c.faltas) return;
   const d = derivar(), eq = D.grupo.equipos;
+  // Equipos armados antes de que existieran los pedidos para rehacer: les abre una ronda.
+  if (eq && !eq.ronda && rondaIniciada !== D.gid) {
+    rondaIniciada = D.gid;
+    actualizarGrupo(s => { if (s.equipos && !s.equipos.ronda) nuevaRonda(s); });
+  }
   // Suplentes que se anotaron después de armar: se suman solos a un equipo.
   if (eq && !equiposDesactualizados(d) && d.suplentes.some(p => ![...(eq.SA || []), ...(eq.SB || [])].includes(p.id))) {
     const clave = `${D.gid}/${d.suplentes.map(p => p.id).join(',')}`;
@@ -623,6 +741,7 @@ function asegurarEquipos() {
     if (titulares.length < cupo || s.equipos?.base === base) return;
     s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base };
     repartirSuplentes(s);
+    nuevaRonda(s);
     s.solicitudes = {};
   }, '⚖️ Se llenó el cupo: equipos equilibrados armados');
 }
@@ -974,12 +1093,14 @@ function vistaReglas() {
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
+      'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
     ${seccion('🆚 Equipos', [
       'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
+      'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando se vuelven a armar, el contador empieza de cero.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
     ${seccion('📊 Calificaciones', [
@@ -1010,6 +1131,21 @@ function vistaReglas() {
     ])}`;
 }
 
+function indicadorClima() {
+  const c = estadoClima();
+  if (!c) return '';
+  if (c.lejos) return '<p class="mt-1.5 text-xs text-slate-500">🌤️ El pronóstico aparece cuando faltan 16 días o menos</p>';
+  const [icono, cielo] = cieloDe(c.codigo, c.dia);
+  return `
+    <p class="mt-1.5 inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs rounded-lg bg-slate-800/70 px-2.5 py-1" title="Pronóstico para las ${esc(c.hora)} en ${esc(D.grupo.ciudad.nombre)}">
+      <span class="text-base leading-none">${icono}</span>
+      <span class="font-semibold text-slate-200">${Math.round(c.temp)}°</span>
+      <span class="text-slate-400">${cielo}</span>
+      <span class="${c.lluvia >= 50 ? 'text-sky-300 font-semibold' : 'text-slate-400'}">💧 ${c.lluvia}%</span>
+      <span class="${c.viento >= 30 ? 'text-amber-300 font-semibold' : 'text-slate-400'}">💨 ${Math.round(c.viento)} km/h</span>
+    </p>`;
+}
+
 function header(d) {
   const p = D.grupo.partido;
   const faltan = d.cupo - d.titulares.length;
@@ -1022,6 +1158,7 @@ function header(d) {
             ${p.fecha || p.cuando ? `<span>📅 ${esc([fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · '))}</span>` : ''}
             ${p.lugar ? `<span>📍 ${esc(p.lugar)}</span>` : ''}
           </div>
+          ${indicadorClima()}
         </div>
         <div class="text-right shrink-0">
           <div class="text-3xl font-black ${faltan <= 0 ? 'text-emerald-400' : ''}">${d.titulares.length}<span class="text-slate-500 text-xl">/${d.cupo}</span></div>
@@ -1169,6 +1306,22 @@ function equipos(d) {
       </ul>
     </div>` : '';
 
+  // Pedidos para rehacer los equipos: todos ven cuántos; quiénes, solo los admins.
+  const nRehacer = vigentes ? pedidosRehacer() : 0;
+  const quienes = esAdmin() ? quienesRehacer().map(id => jugador(id)?.usuario || D.miembros[id]?.usuario).filter(Boolean) : [];
+  const avisoRehacer = nRehacer ? `
+    <div class="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm">
+      🙋 <b>${nRehacer}</b> ${nRehacer === 1 ? 'pidió' : 'pidieron'} rehacer los equipos
+      ${quienes.length ? `<p class="text-xs text-violet-200/80 mt-1">${quienes.map(esc).join(', ')} <span class="text-slate-500">(solo lo ven los admins)</span></p>` : ''}
+    </div>` : '';
+  const yaPedi = D.rehacer.some(r => r.id === yo && r.ronda === rondaActual());
+  const botonRehacer = vigentes && rondaActual() && !editor && D.grupo.anotados.includes(yo) ? (yaPedi
+    ? `<div class="mt-3 flex items-center justify-between gap-2 text-sm bg-violet-500/10 border border-violet-500/20 rounded-xl px-3 py-2">
+         <span>🙋 Pediste rehacer los equipos. Nadie ve quién lo pidió.</span>
+         <button data-action="rehacer-cancelar" class="text-xs text-slate-400 underline shrink-0">Cancelar</button>
+       </div>`
+    : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full mt-3 text-sm">🙋 Pedir rehacer los equipos</button>`) : '';
+
   const modo = eq.editado ? '✏️ editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado';
   return card(`
     <div class="flex items-center justify-between">
@@ -1177,6 +1330,7 @@ function equipos(d) {
     </div>
     ${vigentes ? '' : `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${editor ? 'Volvé a armarlos.' : 'Los van a rearmar.'}</p>`}
     ${pendientes}
+    ${avisoRehacer}
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
       ${columna('A', 'border-red-500/30 bg-red-500/5')}
       ${columna('B', 'border-sky-500/30 bg-sky-500/5')}
@@ -1184,6 +1338,7 @@ function equipos(d) {
     ${editor && vigentes ? '<p class="text-xs text-slate-500 mt-2">Tocá → o ← para pasar a alguien al otro equipo.</p>' : ''}
     ${vigentes ? `<button data-action="copiar-equipos" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">📋 Copiar equipos para WhatsApp</button>` : ''}
     ${pedido}
+    ${botonRehacer}
     ${botones}`);
 }
 
@@ -1643,6 +1798,7 @@ function panelAdmin(d) {
       ${p.fecha && !horaValida(p.cuando) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Cupo titulares<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400 sm:col-span-2">Ciudad (para el clima)<input id="p-ciudad" name="ciudad" value="${esc(D.grupo.ciudad?.nombre || '')}" placeholder="Pinamar" maxlength="80" class="${INPUT} mt-1"></label>
       <div class="sm:col-span-2 flex gap-2">
         <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">💾 Guardar partido</button>
         <button type="button" data-action="nueva-fecha" class="${BTN} bg-red-950 hover:bg-red-900 text-red-200 text-sm">🗓️ Nueva fecha</button>
@@ -1923,9 +2079,10 @@ const acciones = {
     const { titulares } = dividir(s);
     s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
     repartirSuplentes(s);
+    nuevaRonda(s);
     s.solicitudes = {};
   }, '🆚 Equipos armados'),
-  'borrar-equipos': () => actualizarGrupo(s => { s.equipos = null; s.solicitudes = {}; }),
+  'borrar-equipos': () => actualizarGrupo(s => { s.equipos = null; s.solicitudes = {}; s.rehacer = null; }),
   'mover-equipo': ({ id }) => actualizarGrupo(s => {
     const de = s.equipos?.A.includes(id) || s.equipos?.SA?.includes(id) ? 'A' : 'B';
     moverDeEquipo(s, id, otroEquipo(de));
@@ -1942,6 +2099,8 @@ const acciones = {
     delete s.solicitudes[id];
   }, '✅ Cambio aprobado'),
   'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
+  'rehacer-pedir': () => pedirRehacer(true),
+  'rehacer-cancelar': () => pedirRehacer(false),
   'toggle-armador': ({ id }) => actualizarGrupo(s => {
     s.armadores = s.armadores.includes(id) ? s.armadores.filter(x => x !== id) : [...s.armadores, id];
   }, esArmador(id) ? 'Ya no puede editar equipos' : '🛠️ Ahora puede armar y editar equipos'),
@@ -1950,7 +2109,7 @@ const acciones = {
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
     if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
-    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.partido.fecha = ''; }, '🗓️ Lista nueva');
+    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; }, '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
@@ -2165,11 +2324,25 @@ const formularios = {
     if (ok) { ui.modal = null; render(); }
     return ok;
   },
-  partido: f => {
+  partido: async f => {
     const cupo = Math.max(2, Math.min(30, parseInt(f.get('cupo')) || 10));
-    return actualizarGrupo(s => {
+    // La ciudad se busca solo si cambió (el campo muestra el nombre que se guardó).
+    const texto = (f.get('ciudad') || '').trim();
+    let ciudad = D.grupo.ciudad || null;
+    if (texto !== (ciudad?.nombre || '')) {
+      if (!texto) ciudad = null;
+      else {
+        try { ciudad = await buscarCiudad(texto); }
+        catch (e) { toast('❌ ' + (e.mensaje || 'No se pudo buscar la ciudad')); return false; }
+      }
+    }
+    const ok = await actualizarGrupo(s => {
       s.partido = { titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo };
-    }, '💾 Partido guardado');
+      s.ciudad = ciudad;
+    }, ciudad && ciudad.nombre !== D.grupo.ciudad?.nombre ? `💾 Partido guardado · clima de ${ciudad.nombre}` : '💾 Partido guardado');
+    // El campo de ciudad muestra el nombre que encontró (puede diferir de lo escrito).
+    if (ok) { const i = $('#p-ciudad'); if (i) i.value = ciudad?.nombre || ''; }
+    return ok;
   },
   invitado: f => {
     const id = 'inv_' + genId(10);

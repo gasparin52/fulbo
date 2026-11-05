@@ -21,6 +21,19 @@ service cloud.firestore {
       return nuevas.diff(resource.data.get('solicitudes', {})).affectedKeys().hasOnly([uid()])
         && (!(uid() in nuevas) || (nuevas[uid()].keys().hasOnly(['a', 'ts']) && nuevas[uid()].a in ['A', 'B']));
     }
+    // Pedido para rehacer los equipos: el contador sube o baja de a uno y solo si en
+    // la misma escritura aparece (o desaparece) el pedido propio de esta ronda.
+    function miPedido(g) { return /databases/$(database)/documents/grupos/$(g)/rehacer/$(uid()); }
+    function cuentaMiPedido(g) {
+      let antes = resource.data.rehacer;
+      let despues = request.resource.data.rehacer;
+      let tenia = exists(miPedido(g)) && get(miPedido(g)).data.ronda == antes.ronda;
+      let tiene = existsAfter(miPedido(g)) && getAfter(miPedido(g)).data.ronda == antes.ronda;
+      return despues.keys().hasOnly(['ronda', 'n'])
+        && despues.ronda == antes.ronda
+        && antes.ronda == resource.data.equipos.ronda
+        && ((despues.n == antes.n + 1 && !tenia && tiene) || (despues.n == antes.n - 1 && tenia && !tiene));
+    }
 
     // Ficha de un jugador: el nombre tiene que ser el de su propia cuenta.
     function perfilValido(d) {
@@ -55,15 +68,17 @@ service cloud.firestore {
         && request.resource.data.creador == uid()
         && request.resource.data.admins == [uid()];
       // Los admins cambian todo; los armadores, los equipos y los pedidos de cambio;
-      // los demás solo se anotan o se bajan a sí mismos y piden cambiarse de equipo.
+      // los demás solo se anotan o se bajan a sí mismos, piden cambiarse de equipo
+      // o piden rehacer los equipos.
       allow update: if esAdmin(g)
-        || (esArmador(g) && cambia().hasOnly(['equipos', 'solicitudes']))
+        || (esArmador(g) && cambia().hasOnly(['equipos', 'solicitudes', 'rehacer']))
         || (
           esMiembro(g)
           && cambia().hasOnly(['anotados', 'solicitudes'])
           && request.resource.data.anotados.removeAll([uid()]) == resource.data.anotados.removeAll([uid()])
           && soloMiSolicitud()
-        );
+        )
+        || (esMiembro(g) && cambia().hasOnly(['rehacer']) && cuentaMiPedido(g));
       allow delete: if esAdmin(g);
 
       // Para entrar hay que tener el código del link de invitación y no estar expulsado.
@@ -173,6 +188,24 @@ service cloud.firestore {
           && request.time.toMillis() >= mvpDe(request.resource.data.fecha).abre
           && request.time.toMillis() < mvpDe(request.resource.data.fecha).abre + 7 * 86400000;
         allow delete: if esAdmin(g) || (logueado() && resource.data.por == uid());
+      }
+
+      // Pedidos para rehacer los equipos (el id es el de quien pide). Cada uno ve el
+      // suyo; la lista completa, solo los admins. Se crea o se borra junto con el
+      // contador del grupo, que es lo que ven todos.
+      match /rehacer/{u} {
+        function rehacerDespues() { return getAfter(/databases/$(database)/documents/grupos/$(g)).data.rehacer; }
+        allow get: if logueado() && (uid() == u || esAdmin(g));
+        allow list: if esAdmin(g);
+        allow create, update: if esMiembro(g) && uid() == u
+          && uid() in grupo(g).anotados
+          && request.resource.data.keys().hasOnly(['ronda', 'ts'])
+          && request.resource.data.ronda == rehacerDespues().ronda
+          && rehacerDespues().n == grupo(g).rehacer.n + 1;
+        allow delete: if logueado() && uid() == u
+          && (grupo(g).get('rehacer', null) == null
+            || resource.data.ronda != grupo(g).rehacer.ronda
+            || rehacerDespues().n == grupo(g).rehacer.n - 1);
       }
 
       // Faltas aprobadas: las ve todo el grupo, las pone o las saca solo un admin.
