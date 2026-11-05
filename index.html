@@ -542,26 +542,58 @@ async function desactivarNotificaciones() {
   render();
 }
 
-function tarjetaPush() {
+// Activar o desactivar las notificaciones al celu (adentro de la campanita).
+function bloquePush() {
   if (!CONFIG.vapid) return '';
-  if (pushActivo()) return `
-    <p class="text-xs text-slate-500 flex items-center justify-between gap-2 px-1">
-      <span>🔔 Te avisamos en este dispositivo si alguien se baja o se suspende.</span>
-      <button data-action="desactivar-push" class="underline shrink-0">Desactivar</button>
-    </p>`;
-  if (esIOS() && !instalada()) return card(`
-    <p class="text-sm">🔔 <b>¿Querés que te avise si alguien se baja o se suspende?</b></p>
-    <p class="text-xs text-slate-400 mt-1">En iPhone primero agregá Fulbo a tu pantalla de inicio: en Safari tocá <b>Compartir</b> → <b>Agregar a inicio</b>. Después abrila desde ese ícono y vas a ver el botón para activar los avisos.</p>`);
-  if (!pushPosible()) return '';
-  if (Notification.permission === 'denied') return `<p class="text-xs text-slate-500 px-1">🔕 Bloqueaste las notificaciones de esta página. Si querés avisos, habilitalas en la configuración del navegador.</p>`;
-  return card(`
+  const caja = html => `<div class="mt-4 rounded-xl border border-slate-700/60 bg-slate-800/50 p-3 text-sm">${html}</div>`;
+  if (pushActivo()) return caja(`
     <div class="flex items-center gap-3">
-      <p class="flex-1 text-sm">🔔 <b>Avisame al celu</b> <span class="text-slate-400">si alguien se baja, faltan jugadores o se suspende.</span></p>
+      <p class="flex-1">🔔 Te avisamos al celu si alguien se baja, faltan jugadores o se suspende.</p>
+      <button data-action="desactivar-push" class="text-xs text-slate-400 underline shrink-0">Desactivar</button>
+    </div>`);
+  if (esIOS() && !instalada()) return caja(`
+    <p>🔕 <b>¿Querés que te llegue al celu?</b></p>
+    <p class="text-xs text-slate-400 mt-1">En iPhone primero agregá Fulbo a la pantalla de inicio: en Safari tocá <b>Compartir</b> → <b>Agregar a inicio</b>. Abrila desde ese ícono y activalas desde acá.</p>`);
+  if (!pushPosible()) return caja('<p class="text-xs text-slate-400">🔕 Este navegador no permite notificaciones.</p>');
+  if (Notification.permission === 'denied') return caja('<p class="text-xs text-slate-400">🔕 Bloqueaste las notificaciones de esta página. Si querés que te lleguen, habilitalas en la configuración del navegador.</p>');
+  return caja(`
+    <div class="flex items-center gap-3">
+      <p class="flex-1">🔕 <b>Avisame al celu</b> <span class="text-slate-400">si alguien se baja, faltan jugadores o se suspende.</span></p>
       <button data-action="activar-push" class="${BTN_OK} text-sm shrink-0">Activar</button>
     </div>`);
 }
 
-// Carteles arriba de todo: partido suspendido, faltan jugadores y los últimos avisos.
+// 🔔 Campanita: los últimos avisos del grupo; el numerito cuenta los que no viste.
+const claveVisto = () => `${LS}avisos_visto:${D.gid}`;
+const avisosGrupo = () => (D.grupo?.avisos || []).filter(a => Date.now() - a.ts < 7 * DIA).slice().reverse();
+const avisosNuevos = () => avisosGrupo().filter(a => a.ts > Number(guardado.get(claveVisto()) || 0)).length;
+function campanita() {
+  const n = avisosNuevos();
+  return `
+    <button data-action="abrir-avisos" title="Avisos" class="relative w-9 h-9 rounded-xl bg-slate-800/70 hover:bg-slate-700 grid place-items-center shrink-0">
+      <span class="text-lg leading-none">${pushActivo() || n ? '🔔' : '🔕'}</span>
+      ${n ? `<span class="absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] font-bold text-white grid place-items-center">${n}</span>` : ''}
+    </button>`;
+}
+function modalAvisos() {
+  const avisos = avisosGrupo();
+  return modal(`
+    <div class="flex items-center justify-between">
+      <h2 class="text-xl font-black">🔔 Avisos</h2>
+      <button data-action="cerrar-modal" class="text-slate-400 hover:text-slate-200 px-2 text-lg">✕</button>
+    </div>
+    ${avisos.length ? `
+      <ul class="mt-3 divide-y divide-slate-800">
+        ${avisos.map(a => `
+          <li class="py-2.5">
+            <p class="font-semibold text-sm">${esc(a.titulo)}</p>
+            <p class="text-xs text-slate-400">${esc(a.texto)} · ${esc(haceCuanto(a.ts))}</p>
+          </li>`).join('')}
+      </ul>` : '<p class="mt-3 text-sm text-slate-400">No hay avisos esta semana. Acá vas a ver si alguien se baja, si faltan jugadores o si se suspende el partido.</p>'}
+    ${bloquePush()}`);
+}
+
+// Carteles arriba de todo: partido suspendido y faltan jugadores.
 let faltanAvisado = null;
 function tarjetaAvisos(d) {
   const p = D.grupo.partido;
@@ -583,23 +615,11 @@ function tarjetaAvisos(d) {
     const clave = `${D.gid}/${p.fecha}/${hoyArg()}`;
     if (faltanAvisado !== clave) { faltanAvisado = clave; avisar('faltan'); }
   }
-  const recientes = (D.grupo.avisos || [])
-    .filter(a => Date.now() - a.ts < 2 * DIA && !guardado.get(LS + 'aviso:' + a.id))
-    .filter(a => !/^(susp|faltan):/.test(a.clave || ''))  // esos ya tienen su cartel
-    .slice(-3).reverse();
-  partes.push(...recientes.map(a => `
-    <div class="flex items-start gap-3 rounded-xl border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-sm">
-      <div class="flex-1 min-w-0">
-        <p class="font-semibold">${esc(a.titulo)}</p>
-        <p class="text-xs text-slate-400">${esc(a.texto)} · ${esc(haceCuanto(a.ts))}</p>
-      </div>
-      <button data-action="cerrar-aviso" data-id="${esc(a.id)}" title="Cerrar" class="text-slate-500 hover:text-slate-300 px-1">✕</button>
-    </div>`));
   return partes.length ? `<div class="space-y-2">${partes.join('')}</div>` : '';
 }
 const haceCuanto = ts => {
   const min = Math.round((Date.now() - ts) / 60e3);
-  return min < 1 ? 'recién' : min < 60 ? `hace ${min} min` : min < 1440 ? `hace ${Math.round(min / 60)} h` : 'ayer';
+  return min < 1 ? 'recién' : min < 60 ? `hace ${min} min` : min < 1440 ? `hace ${Math.round(min / 60)} h` : min < 2880 ? 'ayer' : `hace ${Math.floor(min / 1440)} días`;
 };
 // Busca la ciudad que escribió el admin (prefiere Argentina si hay varias con el mismo nombre).
 async function buscarCiudad(texto) {
@@ -1182,7 +1202,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), tarjetaAvisos(d), tarjetaMvp(), tarjetaFaltas(), miEstado(d), tarjetaPush(), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), header(d), tarjetaAvisos(d), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
 }
 
 function topBar() {
@@ -1195,6 +1215,7 @@ function topBar() {
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
       <a href="#/reglas" class="text-xs text-amber-300 hover:text-amber-200 underline">📖 Reglas</a>
+      ${campanita()}
       ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
     </div>`;
@@ -1218,7 +1239,7 @@ function vistaReglas() {
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
-      'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Con <b>Activar</b> te llegan también como notificación al celu.',
+      'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Todos quedan en la <b>🔔 campanita</b> de arriba (el número rojo son los que no viste) y desde ahí activás las notificaciones al celu.',
       'Podés <b>instalar Fulbo como app</b>: en Android, Chrome te ofrece "Instalar app"; en iPhone, en Safari tocá Compartir → Agregar a inicio.',
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
@@ -1800,7 +1821,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : '';
 }
 
 const avisoCalificaciones = `
@@ -2277,7 +2298,7 @@ const acciones = {
       .then(ok => ok && avisar('suspendido'));
   },
   reactivar: () => actualizarGrupo(s => { delete s.partido.suspendido; }, '✅ Se levantó la suspensión').then(ok => ok && avisar('reactivado')),
-  'cerrar-aviso': ({ id }) => { guardado.set(LS + 'aviso:' + id, '1'); render(); },
+  'abrir-avisos': () => { ui.modal = 'avisos'; guardado.set(claveVisto(), String(Date.now())); render(); },
   'activar-push': () => activarNotificaciones(),
   'desactivar-push': () => desactivarNotificaciones(),
   'toggle-clima': () => { ui.climaAbierto = !ui.climaAbierto; render(); },
