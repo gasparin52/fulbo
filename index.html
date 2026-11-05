@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Fulbo ⚽ Anotate</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#020617">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Fulbo">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { -webkit-tap-highlight-color: transparent; }
@@ -35,6 +41,9 @@ const CONFIG = {
   superadmin: 'gasparin',
   // URL de la función de Vercel (api/admin.js).
   api: 'https://fulbo-one.vercel.app/api/admin',
+  // Clave pública para notificaciones (Firebase → Configuración → Cloud Messaging →
+  // Certificados push web). Vacía = no se ofrece activar notificaciones.
+  vapid: '',
   // Días que dura la sesión antes de pedir la contraseña de nuevo.
   diasSesion: 30,
 };
@@ -79,12 +88,15 @@ try {
     A.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     F.connectFirestoreEmulator(db, '127.0.0.1', 8085);
     CONFIG.api = 'http://localhost:3001/api/admin';
+    CONFIG.apiAvisar = 'http://localhost:3002/api/avisar';
   }
 } catch (e) {
   console.error(e);
   document.querySelector('#app').innerHTML = '<p class="text-red-300">No se pudo cargar Firebase. Revisá la conexión y recargá la página.</p>';
   throw e;
 }
+// Service worker: hace instalable la app y recibe las notificaciones.
+const swListo = 'serviceWorker' in navigator ? navigator.serviceWorker.register('sw.js').catch(e => { console.warn(e); return null; }) : Promise.resolve(null);
 
 const refUsuario = id => F.doc(db, 'usuarios', id);
 const refGrupo = g => F.doc(db, 'grupos', g);
@@ -476,6 +488,119 @@ function cieloDe(codigo, dia) {
   if (codigo <= 86) return ['🌨️', 'Nieve'];
   return ['⛈️', 'Tormenta'];
 }
+
+// ---------------- 🔔 Avisos y notificaciones ----------------
+// Los avisos importantes (alguien se bajó, faltan jugadores, partido suspendido) los
+// arma y guarda api/avisar.js en el grupo, y de paso manda la notificación al celu.
+// El servidor decide si corresponde y no repite avisos, así que acá se lo llama sin miedo.
+const urlAvisar = () => CONFIG.apiAvisar || (CONFIG.api ? CONFIG.api.replace(/admin$/, 'avisar') : '');
+async function avisar(tipo, datos = {}) {
+  if (!urlAvisar() || !D.user || !D.gid) return;
+  try {
+    await fetch(urlAvisar(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await D.user.getIdToken() },
+      body: JSON.stringify({ gid: D.gid, tipo, ...datos }),
+    });
+  } catch (e) { console.warn(e); }  // Sin aviso no pasa nada: la app anda igual.
+}
+
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushPosible = () => !!CONFIG.vapid && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator;
+const clavePush = () => `${LS}push:${D.gid}:${miUid()}`;
+const pushActivo = () => pushPosible() && Notification.permission === 'granted' && !!guardado.get(clavePush());
+let mensajeria = null;
+async function tokenPush() {
+  mensajeria ||= await import(`https://www.gstatic.com/firebasejs/${V}/firebase-messaging.js`);
+  const reg = await swListo;
+  if (!reg) throw Object.assign(new Error('sin sw'), { mensaje: 'Este navegador no deja recibir notificaciones' });
+  return mensajeria.getToken(mensajeria.getMessaging(), { vapidKey: CONFIG.vapid, serviceWorkerRegistration: reg });
+}
+async function activarNotificaciones() {
+  if ((await Notification.requestPermission()) !== 'granted') {
+    toast('Sin permiso no te puedo avisar. Habilitalo en la configuración del navegador');
+    return render();
+  }
+  const gid = D.gid, uid = miUid();
+  await act(async () => {
+    const token = await tokenPush();
+    // Hasta 5 celus/compus por persona: se queda con los últimos.
+    await F.runTransaction(db, async tx => {
+      const ref = F.doc(db, 'grupos', gid, 'push', uid);
+      const viejos = (await tx.get(ref)).data()?.tokens || [];
+      tx.set(ref, { tokens: [...viejos.filter(t => t !== token), token].slice(-5), ts: Date.now() });
+    });
+    guardado.set(`${LS}push:${gid}:${uid}`, token);
+  }, '🔔 Listo, te avisamos si pasa algo');
+  render();
+}
+async function desactivarNotificaciones() {
+  const token = guardado.get(clavePush());
+  await act(() => F.updateDoc(F.doc(db, 'grupos', D.gid, 'push', miUid()), { tokens: F.arrayRemove(token), ts: Date.now() }), '🔕 Avisos desactivados');
+  guardado.set(clavePush(), null);
+  render();
+}
+
+function tarjetaPush() {
+  if (!CONFIG.vapid) return '';
+  if (pushActivo()) return `
+    <p class="text-xs text-slate-500 flex items-center justify-between gap-2 px-1">
+      <span>🔔 Te avisamos en este dispositivo si alguien se baja o se suspende.</span>
+      <button data-action="desactivar-push" class="underline shrink-0">Desactivar</button>
+    </p>`;
+  if (esIOS() && !instalada()) return card(`
+    <p class="text-sm">🔔 <b>¿Querés que te avise si alguien se baja o se suspende?</b></p>
+    <p class="text-xs text-slate-400 mt-1">En iPhone primero agregá Fulbo a tu pantalla de inicio: en Safari tocá <b>Compartir</b> → <b>Agregar a inicio</b>. Después abrila desde ese ícono y vas a ver el botón para activar los avisos.</p>`);
+  if (!pushPosible()) return '';
+  if (Notification.permission === 'denied') return `<p class="text-xs text-slate-500 px-1">🔕 Bloqueaste las notificaciones de esta página. Si querés avisos, habilitalas en la configuración del navegador.</p>`;
+  return card(`
+    <div class="flex items-center gap-3">
+      <p class="flex-1 text-sm">🔔 <b>Avisame al celu</b> <span class="text-slate-400">si alguien se baja, faltan jugadores o se suspende.</span></p>
+      <button data-action="activar-push" class="${BTN_OK} text-sm shrink-0">Activar</button>
+    </div>`);
+}
+
+// Carteles arriba de todo: partido suspendido, faltan jugadores y los últimos avisos.
+let faltanAvisado = null;
+function tarjetaAvisos(d) {
+  const p = D.grupo.partido;
+  const partes = [];
+  if (p.suspendido) partes.push(`
+    <div class="rounded-2xl border border-red-500/40 bg-red-500/15 px-4 py-3">
+      <p class="font-bold text-red-200">🚫 Partido suspendido</p>
+      <p class="text-sm text-red-100/90 mt-0.5">${esc(p.suspendido)}</p>
+    </div>`);
+  const dias = p.fecha ? Math.round((Date.parse(p.fecha + 'T12:00:00Z') - Date.parse(hoyArg() + 'T12:00:00Z')) / DIA) : -1;
+  const faltan = d.cupo - d.titulares.length;
+  if (!p.suspendido && faltan > 0 && (dias === 0 || dias === 1)) {
+    partes.push(`
+      <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+        <p class="font-bold text-amber-200">⚠️ ${faltan === 1 ? 'Falta 1' : `Faltan ${faltan}`} para ${dias ? 'mañana' : 'hoy'}</p>
+        <p class="text-sm text-amber-100/80 mt-0.5">Somos ${d.titulares.length}/${d.cupo}. Si conocés a alguien, invitalo.</p>
+      </div>`);
+    // Una vez por fecha y por día, el primero que lo ve le pide al servidor que avise.
+    const clave = `${D.gid}/${p.fecha}/${hoyArg()}`;
+    if (faltanAvisado !== clave) { faltanAvisado = clave; avisar('faltan'); }
+  }
+  const recientes = (D.grupo.avisos || [])
+    .filter(a => Date.now() - a.ts < 2 * DIA && !guardado.get(LS + 'aviso:' + a.id))
+    .filter(a => !/^(susp|faltan):/.test(a.clave || ''))  // esos ya tienen su cartel
+    .slice(-3).reverse();
+  partes.push(...recientes.map(a => `
+    <div class="flex items-start gap-3 rounded-xl border border-slate-700/60 bg-slate-800/60 px-3 py-2 text-sm">
+      <div class="flex-1 min-w-0">
+        <p class="font-semibold">${esc(a.titulo)}</p>
+        <p class="text-xs text-slate-400">${esc(a.texto)} · ${esc(haceCuanto(a.ts))}</p>
+      </div>
+      <button data-action="cerrar-aviso" data-id="${esc(a.id)}" title="Cerrar" class="text-slate-500 hover:text-slate-300 px-1">✕</button>
+    </div>`));
+  return partes.length ? `<div class="space-y-2">${partes.join('')}</div>` : '';
+}
+const haceCuanto = ts => {
+  const min = Math.round((Date.now() - ts) / 60e3);
+  return min < 1 ? 'recién' : min < 60 ? `hace ${min} min` : min < 1440 ? `hace ${Math.round(min / 60)} h` : 'ayer';
+};
 // Busca la ciudad que escribió el admin (prefiere Argentina si hay varias con el mismo nombre).
 async function buscarCiudad(texto) {
   const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(texto)}&count=10&language=es&format=json`);
@@ -1057,7 +1182,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), header(d), tarjetaAvisos(d), tarjetaMvp(), tarjetaFaltas(), miEstado(d), tarjetaPush(), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
 }
 
 function topBar() {
@@ -1093,6 +1218,8 @@ function vistaReglas() {
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
+      'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Con <b>Activar</b> te llegan también como notificación al celu.',
+      'Podés <b>instalar Fulbo como app</b>: en Android, Chrome te ofrece "Instalar app"; en iPhone, en Safari tocá Compartir → Agregar a inicio.',
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
     ${seccion('🆚 Equipos', [
@@ -1170,7 +1297,7 @@ function indicadorClima() {
             ${dato('💧 Lluvia', `${c.lluvia}%`, c.lluvia >= 50, 'text-sky-300', c.lluvia)}
             ${dato('💨 Viento', `${Math.round(c.viento)} <span class="text-xs font-medium">km/h</span>`, c.viento >= 30, 'text-amber-300')}
           </div>
-          <p class="mt-2 text-[11px] text-slate-400">Pronóstico para las ${esc(c.hora)} en ${esc(D.grupo.ciudad.nombre)} · se actualiza cada media hora</p>
+          <p class="mt-2 text-[11px] text-slate-400">Pronóstico para el ${esc(fechaLinda(D.grupo.partido.fecha))} a las ${esc(c.hora)} en ${esc(D.grupo.ciudad.nombre)} · se actualiza cada media hora</p>
         </div>` : ''}
     </div>`;
 }
@@ -1844,6 +1971,9 @@ function panelAdmin(d) {
         <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">💾 Guardar partido</button>
         <button type="button" data-action="nueva-fecha" class="${BTN} bg-red-950 hover:bg-red-900 text-red-200 text-sm">🗓️ Nueva fecha</button>
       </div>
+      ${p.suspendido
+        ? `<button type="button" data-action="reactivar" class="${BTN} sm:col-span-2 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 text-sm">✅ Levantar la suspensión</button>`
+        : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">🚫 Suspender partido</button>`}
     </form>
 
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
@@ -2107,7 +2237,7 @@ const acciones = {
   bajar: ({ id }) => {
     const p = jugador(id);
     if (!p || !confirm(id === miUid() ? '¿Seguro que te bajás?' : `¿Bajar a ${p.usuario} de la lista?`)) return;
-    actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista');
+    actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista').then(ok => ok && avisar('baja', { id }));
   },
   copiar: () => copiar(mensajeWsp()),
   'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
@@ -2140,6 +2270,16 @@ const acciones = {
     delete s.solicitudes[id];
   }, '✅ Cambio aprobado'),
   'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
+  suspender: () => {
+    const motivo = prompt('¿Por qué se suspende? (lo ven todos y les llega en la notificación)', 'Se suspende por lluvia');
+    if (motivo === null) return;
+    actualizarGrupo(s => { s.partido.suspendido = motivo.trim().slice(0, 120) || 'Partido suspendido'; }, '🚫 Partido suspendido')
+      .then(ok => ok && avisar('suspendido'));
+  },
+  reactivar: () => actualizarGrupo(s => { delete s.partido.suspendido; }, '✅ Se levantó la suspensión').then(ok => ok && avisar('reactivado')),
+  'cerrar-aviso': ({ id }) => { guardado.set(LS + 'aviso:' + id, '1'); render(); },
+  'activar-push': () => activarNotificaciones(),
+  'desactivar-push': () => desactivarNotificaciones(),
   'toggle-clima': () => { ui.climaAbierto = !ui.climaAbierto; render(); },
   'rehacer-pedir': () => pedirRehacer(true),
   'rehacer-cancelar': () => pedirRehacer(false),
@@ -2151,7 +2291,7 @@ const acciones = {
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
     if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
-    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; }, '🗓️ Lista nueva');
+    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; delete s.partido.suspendido; s.avisos = []; }, '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
@@ -2379,7 +2519,7 @@ const formularios = {
       }
     }
     const ok = await actualizarGrupo(s => {
-      s.partido = { titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo };
+      s.partido = { ...s.partido, titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo };
       s.ciudad = ciudad;
     }, ciudad && ciudad.nombre !== D.grupo.ciudad?.nombre ? `💾 Partido guardado · clima de ${ciudad.nombre}` : '💾 Partido guardado');
     // El campo de ciudad muestra el nombre que encontró (puede diferir de lo escrito).

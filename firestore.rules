@@ -208,6 +208,15 @@ service cloud.firestore {
             || rehacerDespues().n == grupo(g).rehacer.n - 1);
       }
 
+      // A qué celulares mandarle notificaciones (los manda api/avisar.js). Cada uno
+      // ve y cambia solo los suyos; nadie más los lee desde la app.
+      match /push/{u} {
+        allow read, delete: if logueado() && uid() == u;
+        allow create, update: if esMiembro(g) && uid() == u
+          && request.resource.data.keys().hasOnly(['tokens', 'ts'])
+          && request.resource.data.tokens is list && request.resource.data.tokens.size() <= 5;
+      }
+
       // Faltas aprobadas: las ve todo el grupo, las pone o las saca solo un admin.
       match /faltas/{f} {
         allow read: if esMiembro(g);

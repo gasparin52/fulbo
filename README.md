@@ -19,6 +19,8 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 - **Pedidos de cambio**: un jugador que está en un equipo puede tocar "Pedir pasar al otro equipo". Los admins y armadores lo aprueban o lo rechazan. Si se rearman los equipos, los pedidos pendientes se borran.
 - **🙋 Pedir rehacer los equipos**: cualquiera que esté anotado (y no sea admin ni armador) puede pedir que se rehagan. Todos ven **cuántos** lo pidieron; **quiénes**, solo los admins. Los pedidos valen para la "ronda" de equipos actual: cuando se vuelven a armar, el contador vuelve a cero. Las reglas obligan a que el pedido y el contador se escriban juntos, así nadie puede inflar el número ni pedir dos veces.
 - **🌦️ Clima**: el admin carga la **ciudad** en el panel (se busca con Open-Meteo, gratis y sin clave). Arriba aparece el pronóstico para la hora del partido (si la hora no es `HH:MM`, a las 20:00): cielo, temperatura, probabilidad de lluvia y viento. Solo hay pronóstico cuando faltan 16 días o menos. Si la red bloquea Open-Meteo, simplemente no se muestra.
+- **🔔 Avisos**: si alguien se baja, si faltan jugadores para hoy o mañana, o si un admin **suspende** el partido (panel admin, con motivo), aparece un cartel arriba y sale una notificación a los que la activaron. Los arma `api/avisar.js` (Vercel) con los datos reales del grupo y cada aviso sale una sola vez. Las notificaciones usan Firebase Cloud Messaging: hace falta la clave pública en `CONFIG.vapid` (ver Configuración). En iPhone solo andan con la app agregada a la pantalla de inicio.
+- **App instalable (PWA)**: `manifest.json`, `sw.js` y los íconos (`icono-192.png`, `icono-512.png`, `apple-touch-icon.png`) hacen que se pueda instalar desde el navegador, sin tiendas.
 - **Reemplazar**: un admin toca "Reemplazar a alguien" abajo de la lista, elige a quién y después a otro (miembro, invitado o alguien nuevo sin cuenta). Entra en el mismo lugar y en el mismo equipo.
 - **Invitados**: el admin puede anotar a alguien sin cuenta (nombre, posición y nivel). Tienen ficha y los compañeros los califican igual que a los demás.
 - **🏆 Jugador del partido**: si el partido tiene **fecha** cargada (panel admin), se vota al mejor desde **una hora después de la hora del partido** hasta las 23:59 del día siguiente (hora argentina). La hora tiene que estar como `HH:MM` (la app convierte "20hs" o "20" a "20:00"); si no se entiende, abre a las 00:00 del día siguiente. Los candidatos son los titulares; un admin puede agregar o sacar a alguien. Votan todos los del grupo, uno por persona (se puede cambiar mientras esté abierta), nadie a sí mismo. Al entrar aparece un cartel para votar; si lo cerrás, queda la tarjeta "Todavía no votaste". Los votos se ven recién al cierre; con menos de 3 votos queda desierta. "Nueva fecha" guarda la votación con los titulares antes de vaciar la lista. Cada vez que alguien gana (o empata primero) suma una ⭐, que se ve en su ficha y en la lista.
@@ -42,6 +44,10 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 5. **Deploy**. Cuando termine, copiá el dominio (el nuestro es `fulbo-one.vercel.app`).
 6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/admin`.
 7. (Recomendado) Agregá también `RECOVERY_CODE`, una frase secreta de 16 caracteres o más que solo sepas vos, y hacé **Redeploy**. Sirve para recuperar la contraseña del superadmin desde el login ("¿Sos el admin y olvidaste la contraseña?").
+
+### 3. Notificaciones al celu
+
+Firebase → ⚙️ **Configuración del proyecto** → **Cloud Messaging** → **Certificados push web** → **Generar par de claves**. Copiá la clave (es pública) en `CONFIG.vapid` de `index.html`. El envío lo hace `api/avisar.js` con la misma `FIREBASE_SERVICE_ACCOUNT`.
 
 Ojo: la red del trabajo bloquea `vercel.app`. Usá el panel de usuarios desde el celular con datos móviles.
 
