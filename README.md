@@ -30,6 +30,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 - **Invitados**: el admin puede anotar a alguien sin cuenta (nombre, posición y nivel). Tienen ficha y los compañeros los califican igual que a los demás.
 - **🏆 Jugador del partido**: si el partido tiene **fecha** cargada (panel admin), se vota al mejor desde **una hora después de la hora del partido** hasta las 23:59 del día siguiente (hora argentina). La hora tiene que estar como `HH:MM` (la app convierte "20hs" o "20" a "20:00"); si no se entiende, abre a las 00:00 del día siguiente. Los candidatos son los titulares; un admin puede agregar o sacar a alguien. Votan todos los del grupo, uno por persona (se puede cambiar mientras esté abierta), nadie a sí mismo. Al entrar aparece un cartel para votar; si lo cerrás, queda la tarjeta "Todavía no votaste". Los votos se ven recién al cierre; con menos de 3 votos queda desierta. "Nueva fecha" guarda la votación con los titulares antes de vaciar la lista. Cada vez que alguien gana (o empata primero) suma una ⭐, que se ve en su ficha y en la lista.
 - **🟥 Faltó sin avisar**: los que jugaron (los candidatos del jugador del partido) pueden reportar, durante 3 días desde el día siguiente al partido, a alguien de la lista que no fue y no avisó. **Solo cuenta si un admin lo aprueba** (los admins ven quién reportó; el reportado no). Un admin también puede marcarlo desde la ficha, y sacar una tarjeta. La 🟥 se ve en la lista, la grilla y la ficha, y **vence cuando el jugador se anotó en 2 fechas** posteriores. **Castigo**: en la primera fecha en que se anota después de la falta, si se llena la lista, los que se anotan después le pasan adelante y él queda de suplente. Para que una fecha cuente, el partido tiene que tener **fecha** cargada (se guarda quiénes se anotaron al armar la votación del jugador del partido).
+- **🔐 Versión pública** (`CONFIG.publico`, activa fuera de GitHub Pages, o sea en fulbo5.com): al registrarse se pide **mail de recuperación**, contraseña de 8+ caracteres con letras y números, y aceptar los **términos** (`#/terminos`) y la **privacidad** (`#/privacidad`); edad mínima 13. Los que ya tienen cuenta siguen con su sesión; **cuando vuelven a entrar**, si su contraseña no cumple se les pide una nueva, y si no tienen mail, que lo carguen. El mail se confirma con un link y queda en `privado/{uid}` (solo lo lee su dueño; lo escribe `api/cuenta.js`). "¿Te olvidaste la contraseña?" manda un link de 1 hora al mail confirmado. Desde "🔐 Tu cuenta" (en la ficha propia o en la pantalla de grupos) se cambia el mail, la contraseña o se **borra la cuenta**. Los mails salen por [Resend](https://resend.com) (ver Configuración).
 - **Superadmin** (`gasparin`): tiene el panel **Usuarios** para ver a todos, crearlos, editarlos, borrarlos y ponerles una contraseña nueva.
 
 ## Configuración (una sola vez)
@@ -57,6 +58,13 @@ Firebase → ⚙️ **Configuración del proyecto** → **Cloud Messaging** → 
 Ojo: la red del trabajo bloquea `vercel.app`. Usá el panel de usuarios desde el celular con datos móviles.
 
 Después borrá el `.json` descargado o guardalo en un lugar seguro.
+
+## Mails (versión pública)
+
+1. Creá una cuenta en <https://resend.com> y agregá el dominio `fulbo5.com` (Domains → Add). Te da unos registros DNS: cargalos en Cloudflare (DNS → Records) y esperá a que diga **Verified**.
+2. En Resend → API Keys, creá una clave (permiso "Sending access").
+3. En Vercel → Settings → Environment Variables agregá `RESEND_API_KEY` con esa clave y hacé **Redeploy**. Opcional: `MAIL_DESDE` (por defecto `Fulbo <no-responder@fulbo5.com>`).
+4. Para el mail de contacto de los términos (`CONFIG.contacto`, `contacto@fulbo5.com`): en Cloudflare → Email → Email Routing, creá `contacto@` y que reenvíe a tu mail personal.
 
 ## Si alguien se olvida la contraseña
 

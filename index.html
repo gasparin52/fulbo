@@ -47,6 +47,11 @@ const CONFIG = {
   vapid: 'BOuQtxpJuEOwCY9HNPwBglCpc5U2jBmXhHbScpfwjSh230p5VyCC2TAg7lnc1rmV2n0i_xRPyKAAKNzjThpHDMI',
   // Días que dura la sesión antes de pedir la contraseña de nuevo.
   diasSesion: 30,
+  // Versión pública (fulbo5.com): mail de recuperación, contraseñas seguras,
+  // términos y privacidad. En GitHub Pages sigue todo como antes.
+  publico: !location.hostname.endsWith('github.io'),
+  // Mail de contacto que aparece en los términos y la privacidad.
+  contacto: 'contacto@fulbo5.com',
 };
 // =============================================================
 
@@ -90,6 +95,7 @@ try {
     F.connectFirestoreEmulator(db, '127.0.0.1', 8085);
     CONFIG.api = 'http://localhost:3001/api/admin';
     CONFIG.apiAvisar = 'http://localhost:3002/api/avisar';
+    CONFIG.apiCuenta = 'http://localhost:3003/api/cuenta';
   }
 } catch (e) {
   console.error(e);
@@ -223,6 +229,17 @@ const guardado = {
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
 };
 const pos = p => POS[p?.posicion] || POS.comodin;
+// Contraseña para la versión pública (igual que en api/cuenta.js). '' = está bien.
+function claveSegura(p, usuario = '') {
+  if (typeof p !== 'string' || p.length < 8) return 'La contraseña tiene que tener al menos 8 caracteres';
+  if (p.length > 100) return 'La contraseña es demasiado larga';
+  if (!/[A-Za-z]/.test(p) || !/\d/.test(p)) return 'La contraseña tiene que tener letras y números';
+  if (usuario && p.toLowerCase().includes(usuario.trim().toLowerCase())) return 'La contraseña no puede contener tu nombre de usuario';
+  return '';
+}
+const REQUISITOS_CLAVE = 'Mínimo 8 caracteres, con letras y números.';
+// Al entrar con una contraseña vieja (o sin mail de recuperación) se pide actualizar la cuenta.
+const CLAVE_ACTUALIZAR = 'f5_actualizar';
 const emailDe = usuario => `${usuario.trim().toLowerCase()}@${CONFIG.dominio}`;
 const miUid = () => D.user?.uid;
 const esAdmin = () => !!(D.grupo && D.user && D.grupo.admins.includes(D.user.uid));
@@ -299,7 +316,8 @@ function msgError(e) {
     'auth/invalid-login-credentials': 'Usuario o contraseña incorrectos',
     'auth/wrong-password': 'Usuario o contraseña incorrectos',
     'auth/user-not-found': 'Usuario o contraseña incorrectos',
-    'auth/weak-password': 'La contraseña tiene que tener al menos 6 caracteres',
+    'auth/weak-password': 'La contraseña es muy débil',
+    'auth/requires-recent-login': 'Por seguridad, salí y volvé a entrar',
     'auth/too-many-requests': 'Demasiados intentos, esperá un rato',
     'auth/operation-not-allowed': 'Falta habilitar el login en Firebase',
     'auth/configuration-not-found': 'Falta habilitar el login en Firebase',
@@ -346,7 +364,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -355,6 +373,11 @@ A.onAuthStateChanged(auth, user => {
       procesarInvitacion();
       render();
     }, e => { console.error(e); toast('❌ ' + msgError(e)); }));
+    // Mail de recuperación: lo ve solo uno mismo (privado/{uid}).
+    subsUser.push(F.onSnapshot(F.doc(db, 'privado', user.uid), s => {
+      D.privado = s.exists() ? s.data() : null;
+      render();
+    }, e => { console.error(e); D.privado = null; render(); }));
   }
   render();
 });
@@ -533,6 +556,7 @@ function cieloDe(codigo, dia) {
 // Los avisos importantes (alguien se bajó, faltan jugadores, partido suspendido) los
 // arma y guarda api/avisar.js en el grupo, y de paso manda la notificación al celu.
 // El servidor decide si corresponde y no repite avisos, así que acá se lo llama sin miedo.
+const urlCuenta = () => CONFIG.apiCuenta || (CONFIG.api ? CONFIG.api.replace(/admin$/, 'cuenta') : '');
 const urlAvisar = () => CONFIG.apiAvisar || (CONFIG.api ? CONFIG.api.replace(/admin$/, 'avisar') : '');
 async function avisar(tipo, datos = {}) {
   if (!urlAvisar() || !D.user || !D.gid) return;
@@ -1268,6 +1292,7 @@ function vistaRecuperar() {
 
 function vistaLogin() {
   if (ui.tab === 'recuperar') return vistaRecuperar();
+  if (ui.tab === 'olvide' && CONFIG.publico) return vistaOlvide();
   const reg = ui.tab === 'registro';
   const tab = (k, txt) => `<button type="button" data-action="tab" data-tab="${k}" class="rounded-lg py-2 text-sm font-semibold ${ui.tab === k ? 'bg-slate-950 text-white' : 'text-slate-400'}">${txt}</button>`;
   const invitado = guardado.get(LS + 'inv');
@@ -1283,17 +1308,172 @@ function vistaLogin() {
       <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
         <p id="aviso-usuario" class="hidden text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"></p>
         <input id="l-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" title="Letras, números, punto o guion bajo" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" class="${INPUT}">
+        ${reg && CONFIG.publico ? `
+          <div>
+            <input id="l-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail" class="${INPUT}">
+            <p class="text-xs text-slate-500 mt-1">Solo para recuperar la cuenta si te olvidás la contraseña. No lo ve nadie.</p>
+          </div>` : ''}
         <div class="relative">
-          <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="6" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? ' (mínimo 6 caracteres)' : ''}" class="${INPUT} pr-12">
+          <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="${reg && CONFIG.publico ? 8 : 6}" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? (CONFIG.publico ? ' (8+, letras y números)' : ' (mínimo 6 caracteres)') : ''}" class="${INPUT} pr-12">
           <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ui.verPass ? '🙈' : '👁️'}</button>
         </div>
+        ${reg && CONFIG.publico ? `<input id="l-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetí la contraseña" class="${INPUT}">` : ''}
         ${reg ? camposPerfil() : ''}
+        ${reg && CONFIG.publico ? `
+          <label class="flex items-start gap-2 text-sm text-slate-300">
+            <input id="l-acepto" name="acepto" type="checkbox" required class="mt-1 accent-emerald-500">
+            <span>Tengo 13 años o más y acepto los <a href="#/terminos" class="underline text-emerald-300">términos</a> y la <a href="#/privacidad" class="underline text-emerald-300">política de privacidad</a>.</span>
+          </label>` : ''}
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
-      ${reg ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
+      ${reg && !CONFIG.publico ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
+      ${!reg && CONFIG.publico ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="text-sm text-slate-400 hover:text-slate-200 underline">¿Te olvidaste la contraseña?</button></div>' : ''}
     `)}
     <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">❓ ¿Primera vez? Mirá cómo se usa</a>
-    ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}`;
+    ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}
+    ${pie()}`;
+}
+
+// Pie con los términos y la privacidad.
+const pie = () => CONFIG.publico ? `
+  <p class="text-center text-xs text-slate-600 pt-4">
+    <a href="#/terminos" class="hover:text-slate-400 underline">Términos</a> ·
+    <a href="#/privacidad" class="hover:text-slate-400 underline">Privacidad</a> ·
+    <a href="#/ayuda" class="hover:text-slate-400 underline">Ayuda</a>
+  </p>` : '';
+const encabezado = (icono, titulo, texto = '') => `
+  <div class="text-center pt-6">
+    <div class="text-5xl">${icono}</div>
+    <h1 class="text-2xl font-black mt-2">${titulo}</h1>
+    ${texto ? `<p class="text-slate-400 text-sm mt-1">${texto}</p>` : ''}
+  </div>`;
+const camposClave = (usuario = '') => `
+  <input id="c-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="8" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Contraseña nueva" class="${INPUT}">
+  <input id="c-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetila" class="${INPUT}">
+  <div class="flex items-center justify-between gap-2 text-xs text-slate-500">
+    <span>${REQUISITOS_CLAVE}</span>
+    <button type="button" data-action="ver-pass" class="underline shrink-0">${ui.verPass ? '🙈 Ocultar' : '👁️ Mostrar'}</button>
+  </div>`;
+// Revisa la contraseña nueva y su repetición; devuelve el error o ''.
+const revisarClave = (f, usuario) => claveSegura(f.get('pass'), usuario) || (f.get('pass') !== f.get('pass2') ? 'Las contraseñas no coinciden' : '');
+
+function vistaOlvide() {
+  return `
+    ${encabezado('🔑', '¿Te olvidaste la contraseña?', 'Te mandamos un link a tu mail para elegir una nueva.')}
+    ${card(ui.olvideEnviado ? `
+      <p class="text-sm">📧 Si hay una cuenta con ese usuario o mail (y el mail está confirmado), te llegó un link. <b>Dura 1 hora.</b></p>
+      <p class="text-xs text-slate-500 mt-2">Revisá también la carpeta de spam. Si no tenías mail cargado, pedile al admin de tu grupo que te ponga una contraseña nueva.</p>
+    ` : `
+      <form data-form="olvide" class="space-y-3">
+        <input id="o-dato" name="dato" required maxlength="120" autocapitalize="none" spellcheck="false" placeholder="Tu usuario o tu mail" class="${INPUT}">
+        <button class="${BTN_OK} w-full">Mandarme el link</button>
+      </form>
+    `)}
+    <div class="text-center"><button data-action="tab" data-tab="entrar" class="text-sm text-slate-400 hover:text-slate-200 underline">← Volver a entrar</button></div>
+    ${pie()}`;
+}
+
+function vistaNuevaClave(token) {
+  return `
+    ${encabezado('🔐', 'Elegí tu contraseña nueva')}
+    ${card(`
+      <form data-form="nueva-clave" class="space-y-3">
+        <input type="hidden" name="token" value="${esc(token)}">
+        ${camposClave()}
+        <button class="${BTN_OK} w-full">Guardar y entrar</button>
+      </form>`)}
+    ${pie()}`;
+}
+
+function vistaVerificar(token) {
+  ui.verificados = ui.verificados || {};
+  const estado = ui.verificados[token];
+  if (!estado) {
+    ui.verificados[token] = 'cargando';
+    api('verificar', { token }, urlCuenta())
+      .then(r => { ui.verificados[token] = { ok: true, mail: r.mail }; })
+      .catch(e => { ui.verificados[token] = { error: e.mensaje || 'No se pudo confirmar' }; })
+      .finally(render);
+  }
+  const listo = estado && estado !== 'cargando';
+  return `
+    ${encabezado(!listo ? '⏳' : estado.ok ? '✅' : '⚠️', !listo ? 'Confirmando tu mail…' : estado.ok ? '¡Mail confirmado!' : 'No se pudo confirmar', listo ? (estado.ok ? `Si te olvidás la contraseña, te mandamos el link a ${esc(estado.mail)}.` : esc(estado.error)) : '')}
+    ${listo ? `<a href="#/" class="${BTN_OK} block text-center">Ir a Fulbo</a>` : ''}`;
+}
+
+// Al volver a entrar: contraseña nueva si la vieja es débil, y mail de recuperación.
+function pendienteActualizar() {
+  const f = guardado.get(CLAVE_ACTUALIZAR);
+  if (!f || !CONFIG.publico) return false;
+  if (D.privado === undefined) return 'cargando';
+  if (f === 'clave' || !D.privado?.mail) return true;
+  guardado.set(CLAVE_ACTUALIZAR, null);
+  return false;
+}
+function vistaActualizar() {
+  const clave = guardado.get(CLAVE_ACTUALIZAR) === 'clave';
+  return `
+    ${encabezado('🛡️', 'Actualizá tu cuenta', 'Fulbo ahora es público, así que pedimos cuentas más seguras. Es una sola vez.')}
+    ${clave ? card(`
+      <h2 class="font-bold mb-1">🔐 Contraseña nueva</h2>
+      <p class="text-sm text-slate-400 mb-3">Tu contraseña actual es muy corta o fácil de adivinar.</p>
+      <form data-form="actualizar-clave" class="space-y-3">
+        ${camposClave()}
+        <button class="${BTN_OK} w-full">Guardar contraseña</button>
+      </form>`) : card(`
+      <h2 class="font-bold mb-1">📧 Tu mail de recuperación</h2>
+      <p class="text-sm text-slate-400 mb-3">Si algún día te olvidás la contraseña, te mandamos un link acá. No lo ve nadie más ni te vamos a mandar publicidad.</p>
+      <form data-form="mail" class="space-y-3">
+        <input id="a-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail" class="${INPUT}">
+        <button class="${BTN_OK} w-full">Guardar mail</button>
+      </form>`)}
+    <div class="text-center"><button data-action="logout" class="text-sm text-slate-500 underline">Salir</button></div>`;
+}
+
+// Aviso para confirmar el mail.
+function tarjetaMail() {
+  const p = D.privado;
+  if (!CONFIG.publico || !p?.mail || p.verificado) return '';
+  return `
+    <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm flex items-center gap-3">
+      <p class="flex-1">📧 <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. Revisá también spam.</p>
+      <button data-action="reenviar-mail" class="text-xs text-amber-200 underline shrink-0">Reenviar</button>
+    </div>`;
+}
+
+// En la ficha propia: mail, contraseña y borrar la cuenta.
+function tarjetaCuenta() {
+  if (!CONFIG.publico) return '';
+  const p = D.privado;
+  const estado = !p?.mail ? '<span class="text-amber-300">Sin mail: si te olvidás la contraseña no la vas a poder recuperar.</span>'
+    : p.verificado ? '<span class="text-emerald-400">✅ Confirmado</span>' : '<span class="text-amber-300">⏳ Falta confirmarlo (revisá tu mail)</span>';
+  return card(`
+    <h2 class="text-lg font-bold mb-3">🔐 Tu cuenta</h2>
+    <form data-form="mail" class="space-y-2">
+      <label class="block text-sm text-slate-400">Mail de recuperación
+        <input id="f-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" value="${esc(p?.mail || '')}" placeholder="Tu mail" class="${INPUT} mt-1">
+      </label>
+      <p class="text-xs">${estado}</p>
+      <button class="${BTN_SEC} w-full text-sm">${p?.mail ? 'Cambiar mail' : 'Guardar mail'}</button>
+    </form>
+    <form data-form="cambiar-clave" class="space-y-2 mt-5 pt-4 border-t border-slate-800">
+      <p class="text-sm text-slate-400">Cambiar contraseña</p>
+      <input id="f-actual" name="actual" type="password" required autocomplete="current-password" placeholder="Contraseña actual" class="${INPUT}">
+      ${camposClave()}
+      <button class="${BTN_SEC} w-full text-sm">Cambiar contraseña</button>
+    </form>
+    <div class="mt-5 pt-4 border-t border-slate-800">
+      ${ui.borrarCuenta ? `
+        <form data-form="borrar-cuenta" class="space-y-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3">
+          <p class="text-sm text-red-200"><b>Se borra todo:</b> tu ficha, tus calificaciones (las que diste y las que te dieron), tu mail y tu lugar en los grupos. No se puede deshacer.</p>
+          <input id="b-pass" name="pass" type="password" required autocomplete="current-password" placeholder="Tu contraseña" class="${INPUT}">
+          <input id="b-texto" name="texto" required autocapitalize="characters" placeholder="Escribí BORRAR" class="${INPUT}">
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" data-action="borrar-cuenta-abrir" class="${BTN_SEC} text-sm">Cancelar</button>
+            <button class="${BTN} text-sm bg-red-600 hover:bg-red-500 text-white">Borrar mi cuenta</button>
+          </div>
+        </form>` : `<button data-action="borrar-cuenta-abrir" class="text-xs text-slate-500 hover:text-red-300 underline">Borrar mi cuenta</button>`}
+    </div>`);
 }
 
 function vistaCompletar() {
@@ -1341,12 +1521,14 @@ function vistaGrupos(conVolver) {
       <form data-form="crear-grupo" class="flex gap-2">
         <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
         <button class="${BTN_OK} shrink-0">Crear</button>
-      </form>`)}`;
+      </form>`)}
+    ${tarjetaCuenta()}
+    ${pie()}`;
 }
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), panelAdmin(d), pie()].join('');
 }
 
 function topBar() {
@@ -1475,6 +1657,112 @@ function guia() {
     </div>`);
 }
 
+// ---------------- Términos y privacidad ----------------
+const ACTUALIZADO = 'noviembre de 2026';
+function paginaLegal(icono, titulo, secciones) {
+  const contacto = `<a href="mailto:${esc(CONFIG.contacto)}" class="underline">${esc(CONFIG.contacto)}</a>`;
+  return `
+    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <div>
+      <h1 class="text-2xl font-black">${icono} ${titulo}</h1>
+      <p class="text-xs text-slate-500 mt-1">Última actualización: ${ACTUALIZADO}</p>
+    </div>
+    ${secciones.map(([t, items]) => card(`
+      <h2 class="text-lg font-bold mb-2">${t}</h2>
+      <ul class="space-y-2 text-sm text-slate-300 list-disc pl-5 marker:text-slate-600">
+        ${items.map(i => `<li>${i.replace('{contacto}', contacto)}</li>`).join('')}
+      </ul>`)).join('')}
+    ${pie()}`;
+}
+
+function vistaTerminos() {
+  return paginaLegal('📜', 'Términos y condiciones', [
+    ['1. Qué es Fulbo', [
+      'Fulbo (fulbo5.com) es una herramienta <b>gratuita</b> para organizar partidos de fútbol 5 entre conocidos: anotarse, armar equipos parejos, calificarse y votar al jugador del partido.',
+      'Al crear una cuenta o usar la página aceptás estos términos y la <a href="#/privacidad" class="underline">política de privacidad</a>. Si no estás de acuerdo, no la uses.',
+    ]],
+    ['2. Quién puede usarla', [
+      'Tenés que tener <b>13 años o más</b>. Si sos menor de 18, necesitás el permiso de tu madre, padre o tutor.',
+      'Una cuenta por persona. No te hagas pasar por otro ni uses el nombre o la foto de otra persona.',
+    ]],
+    ['3. Tu cuenta', [
+      'Sos responsable de cuidar tu contraseña y de lo que se haga con tu cuenta. Si creés que alguien entró, cambiala desde tu ficha.',
+      'Cargá un mail real: es la única forma de recuperar la cuenta si te olvidás la contraseña.',
+      'Podés borrar tu cuenta cuando quieras desde tu ficha (🔐 Tu cuenta → Borrar mi cuenta).',
+    ]],
+    ['4. Cómo hay que usarla', [
+      'Con respeto. Las calificaciones sirven <b>solo para armar equipos parejos</b>: no las uses para burlarte, discriminar ni acosar a nadie.',
+      'No subas fotos ni pongas nombres ofensivos, sexuales, violentos o de otra persona sin su permiso.',
+      'Los reportes de "faltó sin avisar" tienen que ser reales. No es para vengarse de nadie.',
+      'No intentes romper la página, entrar a grupos o cuentas ajenas, ni sacar datos de otros usuarios.',
+    ]],
+    ['5. Los grupos', [
+      'Cada grupo lo manejan sus admins: ellos invitan, arman la fecha y pueden sacar o expulsar a quien no respete las reglas.',
+      'Fulbo no organiza los partidos ni se hace cargo de lo que pasa en ellos (canchas, pagos, lesiones, peleas, horarios o suspensiones). Eso es entre los jugadores.',
+    ]],
+    ['6. Tu contenido', [
+      'Lo que cargás (foto, ficha, calificaciones) sigue siendo tuyo. Nos das permiso para guardarlo y mostrarlo dentro de la página a los miembros de tus grupos, solo para que funcione.',
+      'Podemos borrar contenido o suspender cuentas que no cumplan estos términos.',
+    ]],
+    ['7. Publicidad', [
+      'La página puede mostrar publicidad para cubrir sus costos. Más detalles en la <a href="#/privacidad" class="underline">política de privacidad</a>.',
+    ]],
+    ['8. Sin garantías', [
+      'Fulbo se ofrece <b>tal cual</b>, sin garantías. Hacemos lo posible para que ande bien, pero puede tener errores, cortarse o dejar de existir.',
+      'En la medida que lo permita la ley, no nos hacemos responsables por daños que surjan del uso de la página.',
+    ]],
+    ['9. Cambios y ley aplicable', [
+      'Podemos cambiar estos términos. Si el cambio es importante, lo avisamos en la página.',
+      'Se rigen por las leyes de la República Argentina.',
+      'Consultas: {contacto}.',
+    ]],
+  ]);
+}
+
+function vistaPrivacidad() {
+  return paginaLegal('🔒', 'Política de privacidad', [
+    ['Qué datos guardamos', [
+      'De tu cuenta: <b>nombre de usuario</b>, <b>contraseña</b> (cifrada: nadie la puede ver, ni nosotros) y tu <b>mail de recuperación</b>.',
+      'De tu ficha: <b>edad</b>, <b>posición</b>, <b>cuadro</b> y, si la subís, tu <b>foto</b>. No pedimos nombre real, teléfono ni documento.',
+      'Lo que hacés en cada grupo: si te anotás o vas a la tribuna, las <b>calificaciones</b> que das, tus votos al jugador del partido, reportes de faltas, bajas y asistencia, y si te marcaste lesionado.',
+      'Si activás las notificaciones, un código de tu navegador para poder mandártelas.',
+    ]],
+    ['Para qué los usamos', [
+      'Solo para que la página funcione: armar listas y equipos, mostrar tu ficha a tu grupo y mandarte avisos del partido.',
+      'El mail lo usamos <b>únicamente</b> para confirmar que es tuyo y para que recuperes la contraseña. No mandamos publicidad ni newsletters.',
+      '<b>No vendemos ni compartimos tus datos.</b>',
+    ]],
+    ['Quién los ve', [
+      'Tu ficha la ven solo los miembros de tus grupos. Para entrar a un grupo hace falta su link de invitación.',
+      'Las calificaciones se muestran como promedios: nadie ve qué le pusiste a quién. Los reportes de faltas los ven solo los admins del grupo.',
+      'Tu mail no lo ve nadie más que vos.',
+      'El administrador del sitio puede ver la lista de usuarios para dar soporte (por ejemplo, ponerte una contraseña nueva).',
+    ]],
+    ['Dónde se guardan', [
+      'En servicios de terceros que usamos para que la página ande: <b>Google Firebase</b> (cuentas y datos), <b>Vercel</b> (servidor), <b>Resend</b> (envío de mails) y <b>Firebase Cloud Messaging</b> (notificaciones). Pueden estar fuera de Argentina.',
+      'Para el clima consultamos <b>Open-Meteo</b> con la ciudad del partido, sin datos tuyos.',
+    ]],
+    ['Cookies y publicidad', [
+      'La página guarda en tu navegador tu sesión y algunas preferencias (por ejemplo, el último grupo que abriste).',
+      'Si se muestra publicidad de Google, Google puede usar cookies para elegir los anuncios. Más info en <a href="https://policies.google.com/technologies/ads?hl=es" target="_blank" rel="noopener" class="underline">policies.google.com/technologies/ads</a>. Podés desactivar los anuncios personalizados en <a href="https://adssettings.google.com" target="_blank" rel="noopener" class="underline">adssettings.google.com</a>.',
+    ]],
+    ['Cuánto tiempo', [
+      'Mientras tengas la cuenta. Si la borrás, se borran tu ficha, tu mail, tus calificaciones y tu lugar en los grupos. Pueden quedar copias de seguridad por un tiempo limitado.',
+    ]],
+    ['Tus derechos', [
+      'Podés ver y corregir tus datos desde tu ficha, y <b>borrar tu cuenta</b> desde ahí mismo (🔐 Tu cuenta).',
+      'Para cualquier otro pedido sobre tus datos (acceso, rectificación o supresión) escribí a {contacto}. Te respondemos dentro de los plazos de la Ley 25.326 de Protección de Datos Personales.',
+      'Si no te responden, podés reclamar ante la <b>Agencia de Acceso a la Información Pública</b> (argentina.gob.ar/aaip), autoridad de control de esa ley.',
+    ]],
+    ['Menores', [
+      'La página no es para menores de 13 años. Si nos enteramos de que un menor de 13 tiene cuenta, la borramos.',
+    ]],
+    ['Cambios', [
+      'Si cambiamos esta política de forma importante, lo avisamos en la página.',
+    ]],
+  ]);
+}
+
 // ---------------- Reglas ----------------
 function vistaReglas() {
   const seccion = (titulo, items) => card(`
@@ -1545,9 +1833,10 @@ function vistaReglas() {
       'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición, foto y de qué cuadro sos.',
       'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
-      '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
+      CONFIG.publico ? '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Si no tenías mail cargado, pedile al admin que te ponga una nueva.' : '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
       'El grupo es privado: solo entra quien tiene el link de invitación. No lo compartas fuera del grupo.',
-    ])}`;
+    ])}
+    ${pie()}`;
 }
 
 function indicadorClima() {
@@ -2309,7 +2598,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|usuarios|reglas)/.test(location.hash);
+  const enPrincipal = !/^#\/(jugador|grupos|usuarios|reglas|ayuda|terminos|privacidad|clave|verificar)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -2424,7 +2713,7 @@ function vistaFicha(id) {
         ${camposPerfil(p)}
         <button class="${BTN_OK} w-full">Guardar</button>
       </form>
-      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) : miVoto && ui.votoAbierto !== id ? card(`
+      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) + tarjetaCuenta() : miVoto && ui.votoAbierto !== id ? card(`
       <div class="flex items-center gap-3">
         <div class="flex-1">
           <h2 class="font-bold">✅ Ya calificaste a ${esc(p.usuario)}</h2>
@@ -2551,17 +2840,19 @@ function panelAdmin(d) {
 // ---------------- Superadmin: usuarios ----------------
 const SA = { usuarios: null, cargando: false, error: null, editando: null, foto: null, passSugerida: genId(8) };
 
-async function api(accion, datos = {}) {
-  if (!CONFIG.api) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
+// renovar: pide un token nuevo (por ejemplo, después de cambiar la contraseña).
+async function api(accion, datos = {}, url = CONFIG.api, renovar = false) {
+  if (!url) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
   const headers = { 'Content-Type': 'application/json' };
-  if (D.user) headers.Authorization = 'Bearer ' + await D.user.getIdToken();
-  const r = await fetch(CONFIG.api, {
+  if (D.user) headers.Authorization = 'Bearer ' + await D.user.getIdToken(renovar);
+  const r = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({ accion, ...datos }),
   }).catch(e => {
     throw Object.assign(e, { mensaje: 'No se pudo conectar con el servidor. Probá de nuevo en un rato o desde otra red (por ejemplo, datos del celular).' });
   });
+  if (r.status === 401 && D.user && !renovar) return api(accion, datos, url, true);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error), { mensaje: j.error || `Error del servidor (${r.status})` });
   return j;
@@ -2680,9 +2971,15 @@ function renderVistas() {
   const el = $('#app');
   if (D.user === undefined) return pintar(el, cargando());
   if (/^#\/(ayuda|reglas)$/.test(location.hash)) return pintar(el, vistaReglas());
+  if (location.hash === '#/terminos') return pintar(el, vistaTerminos());
+  if (location.hash === '#/privacidad') return pintar(el, vistaPrivacidad());
+  const link = location.hash.match(/^#\/(clave|verificar)\/([A-Za-z0-9_-]+)$/);
+  if (link) return pintar(el, link[1] === 'clave' ? vistaNuevaClave(link[2]) : vistaVerificar(link[2]));
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
+  const actualizar = pendienteActualizar();
+  if (actualizar) return pintar(el, actualizar === 'cargando' ? cargando() : vistaActualizar());
   if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
   if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
@@ -2845,6 +3142,8 @@ const acciones = {
   },
   'abrir-avisos': () => { ui.modal = 'avisos'; guardado.set(claveVisto(), String(Date.now())); render(); },
   'activar-push': () => activarNotificaciones(),
+  'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
+  'borrar-cuenta-abrir': () => { ui.borrarCuenta = !ui.borrarCuenta; render(); },
   'desactivar-push': () => desactivarNotificaciones(),
   'toggle-clima': () => { ui.climaAbierto = !ui.climaAbierto; render(); },
   'editar-equipos': () => { ui.editarEquipos = !ui.editarEquipos; render(); },
@@ -2950,22 +3249,36 @@ const cambios = {
 };
 
 const formularios = {
-  entrar: f => {
+  entrar: async f => {
     if (avisoMail(f.get('usuario'))) return toast(avisoMail(f.get('usuario')));
-    return act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass')));
+    // Versión pública: si la contraseña es vieja (débil), al entrar se pide cambiarla.
+    if (CONFIG.publico) guardado.set(CLAVE_ACTUALIZAR, claveSegura(f.get('pass'), f.get('usuario')) ? 'clave' : 'mail');
+    const ok = await act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass')));
+    if (!ok) guardado.set(CLAVE_ACTUALIZAR, null);
+    return ok;
   },
   registro: async f => {
     const usuario = f.get('usuario').trim();
     if (avisoMail(usuario)) return toast(avisoMail(usuario));
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
     const edad = parseInt(f.get('edad'));
-    if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+    const minima = CONFIG.publico ? 13 : 10;
+    if (!(edad >= minima && edad <= 99)) return toast(`Poné una edad entre ${minima} y 99`);
+    const mail = (f.get('mail') || '').trim();
+    if (CONFIG.publico) {
+      const error = revisarClave(f, usuario);
+      if (error) return toast(error);
+      if (!f.get('acepto')) return toast('Tenés que aceptar los términos y la privacidad');
+      guardado.set(CLAVE_ACTUALIZAR, 'mail');
+    }
     const datos = { usuario, edad, posicion: f.get('posicion'), foto: ui.foto || '', cuadro: cuadroDe(f), grupos: [], creado: Date.now() };
     D.registrando = true;
     render();
     const ok = await act(async () => {
       const cred = await A.createUserWithEmailAndPassword(auth, emailDe(usuario), f.get('pass'));
       await F.setDoc(refUsuario(cred.user.uid), datos);
+      // Si falla el mail, se vuelve a pedir en "Actualizá tu cuenta".
+      if (CONFIG.publico) await api('mail', { mail }, urlCuenta()).catch(e => console.error(e));
     }, `¡Bienvenido, ${usuario}! ⚽`);
     D.registrando = false;
     if (ok) ui.foto = null;
@@ -2973,6 +3286,51 @@ const formularios = {
     return ok;
   },
   perfil: guardarPerfil,
+  olvide: async f => {
+    const ok = await act(() => api('olvide', { dato: f.get('dato') }, urlCuenta()));
+    if (ok) { ui.olvideEnviado = true; render(); }
+    return ok;
+  },
+  'nueva-clave': async f => {
+    const error = revisarClave(f);
+    if (error) return toast(error);
+    let usuario;
+    const ok = await act(async () => {
+      usuario = (await api('nueva-clave', { token: f.get('token'), password: f.get('pass') }, urlCuenta())).usuario;
+      guardado.set(CLAVE_ACTUALIZAR, 'mail');
+      await A.signInWithEmailAndPassword(auth, emailDe(usuario), f.get('pass'));
+    }, '🔐 Listo, ya tenés tu contraseña nueva');
+    if (ok) location.hash = '#/';
+    return ok;
+  },
+  mail: f => act(() => api('mail', { mail: f.get('mail') }, urlCuenta()), '📧 Te mandamos un link para confirmarlo'),
+  'actualizar-clave': async f => {
+    const error = revisarClave(f, D.perfil?.usuario);
+    if (error) return toast(error);
+    const ok = await act(() => A.updatePassword(D.user, f.get('pass')), '🔐 Contraseña actualizada');
+    if (ok) guardado.set(CLAVE_ACTUALIZAR, 'mail');
+    return ok;
+  },
+  'cambiar-clave': async f => {
+    const error = revisarClave(f, D.perfil?.usuario);
+    if (error) return toast(error);
+    return act(async () => {
+      await A.reauthenticateWithCredential(D.user, A.EmailAuthProvider.credential(D.user.email, f.get('actual')));
+      await A.updatePassword(D.user, f.get('pass'));
+    }, '🔐 Contraseña cambiada');
+  },
+  'borrar-cuenta': async f => {
+    if (f.get('texto').trim().toUpperCase() !== 'BORRAR') return toast('Escribí BORRAR para confirmar');
+    const ok = await act(async () => {
+      await A.reauthenticateWithCredential(D.user, A.EmailAuthProvider.credential(D.user.email, f.get('pass')));
+      await D.user.getIdToken(true);
+      await api('borrar-cuenta', {}, urlCuenta());
+      guardado.set(CLAVE_ACTUALIZAR, null);
+      await A.signOut(auth);
+    }, 'Tu cuenta se borró. ¡Gracias por haber jugado! ⚽');
+    if (ok) { ui.borrarCuenta = false; location.hash = '#/'; }
+    return ok;
+  },
   recuperar: async f => {
     let usuario;
     const ok = await act(async () => { usuario = (await api('recuperar', { codigo: f.get('codigo'), password: f.get('pass') })).usuario; });
@@ -3135,7 +3493,7 @@ document.addEventListener('submit', async e => {
   try {
     if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
       form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear'].includes(form.dataset.form)) {
+      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear', 'cambiar-clave'].includes(form.dataset.form)) {
         form.reset();
         form.querySelectorAll('[data-out]').forEach(i => (document.getElementById(i.dataset.out).textContent = i.value));
       }
