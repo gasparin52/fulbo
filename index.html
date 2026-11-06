@@ -147,6 +147,30 @@ const DURACION_DEFAULT = 60, DURACIONES = [30, 40, 50, 60, 70, 80, 90, 100, 110,
 const CIERRE_EQUIPOS_MIN = 30;      // los equipos se cierran media hora antes
 const BLOQUEO_DESPUES_H = 6;        // después de terminar, la lista sigue bloqueada un rato
 const duracionDe = p => Math.min(120, Math.max(30, Number(p.duracion) || DURACION_DEFAULT));
+// ---- Fecha fija ----
+// agenda del grupo: { slots: [{ dia: 0-6 (0 = domingo), hora: 'HH:MM', lugar }], saltear: ['AAAA-MM-DD'] }.
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const DIAS_PLURAL = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
+const agendaActiva = g => !!g?.agenda?.slots?.length;
+const textoAgenda = ag => 'Todos los ' + ag.slots.map(x => `${DIAS_PLURAL[x.dia]} ${x.hora}`).join(' y ');
+const diaDe = f => new Date(f + 'T12:00:00Z').getUTCDay();
+const ayerArg = () => new Date(Date.parse(hoyArg() + 'T12:00:00Z') - DIA).toISOString().slice(0, 10);
+// Las próximas n fechas después de "desde" (sin incluirla). Con salteadas: también las que se saltean.
+// Igual que proximasFechas de api/avisar.js.
+function ocurrencias(ag, desde, n, conSalteadas = false) {
+  const out = [];
+  const slots = [...(ag?.slots || [])].sort((a, b) => a.hora.localeCompare(b.hora));
+  let d = Date.parse(desde + 'T12:00:00Z') + DIA;
+  for (let i = 0; i < 120 && out.length < n && slots.length; i++, d += DIA) {
+    const fecha = new Date(d).toISOString().slice(0, 10), dia = new Date(d).getUTCDay();
+    const salteada = (ag.saltear || []).includes(fecha);
+    if (salteada && !conSalteadas) continue;
+    for (const x of slots) if (x.dia === dia && out.length < n) out.push({ fecha, hora: x.hora, lugar: x.lugar || '', salteada });
+  }
+  return out;
+}
+const proximasFechas = (ag, desde, n = 1) => ocurrencias(ag, desde, n);
+
 function tiemposDe(p) {
   const h = p && horaDelPartido(p);
   if (!p?.fecha || !h) return null;
@@ -881,6 +905,21 @@ function crearVotacion(fecha) {
 
 // Una hora después de que empieza el partido, el primero que abre la app crea la votación.
 let mvpIntentado = null;
+// Fecha fija: terminado el partido (y el rato de lista cerrada), se pasa a la fecha siguiente.
+// Antes se arma la votación del mejor con los titulares; el cambio lo hace api/avisar.js.
+let rotacionIntentada = null;
+async function asegurarRotacion() {
+  const g = D.grupo;
+  if (!agendaActiva(g) || !D.miembros || !D.cargado.mvps || !D.cargado.faltas) return;
+  const p = g.partido, t = tiemposDe(p);
+  const termino = !p.fecha || (t ? Date.now() >= t.fin + BLOQUEO_DESPUES_H * 3600e3 : p.fecha < hoyArg());
+  const clave = `${D.gid}/${p.fecha}`;
+  if (!termino || rotacionIntentada === clave) return;
+  rotacionIntentada = clave;
+  if (p.fecha && Date.now() < cierraVotacion(p.fecha) && D.mvp?.id !== p.fecha) await crearVotacion(p.fecha);
+  avisar('rotar');
+}
+
 function asegurarVotacion() {
   const f = D.grupo?.partido.fecha;
   // Espera a tener las votaciones y las 🟥, que deciden quiénes fueron titulares.
@@ -1662,6 +1701,7 @@ function tarjetaMisPartidos() {
           <p class="text-xs text-slate-400 mt-0.5">
             ${x.p.fecha ? [cuantoFalta(x.p.fecha), x.t ? x.t.hora : x.p.cuando, x.p.lugar].filter(Boolean).map(esc).join(' · ') : 'Todavía no hay fecha cargada'}
           </p>
+          ${agendaActiva(x.g) ? `<p class="text-[11px] text-slate-500 mt-0.5">${ic('repeat')} ${esc(textoAgenda(x.g.agenda))}${(() => { const [o] = proximasFechas(x.g.agenda, x.p.fecha || ayerArg()); return o ? ` · después: ${esc(fechaLinda(o.fecha))}` : ''; })()}</p>` : ''}
           ${choques}
           <div class="flex flex-wrap gap-2 mt-2">
             ${abierto && !anotado ? `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN_OK} text-xs px-3 py-1.5">⚽ Me anoto</button>` : ''}
@@ -1994,6 +2034,7 @@ function vistaReglas() {
     ])}
     ${seccion(ic('timer') + ' El día del partido', [
       'El admin carga la <b>duración</b> del partido (hasta 2 h).',
+      'Si el grupo tiene <b>fecha fija</b> (por ejemplo, todos los viernes a las 20), cuando termina el partido la lista se vacía sola y se abre la fecha siguiente. Si un día cambia, el admin elige si el cambio es <b>solo para esa fecha</b> o <b>para todas las siguientes</b>, y puede saltear una semana (feriados).',
       '<b>Media hora antes</b> se cierran los equipos: ya no se rearman solos ni se pueden pedir cambios.',
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
@@ -2088,6 +2129,48 @@ function cuantoFalta(fecha) {
   return dias === 0 ? 'Hoy' : dias === 1 ? 'Mañana' : dias > 1 && dias < 7 ? `En ${dias} días` : '';
 }
 
+function lineaAgenda() {
+  const g = D.grupo;
+  if (!agendaActiva(g)) return '';
+  const lista = ocurrencias(g.agenda, g.partido.fecha || ayerArg(), 3, true);
+  const corta = f => { const t = fechaLinda(f); return t.slice(0, 3) + ' ' + t.split(' ')[1]; };
+  const item = o => esAdmin()
+    ? `<button data-action="saltear" data-fecha="${o.fecha}" title="${o.salteada ? 'Volver a jugar esa fecha' : 'No se juega esa fecha (feriado, etc.)'}" class="underline decoration-dotted ${o.salteada ? 'line-through text-slate-600' : 'hover:text-slate-200'}">${corta(o.fecha)}</button>`
+    : `<span class="${o.salteada ? 'line-through text-slate-600' : ''}">${corta(o.fecha)}</span>`;
+  return `
+    <p class="mt-2 text-xs text-slate-400">${ic('repeat', 'text-emerald-400')} ${esc(textoAgenda(g.agenda))}${lista.length ? ' · Después: ' + lista.map(item).join(', ') : ''}</p>
+    ${esAdmin() && lista.length ? '<p class="text-[11px] text-slate-600 mt-0.5">Tocá una fecha para saltearla (feriado, etc.).</p>' : ''}`;
+}
+
+function formAgenda() {
+  const g = D.grupo, p = g.partido;
+  const slots = g.agenda?.slots?.length ? g.agenda.slots : [{ dia: p.fecha ? diaDe(p.fecha) : 5, hora: horaValida(p.cuando) ? p.cuando : '20:00', lugar: p.lugar }];
+  const filas = Math.min(3, Math.max(slots.length, ui.agendaFilas || 1));
+  const fila = i => {
+    const x = slots[i] || { dia: '', hora: '', lugar: '' };
+    return `
+      <div class="grid grid-cols-[1fr_5.5rem] sm:grid-cols-[9rem_5.5rem_1fr] gap-2">
+        <select id="ag-dia-${i}" name="dia" class="${INPUT}">
+          ${i ? '<option value="">— Ninguno —</option>' : ''}
+          ${DIAS.map((n, k) => `<option value="${k}" ${x.dia === k ? 'selected' : ''}>${n[0].toUpperCase() + n.slice(1)}</option>`).join('')}
+        </select>
+        <input id="ag-hora-${i}" name="hora" value="${esc(x.hora)}" placeholder="20:00" maxlength="5" class="${INPUT}">
+        <input id="ag-lugar-${i}" name="lugarFijo" value="${esc(x.lugar || '')}" placeholder="Lugar (si cambia)" maxlength="60" class="${INPUT} col-span-2 sm:col-span-1">
+      </div>`;
+  };
+  return `
+    <form data-form="agenda" class="mt-6 space-y-2 rounded-xl border border-slate-800 p-3">
+      <h3 class="font-semibold text-sm text-slate-300">${ic('repeat')} Fecha fija ${agendaActiva(g) ? '<span class="text-xs font-normal text-emerald-400">activa</span>' : ''}</h3>
+      <p class="text-xs text-slate-500">Si juegan siempre el mismo día, cargalo acá. Cuando termina un partido, la lista se vacía sola y se abre la fecha siguiente (la votación del mejor queda guardada).</p>
+      ${Array.from({ length: filas }, (_, i) => fila(i)).join('')}
+      ${filas < 3 ? '<button type="button" data-action="agenda-mas" class="text-xs text-slate-400 underline">+ Otro día de la semana</button>' : ''}
+      <div class="flex gap-2 pt-1">
+        <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">${ic('save')} ${agendaActiva(g) ? 'Guardar fecha fija' : 'Activar fecha fija'}</button>
+        ${agendaActiva(g) ? `<button type="button" data-action="agenda-quitar" class="${BTN} bg-slate-800 hover:bg-red-950 text-red-300 text-sm">Desactivar</button>` : ''}
+      </div>
+    </form>`;
+}
+
 function header(d) {
   const p = D.grupo.partido;
   const faltan = d.cupo - d.titulares.length;
@@ -2105,6 +2188,7 @@ function header(d) {
             ${p.cuando ? `<span class="${chip}">${ic('clock', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></span>` : ''}
             ${p.lugar ? `<a href="${esc(mapa)}" target="_blank" rel="noopener" title="Ver en el mapa" class="${chip} min-w-0 hover:border-slate-500">${ic('map-pin', 'text-slate-400')} <b class="font-semibold text-slate-100 truncate">${esc(p.lugar)}</b></a>` : ''}
           </div>
+          ${lineaAgenda()}
         </div>
         <div class="text-right shrink-0">
           <div class="text-3xl font-black ${faltan <= 0 ? 'text-emerald-400' : ''}">${d.titulares.length}<span class="text-slate-500 text-xl">/${d.cupo}</span></div>
@@ -2993,6 +3077,12 @@ function panelAdmin(d) {
           ${DURACIONES.map(m => `<option value="${m}" ${duracionDe(p) === m ? 'selected' : ''}>${m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`}</option>`).join('')}
         </select>
       </label>
+      ${agendaActiva(D.grupo) ? `
+        <fieldset class="sm:col-span-2 rounded-xl border border-slate-700 p-3 text-sm">
+          <legend class="px-1 text-slate-400">Si cambiás el día, la hora o el lugar…</legend>
+          <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="esta" checked class="accent-emerald-500"> Solo para esta fecha</label>
+          <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="todas" class="accent-emerald-500"> Para esta y todas las siguientes</label>
+        </fieldset>` : ''}
       <label class="text-sm text-slate-400 sm:col-span-2">Ciudad (para el clima)<input id="p-ciudad" name="ciudad" value="${esc(D.grupo.ciudad?.nombre || '')}" placeholder="Pinamar" maxlength="80" class="${INPUT} mt-1"></label>
       <div class="sm:col-span-2 flex gap-2">
         <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">${ic('save')} Guardar partido</button>
@@ -3002,6 +3092,8 @@ function panelAdmin(d) {
         ? `<button type="button" data-action="reactivar" class="${BTN} sm:col-span-2 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 text-sm">${ic('circle-check')} Levantar la suspensión</button>`
         : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">${ic('ban')} Suspender partido</button>`}
     </form>
+
+    ${formAgenda()}
 
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
     <p class="text-xs text-slate-500 mb-2">Para equilibrar se usa el promedio de votos (★). Si alguien no tiene votos, se usa el nivel que elijas acá (por defecto ${NIVEL_DEFAULT}). Los niveles solo los ven los admins.</p>
@@ -3160,6 +3252,7 @@ function render() {
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
   pintar($('#modal'), listo ? renderModal() : '');
   if (listo) {
+    asegurarRotacion();
     asegurarVotacion();
     asegurarEquipos();
   }
@@ -3349,6 +3442,21 @@ const acciones = {
       s.publico = s.publico.filter(x => x !== miUid());
     }, `⚽ ¡Anotado en ${g.nombre}!`, gid);
   },
+  'agenda-mas': () => { ui.agendaFilas = Math.min(3, (ui.agendaFilas || D.grupo.agenda?.slots?.length || 1) + 1); render(); },
+  'agenda-quitar': () => {
+    if (!confirm('¿Desactivar la fecha fija? La fecha cargada queda como está y "Nueva fecha" vuelve a dejarla vacía.')) return;
+    ui.agendaFilas = 0;
+    actualizarGrupo(s => { s.agenda = null; }, 'Fecha fija desactivada');
+  },
+  saltear: ({ fecha }) => {
+    const salteada = (D.grupo.agenda?.saltear || []).includes(fecha);
+    if (!confirm(salteada ? `¿Volver a jugar el ${fechaLinda(fecha)}?` : `¿Saltear el ${fechaLinda(fecha)}? Esa semana no se juega y la lista pasa a la fecha siguiente.`)) return;
+    actualizarGrupo(s => {
+      const hoy = hoyArg();
+      const lista = (s.agenda.saltear || []).filter(f => f >= hoy && f !== fecha);
+      s.agenda.saltear = salteada ? lista : [...lista, fecha].sort();
+    }, salteada ? 'Fecha recuperada' : 'Fecha salteada');
+  },
   agendar: ({ gid }) => { ui.agendar = ui.agendar === gid ? null : gid; render(); },
   'bajar-ics': ({ gid }) => { const x = misPartidos().find(p => p.id === gid); if (x?.t) bajarIcs(x); },
   'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
@@ -3366,7 +3474,13 @@ const acciones = {
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
     if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
-    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; delete s.partido.suspendido; s.avisos = []; s.publico = []; }, '🗓️ Lista nueva');
+    const [prox] = agendaActiva(D.grupo) ? proximasFechas(D.grupo.agenda, D.grupo.partido.fecha || ayerArg()) : [];
+    actualizarGrupo(s => {
+      s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.avisos = []; s.publico = [];
+      delete s.partido.suspendido;
+      s.partido.fecha = prox?.fecha || '';
+      if (prox) { s.partido.cuando = prox.hora; if (prox.lugar) s.partido.lugar = prox.lugar; }
+    }, prox ? `🗓️ Lista nueva para el ${fechaLinda(prox.fecha)}` : '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
@@ -3495,6 +3609,25 @@ const formularios = {
     return ok;
   },
   perfil: guardarPerfil,
+  agenda: f => {
+    const dias = f.getAll('dia'), horas = f.getAll('hora'), lugares = f.getAll('lugarFijo');
+    const slots = [];
+    for (let i = 0; i < dias.length; i++) {
+      if (dias[i] === '') continue;
+      const hora = normalizarHora((horas[i] || '').trim());
+      if (!horaValida(hora)) return toast('Poné la hora como 20:00');
+      slots.push({ dia: Number(dias[i]), hora, lugar: (lugares[i] || '').trim() });
+    }
+    if (!slots.length) return toast('Elegí al menos un día');
+    return actualizarGrupo(s => {
+      s.agenda = { slots, saltear: (s.agenda?.saltear || []).filter(f => f >= hoyArg()) };
+      // Sin fecha cargada (o ya pasada): arranca con la próxima.
+      if (!s.partido.fecha || s.partido.fecha < hoyArg()) {
+        const [prox] = proximasFechas(s.agenda, ayerArg());
+        if (prox) s.partido = { ...s.partido, fecha: prox.fecha, cuando: prox.hora, lugar: prox.lugar || s.partido.lugar };
+      }
+    }, '🔁 Fecha fija guardada');
+  },
   olvide: async f => {
     const ok = await act(() => api('olvide', { dato: f.get('dato') }, urlCuenta()));
     if (ok) { ui.olvideEnviado = true; render(); }
@@ -3660,8 +3793,16 @@ const formularios = {
       }
     }
     const ok = await actualizarGrupo(s => {
+      const antes = s.partido;
       s.partido = { ...s.partido, titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo, duracion: duracionDe({ duracion: parseInt(f.get('duracion')) }) };
       s.ciudad = ciudad;
+      // "Esta y todas las siguientes": se cambia la fecha fija que generó esta fecha.
+      if (f.get('alcance') === 'todas' && agendaActiva(s)) {
+        const p = s.partido;
+        const i = Math.max(0, s.agenda.slots.findIndex(x => antes.fecha && x.dia === diaDe(antes.fecha) && x.hora === antes.cuando));
+        const x = s.agenda.slots[i];
+        s.agenda.slots[i] = { dia: p.fecha ? diaDe(p.fecha) : x.dia, hora: horaValida(p.cuando) ? p.cuando : x.hora, lugar: p.lugar };
+      }
     }, ciudad && ciudad.nombre !== D.grupo.ciudad?.nombre ? `💾 Partido guardado · clima de ${ciudad.nombre}` : '💾 Partido guardado');
     // El campo de ciudad muestra el nombre que encontró (puede diferir de lo escrito).
     if (ok) { const i = $('#p-ciudad'); if (i) i.value = ciudad?.nombre || ''; }

@@ -129,6 +129,46 @@ async function excusarBajas(gid, fecha, excusa) {
   await Promise.all(qs.docs.map(d => d.ref.update({ excusa })));
 }
 
+// ---- Fecha fija ----
+// Igual que ocurrencias/proximasFechas de index.html.
+function proximasFechas(ag, desde, n = 1) {
+  const out = [];
+  const slots = [...(ag?.slots || [])].sort((x, y) => x.hora.localeCompare(y.hora));
+  let d = Date.parse(desde + 'T12:00:00Z') + DIA;
+  for (let i = 0; i < 120 && out.length < n && slots.length; i++, d += DIA) {
+    const fecha = new Date(d).toISOString().slice(0, 10), dia = new Date(d).getUTCDay();
+    if ((ag.saltear || []).includes(fecha)) continue;
+    for (const x of slots) if (x.dia === dia && out.length < n) out.push({ fecha, hora: x.hora, lugar: x.lugar || '' });
+  }
+  return out;
+}
+// Cuando terminó el partido (más 6 h de lista cerrada), vacía la lista y abre la fecha siguiente.
+// Lo pide cualquier miembro que abra la app; si la votación del mejor no está armada, espera.
+async function rotar(gid) {
+  const ref = db.doc(`grupos/${gid}`);
+  return db.runTransaction(async tx => {
+    const g = (await tx.get(ref)).data() || {};
+    const p = g.partido || {}, ag = g.agenda;
+    if (!ag?.slots?.length) return { rotado: false };
+    if (p.fecha) {
+      const fin = Date.parse(`${p.fecha}T${horaDe(p)}:00-03:00`) + duracionMin(p) * 60e3;
+      if (Date.now() < fin + 6 * 3600e3) return { rotado: false };
+      const votando = Date.now() < Date.parse(`${p.fecha}T00:00:00-03:00`) + 2 * DIA;
+      const mvp = await tx.get(db.doc(`grupos/${gid}/mvp/${p.fecha}`));
+      if (votando && (g.anotados || []).length && !mvp.exists) return { rotado: false, falta: 'votacion' };
+    }
+    const ayer = new Date(Date.parse(hoyArg() + 'T12:00:00Z') - DIA).toISOString().slice(0, 10);
+    const [prox] = proximasFechas(ag, p.fecha && p.fecha > ayer ? p.fecha : ayer);
+    if (!prox) return { rotado: false };
+    const { suspendido, ...resto } = p;
+    tx.update(ref, {
+      anotados: [], equipos: null, solicitudes: {}, rehacer: null, publico: [], avisos: [],
+      partido: { ...resto, fecha: prox.fecha, cuando: prox.hora, lugar: prox.lugar || p.lugar || '' },
+    });
+    return { rotado: true, fecha: prox.fecha };
+  });
+}
+
 async function notificar(gid, uids, aviso) {
   const docs = await Promise.all(uids.map(u => db.doc(`grupos/${gid}/push/${u}`).get()));
   const tokens = docs.flatMap(d => d.data()?.tokens || []);
@@ -159,6 +199,8 @@ export default async function handler(req, res) {
     const { uid } = await auth.verifyIdToken(token).catch(() => { throw new ErrorApi(401, 'Sesión inválida'); });
     const gid = String(body.gid || '');
     if (!gid || !(await db.doc(`grupos/${gid}/miembros/${uid}`).get()).exists) throw new ErrorApi(403, 'No sos del grupo');
+
+    if (body.tipo === 'rotar') return res.status(200).json(await rotar(gid));
 
     const ref = db.doc(`grupos/${gid}`);
     // Asistencia: bajas tardías y, si se suspende, perdonarlas.
