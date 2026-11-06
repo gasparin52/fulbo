@@ -1890,11 +1890,30 @@ function tarjetaHoy() {
 // Tarjetas de mis grupos: si soy admin, también "Administrar".
 function tarjetaMisGrupos() {
   const grupos = D.perfil.grupos || [];
+  const sumarse = `
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
+      <div class="flex gap-1.5">
+        <button data-action="sumarse" data-que="unirse" class="${BTN_CHIP} ${ui.sumarse === 'unirse' ? '!bg-emerald-500/20 !text-emerald-200' : ''}">${ic('ticket')} Unirme</button>
+        <button data-action="sumarse" data-que="crear" class="${BTN_CHIP} ${ui.sumarse === 'crear' ? '!bg-emerald-500/20 !text-emerald-200' : ''}">${ic('plus')} Crear</button>
+      </div>
+    </div>
+    ${ui.sumarse === 'unirse' ? `
+      <form data-form="unirse" class="flex gap-2 mb-3">
+        <input id="u-link" name="link" required placeholder="Pegá el link de invitación" class="${INPUT}">
+        <button class="${BTN_OK} shrink-0">Unirme</button>
+      </form>` : ui.sumarse === 'crear' ? `
+      <form data-form="crear-grupo" class="flex gap-2 mb-1">
+        <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Nombre del grupo" class="${INPUT}">
+        <button class="${BTN_OK} shrink-0">Crear</button>
+      </form>
+      <p class="text-xs text-slate-500 mb-3">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`;
   if (!grupos.length) return card(`
-    <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
-    <p class="text-sm text-slate-400 mt-1">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
+    ${sumarse}
+    <p class="text-sm text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
   return card(`
-    <ul class="divide-y divide-slate-800/80 -mx-1 -my-1">
+    ${sumarse}
+    <ul class="divide-y divide-slate-800/80 -mx-1 -mb-1">
       ${grupos.map(g => {
         const x = D.misGrupos[g.id];
         const admin = !!x?.admins.includes(miUid());
@@ -1918,9 +1937,9 @@ function tarjetaMisGrupos() {
 // Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
 function vistaInicio() {
   const h = location.hash;
-  const sec = h === '#/perfil' ? 'perfil' : h === '#/grupos' ? 'grupos' : h === '#/calendario' ? 'calendario' : 'inicio';
+  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : 'inicio';
   const yo = { ...D.perfil, id: miUid() };
-  const titulo = { grupos: 'Mis grupos', calendario: 'Calendario', perfil: 'Mi perfil' }[sec];
+  const titulo = { calendario: 'Calendario', perfil: 'Mi perfil' }[sec];
   return `
     <div class="flex items-center gap-3">
       ${avatarAmpliable(yo, 44)}
@@ -1932,28 +1951,29 @@ function vistaInicio() {
       ${campanita()}
     </div>
     ${tarjetaMail()}
-    ${sec === 'perfil' ? panelPerfil() : sec === 'grupos' ? panelGrupos() : sec === 'calendario' ? (tarjetaMisPartidos(true) || card('<p class="text-sm text-slate-400">Todavía no tenés partidos. Unite a un grupo para ver sus fechas acá.</p>')) : panelInicio()}
+    ${sec === 'perfil' ? panelPerfil() : sec === 'calendario' ? (tarjetaMisPartidos(true) || card('<p class="text-sm text-slate-400">Todavía no tenés partidos. Unite a un grupo para ver sus fechas acá.</p>')) : panelInicio()}
     ${pie()}`;
 }
 // Inicio: lo de hoy (o el próximo partido) y las novedades del día.
+// Inicio: lo de hoy (o el próximo partido), mis grupos, pedidos y, abajo, los avisos.
 function panelInicio() {
-  const hoy = tarjetaHoy();
-  const novedades = avisosTodos().filter(a => new Date(a.ts - 3 * 3600e3).toISOString().slice(0, 10) === hoyArg());
   return `
-    ${hoy || tarjetaProximo()}
-    ${novedades.length ? card(`
-      <div class="flex items-center justify-between gap-2">
-        <h2 class="text-lg font-bold">${ic('bell', 'text-amber-300')} Novedades de hoy</h2>
-        ${novedades.length > 5 ? `<button data-action="abrir-avisos" class="${BTN_CHIP}">Ver todas (${novedades.length})</button>` : ''}
-      </div>
-      <ul class="divide-y divide-slate-800 mt-1">${novedades.slice(0, 5).map(filaAviso).join('')}</ul>`) : ''}
+    ${tarjetaHoy() || tarjetaProximo()}
+    ${tarjetaMisGrupos()}
     ${tarjetaPedidos()}
-    ${(D.perfil.grupos || []).length ? '' : card(`
-      <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Empezá por un grupo</h2>
-      <p class="text-sm text-slate-400 mt-1">Pedile el link de invitación a quien organiza, o creá tu propio grupo.</p>
-      <a href="#/grupos" class="${BTN_OK} w-full mt-3 inline-flex items-center justify-center gap-1.5">Ir a Grupos ${ic('chevron-right')}</a>`)}`;
+    ${tarjetaNovedades()}`;
 }
 
+// Avisos de mis grupos: el último a la vista y, tocando, el resto.
+function tarjetaNovedades() {
+  const avisos = avisosTodos();
+  if (!avisos.length) return '';
+  const abierto = !!ui.avisosAbiertos && avisos.length > 1;
+  return card(`
+    <h2 class="text-base font-bold mb-1">${ic('bell', 'text-amber-300')} Avisos</h2>
+    <ul class="divide-y divide-slate-800">${(abierto ? avisos : avisos.slice(0, 1)).map(filaAviso).join('')}</ul>
+    ${avisos.length > 1 ? `<button data-action="toggle-avisos" class="${BTN_CHIP} w-full !py-2 mt-1">${abierto ? 'Ver menos' : `Ver ${avisos.length - 1} más`} <span class="transition ${abierto ? '-rotate-90' : 'rotate-90'}">${ic('chevron-right')}</span></button>` : ''}`);
+}
 // Si hoy no hay partido: el próximo, más chico.
 function tarjetaProximo() {
   const x = misPartidos().find(p => p.t && !p.viejo && !p.p.suspendido);
@@ -1991,52 +2011,6 @@ function tarjetaPedidos() {
 }
 
 // Grupos: mis grupos, pedidos pendientes y unirse o crear.
-function panelGrupos() {
-  return `
-    ${tarjetaMisGrupos()}
-    ${tarjetaPedidos()}
-    ${card(`
-      <div class="grid grid-cols-2 gap-2">
-        <button data-action="sumarse" data-que="unirse" class="${BTN} text-sm inline-flex items-center justify-center gap-1.5 ${ui.sumarse === 'unirse' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('ticket')} Unirme</button>
-        <button data-action="sumarse" data-que="crear" class="${BTN} text-sm inline-flex items-center justify-center gap-1.5 ${ui.sumarse === 'crear' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('plus')} Crear grupo</button>
-      </div>
-      ${ui.sumarse === 'unirse' ? `
-        <form data-form="unirse" class="flex gap-2 mt-3">
-          <input id="u-link" name="link" required placeholder="Pegá el link de invitación" class="${INPUT}">
-          <button class="${BTN_OK} shrink-0">Unirme</button>
-        </form>` : ui.sumarse === 'crear' ? `
-        <form data-form="crear-grupo" class="flex gap-2 mt-3">
-          <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Nombre del grupo" class="${INPUT}">
-          <button class="${BTN_OK} shrink-0">Crear</button>
-        </form>
-        <p class="text-xs text-slate-500 mt-2">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`)}`;
-}function panelPerfil() {
-  const p = D.perfil;
-  return `
-    ${card(`
-      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mi ficha</h2>
-      <form data-form="perfil" class="space-y-4">
-        ${camposPerfil(p)}
-        <button class="${BTN_OK} w-full">Guardar</button>
-      </form>`)}
-    ${card(`
-      <div class="flex items-center justify-between gap-3">
-        <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale a tus grupos.'}</p>
-        <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
-      </div>`)}
-    ${(D.perfil.grupos || []).length ? card(`
-      <h2 class="text-base font-bold mb-2">${ic('log-out', 'text-slate-400')} Salir de un grupo</h2>
-      <ul class="divide-y divide-slate-800">
-        ${D.perfil.grupos.map(g => `
-          <li class="flex items-center gap-3 py-2 text-sm">
-            ${fotoGrupo(D.misGrupos[g.id] || g, 32)}
-            <span class="flex-1 font-medium truncate">${esc(D.misGrupos[g.id]?.nombre || g.nombre)}</span>
-            <button data-action="salir-grupo" data-gid="${g.id}" class="${BTN_CHIP} hover:!text-red-300">Salir</button>
-          </li>`).join('')}
-      </ul>`) : ''}
-    ${tarjetaCuenta()}
-    <button data-action="logout" class="${BTN} w-full inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-red-950 text-red-300">${ic('log-out')} Cerrar sesión</button>`;
-}
 
 const tabGrupo = () => location.hash === '#/equipos' ? 'equipos' : location.hash === '#/jugadores' ? 'jugadores' : 'partido';
 function tabsGrupo() {
@@ -2070,8 +2044,8 @@ function navInferior() {
   if (!D.user || !D.perfil || pendienteActualizar()) return '';
   const h = location.hash;
   if (/^#\/(clave|verificar)\//.test(h)) return '';
-  // "Grupos" queda marcado también adentro de un grupo.
-  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : h === '#/grupos' || (D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h)) ? 'grupos' : h === '#/inicio' || !h || h === '#/' ? 'inicio' : '';
+  // "Inicio" queda marcado también adentro de un grupo (los grupos están en el inicio).
+  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : ['#/inicio', '#/grupos', '', '#/'].includes(h) || (D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h)) ? 'inicio' : '';
   const item = (href, k, icono, txt) => `
     <a href="${href}" class="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition ${sec === k ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'}">
       ${sec === k ? '<span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400"></span>' : ''}
@@ -2079,9 +2053,8 @@ function navInferior() {
     </a>`;
   return `
     <div class="fixed bottom-0 inset-x-0 z-30 border-t border-slate-800 bg-slate-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div class="max-w-2xl mx-auto grid grid-cols-4">
+      <div class="max-w-2xl mx-auto grid grid-cols-3">
         ${item('#/inicio', 'inicio', 'house', 'Inicio')}
-        ${item('#/grupos', 'grupos', 'users', 'Grupos')}
         ${item('#/calendario', 'calendario', 'calendar', 'Calendario')}
         ${item('#/perfil', 'perfil', 'user', 'Perfil')}
       </div>
@@ -2094,7 +2067,7 @@ function topBar() {
   const yo = D.miembros[miUid()];
   return `
     <div class="flex items-center gap-2">
-      <a href="#/grupos" class="${BTN_ICONO} !w-9" title="Mis grupos" aria-label="Volver a mis grupos">${ic('arrow-left', '!w-5 !h-5')}</a>
+      <a href="#/inicio" class="${BTN_ICONO} !w-9" title="Inicio" aria-label="Volver al inicio">${ic('arrow-left', '!w-5 !h-5')}</a>
       ${fotoGrupo(D.grupo, 40)}
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
@@ -3797,6 +3770,7 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
   'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
+  'toggle-avisos': () => { ui.avisosAbiertos = !ui.avisosAbiertos; render(); },
   'mas-cal': () => { ui.calLimite = (ui.calLimite || 10) + 10; render(); },
   sumarse: ({ que }) => { ui.sumarse = ui.sumarse === que ? null : que; render(); },
   'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),
