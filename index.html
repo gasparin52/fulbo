@@ -1386,11 +1386,14 @@ const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-c
 // Foto del grupo (la sube un admin); si no tiene, la inicial con un color propio.
 function fotoGrupo(g, size = 40) {
   const st = `width:${size}px;height:${size}px`;
-  if (g?.foto) return `<img src="${esc(g.foto)}" alt="" style="${st}" class="rounded-xl object-cover shrink-0 bg-slate-800">`;
+  if (g?.foto) return `<img src="${esc(g.foto)}" alt="${esc(g.nombre || '')}" data-action="ampliar" title="Ver foto" style="${st}" class="rounded-xl object-cover shrink-0 bg-slate-800 cursor-zoom-in">`;
   const n = g?.nombre || '?';
   const hue = [...n].reduce((h, c) => h + c.charCodeAt(0) * 7, 0) % 360;
   return `<span style="${st};background:hsl(${hue} 45% 20%);color:hsl(${hue} 75% 72%);font-size:${Math.round(size * 0.45)}px" class="rounded-xl grid place-items-center font-black shrink-0">${esc(n[0].toUpperCase())}</span>`;
 }
+
+// Avatar que se agranda al tocarlo (si tiene foto).
+const avatarAmpliable = (p, size) => avatar(p, size).replace('<img ', `<img data-action="ampliar" data-redonda title="Ver foto" alt="${esc(p?.usuario || '')}" `).replace('class="rounded-full', 'class="cursor-zoom-in rounded-full');
 
 function avatar(p, size = 40) {
   const s = `width:${size}px;height:${size}px`;
@@ -1858,7 +1861,7 @@ function vistaInicio() {
   const yo = { ...D.perfil, id: miUid() };
   return `
     <div class="flex items-center gap-3">
-      ${avatar(yo, 48)}
+      ${avatarAmpliable(yo, 48)}
       <div class="min-w-0 flex-1">
         <p class="text-xs text-slate-500">Hola,</p>
         <p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>
@@ -3050,6 +3053,17 @@ const marcaLesion = id => jugador(id)?.lesionado ? ' <span class="text-xs" title
 const marcaHater = id => esHater(id)
   ? ' <span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 whitespace-nowrap" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : '';
 
+function modalFoto() {
+  const f = ui.fotoGrande;
+  if (!f) return '';
+  return `
+    <div class="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6" data-action="cerrar-modal" data-fondo>
+      <img src="${esc(f.src)}" alt="${esc(f.alt)}" class="w-[min(82vw,440px)] aspect-square object-cover shadow-2xl shadow-black/60 ${f.redonda ? 'rounded-full' : 'rounded-3xl'}">
+      ${f.alt ? `<p class="mt-4 text-lg font-bold text-white text-center">${esc(f.alt)}</p>` : ''}
+      <button data-action="cerrar-modal" aria-label="Cerrar" class="absolute top-4 right-4 w-10 h-10 grid place-items-center rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200">${ic('x', '!w-5 !h-5')}</button>
+    </div>`;
+}
+
 function modal(html) {
   return `
     <div class="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" data-action="cerrar-modal" data-fondo>
@@ -3126,7 +3140,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : '';
 }
 
 const avisoCalificaciones = `
@@ -3178,7 +3192,7 @@ function vistaFicha(id) {
     <a href="#/" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 w-fit">← Volver</a>
     <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
       <div class="flex items-center gap-4">
-        ${avatar(p, 96)}
+        ${avatarAmpliable(p, 96)}
         <div class="min-w-0 flex-1">
           <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">' + ic('wrench') + ' armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}${p.invitado ? ' · invitado (sin cuenta)' : ''}</p>
@@ -3947,6 +3961,12 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-action]');
   if (!b) return;
   if ('fondo' in b.dataset && e.target !== b) return;  // clic dentro del modal: no lo cierra
+  if (b.dataset.action === 'ampliar') {
+    e.preventDefault();
+    ui.fotoGrande = { src: b.src, alt: b.alt, redonda: 'redonda' in b.dataset };
+    ui.modal = 'foto';
+    return render();
+  }
   acciones[b.dataset.action]?.(b.dataset);
 });
 document.addEventListener('change', e => {
