@@ -278,7 +278,8 @@ const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
 const cortar = arr => { arr.forEach(f => f()); arr.length = 0; };
 const urlBase = () => location.origin + location.pathname;
 const linkInvitacion = () => `${urlBase()}#/unirse/${D.gid}/${D.grupo.codigo}`;
-const datosPerfil = p => ({ usuario: p.usuario, edad: p.edad, posicion: p.posicion, foto: p.foto || '', lesionado: !!p.lesionado });
+const datosPerfil = p => ({ usuario: p.usuario, edad: p.edad, posicion: p.posicion, foto: p.foto || '', lesionado: !!p.lesionado, cuadro: p.cuadro || '' });
+const cuadroDe = f => CLUBES[f.get('cuadro')] ? f.get('cuadro') : '';
 
 let toastTimer;
 function toast(msg) {
@@ -1060,6 +1061,95 @@ async function procesarFoto(file) {
   return c.toDataURL('image/jpeg', 0.82);
 }
 
+// ---------------- Cuadros ----------------
+// Escudo dibujado con los colores del club (sin depender de imágenes de afuera).
+// d: liso | franja (horizontal) | banda (diagonal) | bastones | mitad | v | rayas
+const CLUBES = {
+  boca: { n: 'Boca Juniors', c: ['#0b3d91', '#f4c300'], d: 'franja' },
+  river: { n: 'River Plate', c: ['#ffffff', '#d6001c'], d: 'banda' },
+  racing: { n: 'Racing Club', c: ['#6cace4', '#ffffff'], d: 'bastones' },
+  independiente: { n: 'Independiente', c: ['#d6001c', '#ffffff'], d: 'liso' },
+  sanlorenzo: { n: 'San Lorenzo', c: ['#1d3c8f', '#c8102e'], d: 'bastones' },
+  huracan: { n: 'Huracán', c: ['#ffffff', '#d6001c'], d: 'liso' },
+  velez: { n: 'Vélez Sarsfield', c: ['#ffffff', '#1d4fa0'], d: 'v' },
+  estudiantes: { n: 'Estudiantes de La Plata', c: ['#d6001c', '#ffffff'], d: 'bastones' },
+  gimnasia: { n: 'Gimnasia y Esgrima La Plata', c: ['#ffffff', '#0b2a6b'], d: 'franja' },
+  newells: { n: "Newell's Old Boys", c: ['#d6001c', '#111111'], d: 'mitad' },
+  central: { n: 'Rosario Central', c: ['#0b3d91', '#f4c300'], d: 'bastones' },
+  talleres: { n: 'Talleres', c: ['#0b2a6b', '#ffffff'], d: 'bastones' },
+  belgrano: { n: 'Belgrano', c: ['#6cace4', '#ffffff'], d: 'liso' },
+  instituto: { n: 'Instituto', c: ['#d6001c', '#ffffff'], d: 'bastones' },
+  lanus: { n: 'Lanús', c: ['#7a1f3d', '#ffffff'], d: 'liso' },
+  banfield: { n: 'Banfield', c: ['#0a7d3b', '#ffffff'], d: 'bastones' },
+  argentinos: { n: 'Argentinos Juniors', c: ['#d6001c', '#ffffff'], d: 'liso' },
+  platense: { n: 'Platense', c: ['#ffffff', '#5c3a21'], d: 'franja' },
+  tigre: { n: 'Tigre', c: ['#0b2a6b', '#d6001c'], d: 'franja' },
+  defensa: { n: 'Defensa y Justicia', c: ['#f4c300', '#0a7d3b'], d: 'mitad' },
+  union: { n: 'Unión de Santa Fe', c: ['#d6001c', '#ffffff'], d: 'bastones' },
+  colon: { n: 'Colón', c: ['#d6001c', '#111111'], d: 'mitad' },
+  godoycruz: { n: 'Godoy Cruz', c: ['#0b2a6b', '#ffffff'], d: 'liso' },
+  indrivadavia: { n: 'Independiente Rivadavia', c: ['#0b2a6b', '#ffffff'], d: 'liso' },
+  tucuman: { n: 'Atlético Tucumán', c: ['#6cace4', '#ffffff'], d: 'bastones' },
+  sarmiento: { n: 'Sarmiento', c: ['#0a7d3b', '#ffffff'], d: 'liso' },
+  aldosivi: { n: 'Aldosivi', c: ['#f4c300', '#0a7d3b'], d: 'bastones' },
+  barracas: { n: 'Barracas Central', c: ['#d6001c', '#ffffff'], d: 'franja' },
+  riestra: { n: 'Deportivo Riestra', c: ['#111111', '#ffffff'], d: 'liso' },
+  centralcordoba: { n: 'Central Córdoba (SdE)', c: ['#111111', '#ffffff'], d: 'bastones' },
+  sanmartinsj: { n: 'San Martín de San Juan', c: ['#0a7d3b', '#111111'], d: 'bastones' },
+  sanmartint: { n: 'San Martín de Tucumán', c: ['#d6001c', '#ffffff'], d: 'bastones' },
+  chacarita: { n: 'Chacarita Juniors', c: ['#d6001c', '#111111', '#ffffff'], d: 'bastones' },
+  ferro: { n: 'Ferro Carril Oeste', c: ['#0a7d3b', '#ffffff'], d: 'liso' },
+  quilmes: { n: 'Quilmes', c: ['#ffffff', '#0b2a6b'], d: 'liso' },
+  allboys: { n: 'All Boys', c: ['#ffffff', '#111111'], d: 'liso' },
+  atlanta: { n: 'Atlanta', c: ['#f4c300', '#0b2a6b'], d: 'bastones' },
+  nuevachicago: { n: 'Nueva Chicago', c: ['#0a7d3b', '#111111'], d: 'bastones' },
+  temperley: { n: 'Temperley', c: ['#6cace4', '#ffffff'], d: 'liso' },
+  losandes: { n: 'Los Andes', c: ['#d6001c', '#ffffff'], d: 'franja' },
+  almirante: { n: 'Almirante Brown', c: ['#f4c300', '#111111'], d: 'bastones' },
+  arsenal: { n: 'Arsenal de Sarandí', c: ['#6cace4', '#d6001c'], d: 'banda' },
+  olimpo: { n: 'Olimpo', c: ['#f4c300', '#111111'], d: 'franja' },
+  patronato: { n: 'Patronato', c: ['#d6001c', '#111111'], d: 'bastones' },
+  barcelona: { n: 'Barcelona', c: ['#a50044', '#004d98'], d: 'bastones', afuera: true },
+  realmadrid: { n: 'Real Madrid', c: ['#ffffff', '#febe10'], d: 'liso', afuera: true },
+  atleticomadrid: { n: 'Atlético de Madrid', c: ['#d6001c', '#ffffff'], d: 'bastones', afuera: true },
+  mancity: { n: 'Manchester City', c: ['#6cabdd', '#ffffff'], d: 'liso', afuera: true },
+  manunited: { n: 'Manchester United', c: ['#da291c', '#fbe122'], d: 'liso', afuera: true },
+  liverpool: { n: 'Liverpool', c: ['#c8102e', '#ffffff'], d: 'liso', afuera: true },
+  milan: { n: 'Milan', c: ['#fb090b', '#111111'], d: 'bastones', afuera: true },
+  inter: { n: 'Inter', c: ['#0068a8', '#111111'], d: 'bastones', afuera: true },
+  juventus: { n: 'Juventus', c: ['#111111', '#ffffff'], d: 'bastones', afuera: true },
+  bayern: { n: 'Bayern Múnich', c: ['#dc052d', '#ffffff'], d: 'liso', afuera: true },
+  penarol: { n: 'Peñarol', c: ['#f4c300', '#111111'], d: 'bastones', afuera: true },
+  nacional: { n: 'Nacional (Uruguay)', c: ['#ffffff', '#0b2a6b'], d: 'liso', afuera: true },
+  flamengo: { n: 'Flamengo', c: ['#c8102e', '#111111'], d: 'rayas', afuera: true },
+};
+function escudo(id, size = 20) {
+  const k = CLUBES[id];
+  if (!k) return '';
+  const [a, b = a] = k.c;
+  const fondo = {
+    liso: `<rect width="20" height="24" fill="${a}"/>${b !== a ? `<path d="M2 1.5h16v9.5c0 6.2-4 9.6-8 11.5-4-1.9-8-5.3-8-11.5z" fill="none" stroke="${b}" stroke-width="4"/>` : ""}`,
+    franja: `<rect width="20" height="24" fill="${a}"/><rect y="8.5" width="20" height="6" fill="${b}"/>`,
+    banda: `<rect width="20" height="24" fill="${a}"/><polygon points="13,0 20,0 7,24 0,24" fill="${b}"/>`,
+    bastones: [0, 1, 2, 3, 4].map(i => `<rect x="${i * 4}" width="4" height="24" fill="${k.c[i % k.c.length]}"/>`).join(''),
+    mitad: `<rect width="10" height="24" fill="${a}"/><rect x="10" width="10" height="24" fill="${b}"/>`,
+    v: `<rect width="20" height="24" fill="${a}"/><polyline points="2,2 10,15 18,2" fill="none" stroke="${b}" stroke-width="3.5"/>`,
+    rayas: [0, 1, 2, 3, 4, 5, 6, 7].map(i => `<rect y="${i * 3}" width="20" height="3" fill="${k.c[i % k.c.length]}"/>`).join(''),
+  }[k.d];
+  const forma = 'M2 1.5h16v9.5c0 6.2-4 9.6-8 11.5-4-1.9-8-5.3-8-11.5z';
+  return `<svg viewBox="0 0 20 24" width="${size}" height="${Math.round(size * 1.2)}" class="shrink-0 inline-block" role="img" aria-label="${esc(k.n)}"><title>${esc(k.n)}</title><clipPath id="esc-${id}"><path d="${forma}"/></clipPath><g clip-path="url(#esc-${id})">${fondo}</g><path d="${forma}" fill="none" stroke="#e2e8f0" stroke-opacity=".7" stroke-width="1"/></svg>`;
+}
+const selectorCuadro = sel => {
+  const ops = af => Object.entries(CLUBES).filter(([, k]) => !!k.afuera === af)
+    .sort((x, y) => x[1].n.localeCompare(y[1].n))
+    .map(([id, k]) => `<option value="${id}" ${id === sel ? 'selected' : ''}>${esc(k.n)}</option>`).join('');
+  return `<select id="pf-cuadro" name="cuadro" class="${INPUT} mt-1">
+    <option value="">— Ninguno —</option>
+    <optgroup label="Argentina">${ops(false)}</optgroup>
+    <optgroup label="Afuera">${ops(true)}</optgroup>
+  </select>`;
+};
+
 // ---------------- Componentes ----------------
 const CARD = 'bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5';
 const INPUT = 'w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500';
@@ -1139,7 +1229,10 @@ function camposPerfil(p = {}) {
     <div>
       <p class="text-sm text-slate-400 mb-1">Posición</p>
       ${selectorPos('pf-pos', p.posicion || 'comodin')}
-    </div>`;
+    </div>
+    <label class="block text-sm text-slate-400">¿De qué cuadro sos?
+      ${selectorCuadro(p.cuadro || '')}
+    </label>`;
 }
 
 // La gente tiende a poner el mail del trabajo: acá va solo un nombre de usuario.
@@ -2145,7 +2238,7 @@ function jugadoresGrid() {
         return `
           <a href="#/jugador/${p.id}" class="relative flex flex-col items-center text-center gap-1 p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition">
             ${falta ? '<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400" title="Calificalo"></span>' : ''}
-            ${avatar(p, 56)}
+            <span class="relative">${avatar(p, 56)}${CLUBES[p.cuadro] ? `<span class="absolute -bottom-1 -right-1.5">${escudo(p.cuadro, 20)}</span>` : ''}</span>
             <span class="text-sm font-semibold truncate w-full">${esc(p.usuario)}${marcaLesion(p.id)}</span>
             ${esHater(p.id) ? '<span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 -mt-0.5" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : ''}
             ${estrellasDe(p.id) ? `<span class="absolute top-1.5 left-1.5 text-[11px] font-bold text-amber-300" title="Jugador del partido">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}
@@ -2172,6 +2265,8 @@ function vistaFicha(id) {
         <div class="min-w-0 flex-1">
           <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">🛠️ armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}${p.invitado ? ' · invitado (sin cuenta)' : ''}</p>
+          ${CLUBES[p.cuadro] ? `
+            <p class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-800 border border-slate-700 pl-1.5 pr-2.5 py-0.5 text-xs font-semibold text-slate-200">${escudo(p.cuadro, 18)} ${esc(CLUBES[p.cuadro].n)}</p>` : ''}
           ${estrellasDe(id) ? `
             <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">
               ${'⭐'.repeat(Math.min(estrellasDe(id), 5))}${estrellasDe(id) > 5 ? ` ×${estrellasDe(id)}` : ''} Jugador del partido${estrellasDe(id) > 1 ? ` · ${estrellasDe(id)} veces` : ''}
@@ -2504,6 +2599,7 @@ async function guardarPerfil(f) {
     posicion: f.get('posicion'),
     foto: ui.foto ?? actual.foto ?? '',
     lesionado: !!actual.lesionado,
+    cuadro: cuadroDe(f),
   };
   const ok = await act(async () => {
     await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now() });
@@ -2752,7 +2848,7 @@ const formularios = {
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
     const edad = parseInt(f.get('edad'));
     if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
-    const datos = { usuario, edad, posicion: f.get('posicion'), foto: ui.foto || '', grupos: [], creado: Date.now() };
+    const datos = { usuario, edad, posicion: f.get('posicion'), foto: ui.foto || '', cuadro: cuadroDe(f), grupos: [], creado: Date.now() };
     D.registrando = true;
     render();
     const ok = await act(async () => {
