@@ -49,7 +49,8 @@ async function armarAviso(gid, g, tipo, datos, quien) {
   const futuro = p.fecha && diasHasta(p.fecha) >= 0;
   if (tipo === 'baja') {
     const id = String(datos.id || '');
-    if (!futuro || p.suspendido || !id || anotados.includes(id)) return null;
+    // Con el partido ya empezado no se avisa (eso es una falta, no una baja).
+    if (!futuro || p.suspendido || !id || anotados.includes(id) || horasAntes(p) < 0) return null;
     const nombre = await nombreDe(gid, g, id);
     const resto = anotados.length >= cupo ? 'Sube el primer suplente.' : `Quedan ${anotados.length}/${cupo} para ${cuando(p.fecha)}.`;
     return { clave: `baja:${id}:${p.fecha}:${anotados.length}`, titulo: `😢 ${nombre} se bajó`, texto: resto, para: null };
@@ -81,7 +82,14 @@ async function armarAviso(gid, g, tipo, datos, quien) {
 // Una baja de titular a menos de 24 h del partido cuenta como "tarde"; a menos de 6 h,
 // como "a último momento". No cuenta si estaba suspendido o se pronosticaba lluvia.
 const HORA_DEFAULT = '20:00';
-const horaDe = p => (/^([01]\d|2[0-3]):[0-5]\d$/.test(p.cuando || '') ? p.cuando : HORA_DEFAULT);
+// Igual que horaDelPartido de index.html: entiende "20:00", "20hs" o "Viernes 20hs".
+function horaDe(p) {
+  const c = p.cuando || '';
+  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(c)) return c;
+  const m = c.match(/(\d{1,2})(?:\s*[:.]\s*(\d{2}))?\s*(?:h|hs|hrs?)\b/i) || c.match(/\b(\d{1,2}):(\d{2})\b/);
+  return m && +m[1] <= 23 && +(m[2] || 0) <= 59 ? `${m[1].padStart(2, '0')}:${m[2] || '00'}` : HORA_DEFAULT;
+}
+const duracionMin = p => Math.min(120, Math.max(30, Number(p.duracion) || 60));
 const horasAntes = p => (Date.parse(`${p.fecha}T${horaDe(p)}:00-03:00`) - Date.now()) / 3600e3;
 async function llueve(g, p) {
   const c = g.ciudad;
@@ -102,7 +110,13 @@ async function registrarBaja(gid, g, id, titular, por) {
   const p = g.partido || {};
   if (!titular || !id || !p.fecha || (g.anotados || []).includes(id) || g.invitados?.[id]) return;
   const horas = horasAntes(p);
-  if (horas >= 24 || horas < -3) return;  // con tiempo, o ya terminado: no cuenta
+  if (horas >= 24) return;  // con tiempo: no cuenta
+  if (horas < 0) {
+    // Con el partido en juego cuenta como que faltó sin avisar (🟥), salvo suspensión.
+    if (p.suspendido || -horas * 60 > duracionMin(p)) return;
+    await db.doc(`grupos/${gid}/faltas/${p.fecha}_${id}`).set({ fecha: p.fecha, target: id, nombre: await nombreDe(gid, g, id), por, ts: Date.now() });
+    return;
+  }
   const excusa = p.suspendido ? 'suspendido' : (await llueve(g, p)) ? 'lluvia' : null;
   await db.doc(`grupos/${gid}/bajas/${p.fecha}_${id}`).set({
     fecha: p.fecha, target: id, tipo: horas < 6 ? 'ultimo' : 'tarde',
