@@ -1894,7 +1894,7 @@ function tarjetaHoy() {
 function tarjetaMisGrupos() {
   const grupos = D.perfil.grupos || [];
   const sumarse = `
-    <div class="flex items-center justify-between gap-2 mb-2">
+    <div class="flex items-center justify-between gap-2">
       <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
       <div class="flex gap-1.5">
         <button data-action="sumarse" data-que="unirse" class="${BTN_CHIP} ${ui.sumarse === 'unirse' ? '!bg-emerald-500/20 !text-emerald-200' : ''}">${ic('ticket')} Unirme</button>
@@ -1902,19 +1902,19 @@ function tarjetaMisGrupos() {
       </div>
     </div>
     ${ui.sumarse === 'unirse' ? `
-      <form data-form="unirse" class="flex gap-2 mb-3">
+      <form data-form="unirse" class="flex gap-2 mt-4">
         <input id="u-link" name="link" required placeholder="Pegá el link de invitación" class="${INPUT}">
         <button class="${BTN_OK} shrink-0">Unirme</button>
       </form>` : ui.sumarse === 'crear' ? `
-      <form data-form="crear-grupo" class="flex gap-2 mb-1">
+      <form data-form="crear-grupo" class="flex gap-2 mt-4">
         <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Nombre del grupo" class="${INPUT}">
         <button class="${BTN_OK} shrink-0">Crear</button>
       </form>
-      <p class="text-xs text-slate-500 mb-3">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`;
+      <p class="text-xs text-slate-500 mt-2">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`;
   if (!grupos.length) return card(`
     ${sumarse}
-    <p class="text-sm text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
-  return card(sumarse.replace('mb-2', '')) + `
+    <p class="text-sm text-slate-400 mt-3">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
+  return card(sumarse) + `
     <ul class="space-y-2">
       ${grupos.map(g => {
         const x = D.misGrupos[g.id];
