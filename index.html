@@ -1805,10 +1805,17 @@ function tarjetaHoy() {
     const juego = x.fase === 'enjuego';
     const abierto = !x.p.suspendido && !['enjuego', 'terminado'].includes(x.fase);
     const fondo = x.p.suspendido ? 'from-red-600 to-rose-700 text-white' : anotado ? 'from-emerald-400 to-teal-500 text-slate-950' : 'from-slate-700 to-slate-800 text-white';
+    const cupo = x.cupo, anotados = Math.min(x.g.anotados.length, cupo), faltan = cupo - anotados, sups = Math.max(0, x.g.anotados.length - cupo);
+    const estadoCupo = x.p.suspendido ? '' : faltan > 0
+      ? `<span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-black bg-amber-300 text-slate-950" title="Faltan jugadores">${ic('triangle-alert')} Faltan ${faltan} · ${anotados}/${cupo}</span>`
+      : `<span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-black bg-slate-950/80 text-emerald-300" title="Lista completa">${ic('circle-check')} Completo ${cupo}/${cupo}${sups ? ` · +${sups}` : ''}</span>`;
     const titulo = x.p.suspendido ? '🚫 Hoy: partido suspendido' : juego ? '⚽ Se está jugando ahora' : x.fase === 'terminado' ? '🏁 Ya terminó' : anotado ? (x.estado === 'titular' ? '⚽ Hoy jugás' : '⚽ Hoy sos suplente S' + x.sup) : '⚽ Hoy hay partido';
     return `
-      <div class="rounded-2xl p-4 bg-gradient-to-br ${fondo} shadow-lg shadow-black/30">
-        <p class="text-xs font-black uppercase tracking-wider opacity-80">${titulo}</p>
+      <div data-action="cambiar-grupo" data-gid="${x.id}" role="link" class="cursor-pointer rounded-2xl p-4 bg-gradient-to-br ${fondo} shadow-lg shadow-black/30 active:scale-[.99] transition">
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs font-black uppercase tracking-wider opacity-80 pt-1">${titulo}</p>
+          ${estadoCupo}
+        </div>
         <div class="flex items-center gap-3 mt-3">
           ${fotoGrupo(x.g, 52)}
           <div class="min-w-0 flex-1">
@@ -1946,7 +1953,7 @@ function topBar() {
   const yo = D.miembros[miUid()];
   return `
     <div class="flex items-center gap-2">
-      <a href="#/inicio" class="${BTN_ICONO}" title="Inicio" aria-label="Volver al inicio">${ic('house', '!w-5 !h-5')}</a>
+      <a href="#/inicio" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm" aria-label="Volver al inicio">${ic('arrow-left')} Inicio</a>
       ${fotoGrupo(D.grupo, 40)}
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
@@ -1954,7 +1961,7 @@ function topBar() {
       </div>
       ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span class="hidden sm:inline">Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
       ${campanita()}
-      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0">${avatar(yo, 40)}</a>
+      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0 hidden sm:block">${avatar(yo, 40)}</a>
     </div>`;
 }
 
@@ -2677,7 +2684,7 @@ function avisoPendientes() {
 function vistaAdmin() {
   return `
     <div class="flex items-center gap-2">
-      <a href="#/" class="${BTN_ICONO}" title="Volver al grupo" aria-label="Volver al grupo">${ic('arrow-left', '!w-5 !h-5')}</a>
+      <a href="#/" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm" aria-label="Volver al grupo">${ic('arrow-left')} Grupo</a>
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-emerald-400">Administrar</p>
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
