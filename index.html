@@ -1911,16 +1911,15 @@ function tarjetaMisGrupos() {
   if (!grupos.length) return card(`
     ${sumarse}
     <p class="text-sm text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
-  return card(`
-    ${sumarse}
-    <ul class="divide-y divide-slate-800/80 -mx-1 -mb-1">
+  return card(sumarse.replace('mb-2', '')) + `
+    <ul class="space-y-2">
       ${grupos.map(g => {
         const x = D.misGrupos[g.id];
         const admin = !!x?.admins.includes(miUid());
         const p = x?.partido;
         const prox = !x ? 'Cargando…' : p?.suspendido ? '🚫 Suspendido' : p?.fecha ? [cuantoFalta(p.fecha) || fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ') : 'Sin fecha cargada';
         return `
-          <li class="flex items-center gap-3 py-2.5 px-1">
+          <li class="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-3 hover:border-slate-600 transition">
             <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex items-center gap-3 flex-1 min-w-0 text-left group">
               ${fotoGrupo(x || g, 48)}
               <span class="min-w-0 flex-1">
@@ -1932,7 +1931,7 @@ function tarjetaMisGrupos() {
             <button data-action="cambiar-grupo" data-gid="${g.id}" aria-label="Entrar" class="${BTN_ICONO} !w-9 !h-9 !bg-emerald-500 !text-slate-950 hover:!bg-emerald-400">${ic('chevron-right', '!w-5 !h-5')}</button>
           </li>`;
       }).join('')}
-    </ul>`);
+    </ul>`;
 }
 // Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
 function vistaInicio() {
