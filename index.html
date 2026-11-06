@@ -1490,7 +1490,7 @@ function equipos(d) {
   const editor = puedeEditarEquipos();
   const vigentes = eq && !equiposDesactualizados(d);
   const botones = editor ? `
-    <div class="grid grid-cols-2 gap-2 mt-4">
+    <div class="grid grid-cols-2 gap-2 mt-3">
       <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">⚖️ Armar equilibrados</button>
       <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
     </div>
@@ -1502,51 +1502,48 @@ function equipos(d) {
       ${botones}`);
   }
   const solicitudes = Object.entries(D.grupo.solicitudes).filter(([id, s]) => jugador(id) && equipoDe(id) && equipoDe(id) !== s.a);
-  const columna = (e, color) => {
+  // Las flechas y los botones de armar aparecen solo en modo edición (admins y armadores).
+  const editando = editor && vigentes && ui.editarEquipos;
+  const mover = (p, e) => editando ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${NOMBRE_EQUIPO[otroEquipo(e)]}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : '';
+  const prom = e => { const js = eq[e].map(jugador).filter(Boolean); return js.reduce((t, p) => t + puntaje(p.id), 0) / (js.length || 1); };
+  const columna = (e, borde, fondo, texto) => {
     const js = eq[e].map(jugador).filter(Boolean);
-    const suma = js.reduce((t, p) => t + puntaje(p.id), 0);
-    const mover = p => editor && vigentes ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${NOMBRE_EQUIPO[otroEquipo(e)]}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : '';
     const sups = vigentes ? suplentesDe(e, d) : [];
     return `
-      <div class="rounded-xl border ${color} p-3">
-        <div class="flex items-baseline justify-between gap-2">
-          <h3 class="font-bold">${NOMBRE_EQUIPO[e]} <span class="text-xs font-normal text-slate-400">(${js.length})</span></h3>
-          ${editor ? `<span class="text-xs text-slate-400">Σ ${suma.toFixed(1)} · prom ${(suma / (js.length || 1)).toFixed(1)}</span>` : ''}
-        </div>
-        <ul class="mt-2 space-y-1.5 text-sm">
+      <div class="rounded-2xl border-t-4 ${borde} ${fondo} p-3">
+        <ul class="space-y-2">
           ${js.map(p => `
-            <li class="flex items-center gap-2">
-              ${avatar(p, 22)}
-              <span class="truncate flex-1">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse">🔄</span>' : ''}</span>
-              <span>${pos(p).emoji}</span>
-              ${chipNota(p.id)}
-              ${mover(p)}
+            <li class="flex items-center gap-2.5">
+              ${avatar(p, 30)}
+              <a href="#/jugador/${p.id}" class="flex-1 min-w-0">
+                <span class="block font-semibold truncate">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse">🔄</span>' : ''}</span>
+                <span class="block text-[11px] text-slate-500">${pos(p).emoji} ${pos(p).corto}</span>
+              </a>
+              <span class="opacity-70">${chipNota(p.id)}</span>
+              ${mover(p, e)}
             </li>`).join('')}
         </ul>
         ${sups.length ? `
-          <p class="mt-3 mb-1.5 text-xs font-semibold text-amber-300/80">🔁 Suplentes</p>
-          <ul class="space-y-1.5 text-sm text-slate-300">
+          <div class="mt-3 pt-2 border-t border-slate-700/50 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+            <span class="${texto} font-semibold">🔁</span>
             ${sups.map(p => `
-              <li class="flex items-center gap-2">
-                <span class="text-[10px] font-bold rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-300 shrink-0">S${d.suplentes.indexOf(p) + 1}</span>
-                ${avatar(p, 22)}
-                <span class="truncate flex-1">${esc(p.usuario)}</span>
-                <span>${pos(p).emoji}</span>
-                ${chipNota(p.id)}
-                ${mover(p)}
-              </li>`).join('')}
-          </ul>` : ''}
+              <span class="inline-flex items-center gap-1 rounded-lg bg-slate-800/70 px-1.5 py-0.5">
+                <b class="text-amber-300">S${d.suplentes.indexOf(p) + 1}</b> ${esc(p.usuario)}
+                ${editando ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al otro equipo" class="ml-0.5 px-1 rounded bg-slate-700 hover:bg-slate-600">${e === 'A' ? '→' : '←'}</button>` : ''}
+              </span>`).join('')}
+          </div>` : ''}
       </div>`;
   };
 
   // Pedido propio para cambiarse (solo si no puede moverse solo).
   const yo = miUid(), miEquipo = equipoDe(yo), miSolicitud = D.grupo.solicitudes[yo];
-  const pedido = vigentes && miEquipo && !editor && !equiposCerrados() ? (miSolicitud && miSolicitud.a !== miEquipo
-    ? `<div class="mt-3 flex items-center justify-between gap-2 text-sm bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
-         <span>🔄 Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}. Esperando respuesta.</span>
-         <button data-action="cancelar-solicitud" class="text-xs text-slate-400 underline shrink-0">Cancelar</button>
+  const abiertos = vigentes && miEquipo && !editor && !equiposCerrados();
+  const pedido = abiertos ? (miSolicitud && miSolicitud.a !== miEquipo
+    ? `<div class="flex items-center justify-between gap-2 text-xs bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
+         <span>🔄 Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}.</span>
+         <button data-action="cancelar-solicitud" class="text-slate-400 underline shrink-0">Cancelar</button>
        </div>`
-    : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full mt-3 text-sm">🔄 Pedir pasar al ${NOMBRE_EQUIPO[otroEquipo(miEquipo)]}</button>`) : '';
+    : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full text-xs py-2">🔄 Pasarme al otro equipo</button>`) : '';
 
   const pendientes = editor && vigentes && solicitudes.length ? `
     <div class="mt-3 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
@@ -1567,41 +1564,56 @@ function equipos(d) {
   const quienes = esAdmin() ? quienesRehacer().map(id => jugador(id)?.usuario || D.miembros[id]?.usuario).filter(Boolean) : [];
   const umbral = umbralRehacer(d), pct = Math.min(100, Math.round(100 * nRehacer / umbral));
   const avisoRehacer = nRehacer ? `
-    <div class="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm">
-      <div class="flex items-baseline justify-between gap-2">
-        <span>🙋 <b>${nRehacer}</b> de <b>${umbral}</b> pidieron rehacer los equipos</span>
-        <span class="text-xs font-bold text-violet-200">${pct}%</span>
+    <div class="mt-3 text-xs" title="Con ${umbral} (el ${Math.round(PORCENTAJE_REHACER * 100)}% de los titulares) se rehacen solos, equilibrados">
+      <div class="flex items-center gap-2">
+        <span class="shrink-0">🙋 <b>${nRehacer}</b> de ${umbral} pidieron rehacerlos</span>
+        <div class="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-violet-400 transition-all" style="width:${pct}%"></div></div>
+        <span class="font-bold text-violet-300">${pct}%</span>
       </div>
-      <div class="mt-1.5 h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-violet-400 transition-all" style="width:${pct}%"></div></div>
-      <p class="text-[11px] text-slate-400 mt-1">Con ${umbral} (el ${Math.round(PORCENTAJE_REHACER * 100)}% de los titulares) se rehacen solos, equilibrados.</p>
-      ${quienes.length ? `<p class="text-xs text-violet-200/80 mt-1">${quienes.map(esc).join(', ')} <span class="text-slate-500">(solo lo ven los admins)</span></p>` : ''}
+      ${quienes.length ? `<p class="text-violet-200/70 mt-1">${quienes.map(esc).join(', ')} <span class="text-slate-500">(solo lo ven los admins)</span></p>` : ''}
     </div>` : '';
   const yaPedi = D.rehacer.some(r => r.id === yo && r.ronda === rondaActual());
-  const botonRehacer = vigentes && rondaActual() && !editor && miEquipo && !equiposCerrados() ? (yaPedi
-    ? `<div class="mt-3 flex items-center justify-between gap-2 text-sm bg-violet-500/10 border border-violet-500/20 rounded-xl px-3 py-2">
-         <span>🙋 Pediste rehacer los equipos. Nadie ve quién lo pidió.</span>
-         <button data-action="rehacer-cancelar" class="text-xs text-slate-400 underline shrink-0">Cancelar</button>
-       </div>`
-    : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full mt-3 text-sm">🙋 Pedir rehacer los equipos</button>`) : '';
+  const botonRehacer = abiertos && rondaActual() ? (yaPedi
+    ? `<button data-action="rehacer-cancelar" class="${BTN} w-full text-xs py-2 bg-violet-500/15 text-violet-200 border border-violet-500/30" title="Nadie ve quién lo pidió">🙋 Pediste rehacerlos · Cancelar</button>`
+    : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full text-xs py-2">🙋 Pedir rehacerlos</button>`) : '';
 
   const modo = eq.editado ? '✏️ editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado';
+  const dif = Math.abs(prom('A') - prom('B'));
   return card(`
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between gap-2">
       <h2 class="text-lg font-bold">🆚 Equipos</h2>
-      <span class="text-xs text-slate-500">${modo}</span>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-500">${modo}</span>
+        ${editor && vigentes ? `<button data-action="editar-equipos" class="text-xs rounded-lg px-2.5 py-1 ${editando ? 'bg-emerald-500 text-slate-950 font-semibold' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}">${editando ? '✓ Listo' : '✏️ Editar'}</button>` : ''}
+      </div>
     </div>
     ${vigentes ? '' : `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${editor ? 'Volvé a armarlos.' : 'Los van a rearmar.'}</p>`}
     ${pendientes}
-    ${avisoRehacer}
-    <div class="grid sm:grid-cols-2 gap-3 mt-3">
-      ${columna('A', 'border-red-500/30 bg-red-500/5')}
-      ${columna('B', 'border-sky-500/30 bg-sky-500/5')}
+    <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
+      <div>
+        <p class="text-lg sm:text-xl font-black text-red-300 tracking-wide">🔴 EQUIPO A</p>
+        ${editor ? `<p class="text-xs text-slate-400">prom <b class="text-slate-200">${prom('A').toFixed(1)}</b></p>` : `<p class="text-xs text-slate-500">${eq.A.length} jugadores</p>`}
+      </div>
+      <span class="text-xs font-black text-slate-500 rounded-full border border-slate-700 w-9 h-9 grid place-items-center">VS</span>
+      <div>
+        <p class="text-lg sm:text-xl font-black text-sky-300 tracking-wide">EQUIPO B 🔵</p>
+        ${editor ? `<p class="text-xs text-slate-400">prom <b class="text-slate-200">${prom('B').toFixed(1)}</b></p>` : `<p class="text-xs text-slate-500">${eq.B.length} jugadores</p>`}
+      </div>
     </div>
-    ${editor && vigentes ? '<p class="text-xs text-slate-500 mt-2">Tocá → o ← para pasar a alguien al otro equipo.</p>' : ''}
-    ${vigentes ? `<button data-action="copiar-equipos" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">📋 Copiar equipos para WhatsApp</button>` : ''}
-    ${pedido}
-    ${botonRehacer}
-    ${botones}`);
+    ${editor ? `<p class="text-center text-[11px] mt-1 ${dif <= 0.3 ? 'text-emerald-400' : dif <= 0.8 ? 'text-amber-300' : 'text-red-300'}">⚖️ Diferencia: ${dif.toFixed(1)}</p>` : ''}
+    <div class="grid sm:grid-cols-2 gap-3 mt-3">
+      ${columna('A', 'border-red-500', 'bg-red-500/5', 'text-red-300')}
+      ${columna('B', 'border-sky-500', 'bg-sky-500/5', 'text-sky-300')}
+    </div>
+    ${avisoRehacer}
+    ${editando ? `
+      <div class="mt-3 rounded-xl border border-slate-700 bg-slate-800/40 p-3">
+        <p class="text-xs text-slate-400">Tocá → o ← para pasar a alguien al otro equipo, o volvé a armarlos:</p>
+        ${botones}
+      </div>` : ''}
+    <div class="grid ${pedido && botonRehacer ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-3">${pedido}${botonRehacer}</div>
+    ${vigentes ? `<button data-action="copiar-equipos" class="${BTN_SEC} w-full mt-2 text-xs py-2">📋 Copiar equipos para WhatsApp</button>` : ''}
+    ${editor && !vigentes ? botones : ''}`);
 }
 
 function tarjetaMvp() {
@@ -2590,6 +2602,7 @@ const acciones = {
   'activar-push': () => activarNotificaciones(),
   'desactivar-push': () => desactivarNotificaciones(),
   'toggle-clima': () => { ui.climaAbierto = !ui.climaAbierto; render(); },
+  'editar-equipos': () => { ui.editarEquipos = !ui.editarEquipos; render(); },
   'rehacer-pedir': () => pedirRehacer(true),
   'rehacer-cancelar': () => pedirRehacer(false),
   'toggle-armador': ({ id }) => actualizarGrupo(s => {
