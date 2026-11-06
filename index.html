@@ -1359,15 +1359,37 @@ function escudo(id, size = 20) {
   const forma = 'M2 1.5h16v9.5c0 6.2-4 9.6-8 11.5-4-1.9-8-5.3-8-11.5z';
   return `<svg viewBox="0 0 20 24" width="${size}" height="${Math.round(size * 1.2)}" class="shrink-0 inline-block" role="img" aria-label="${esc(k.n)}"><title>${esc(k.n)}</title><clipPath id="esc-${id}"><path d="${forma}"/></clipPath><g clip-path="url(#esc-${id})">${fondo}</g><path d="${forma}" fill="none" stroke="#e2e8f0" stroke-opacity=".7" stroke-width="1"/></svg>`;
 }
+// Buscador de cuadros: se escribe para filtrar (sin importar acentos) o se elige de la lista.
+const sinAcentos = t => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const selectorCuadro = sel => {
-  const ops = af => Object.entries(CLUBES).filter(([, k]) => !!k.afuera === af)
+  const k = CLUBES[sel];
+  const filtro = sinAcentos(ui.cuadroFiltro || '');
+  const lista = af => Object.entries(CLUBES).filter(([, c]) => !!c.afuera === af && sinAcentos(c.n).includes(filtro))
     .sort((x, y) => x[1].n.localeCompare(y[1].n))
-    .map(([id, k]) => `<option value="${id}" ${id === sel ? 'selected' : ''}>${esc(k.n)}</option>`).join('');
-  return `<select id="pf-cuadro" name="cuadro" class="${INPUT} mt-1">
-    <option value="">— Ninguno —</option>
-    <optgroup label="Argentina">${ops(false)}</optgroup>
-    <optgroup label="Afuera">${ops(true)}</optgroup>
-  </select>`;
+    .map(([id, c]) => `
+      <button type="button" data-action="elegir-cuadro" data-id="${id}" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-slate-800 ${id === sel ? 'bg-emerald-500/10 text-emerald-200' : 'text-slate-200'}">
+        ${escudo(id, 18)} <span class="flex-1 truncate">${esc(c.n)}</span>${id === sel ? ic('check', 'text-emerald-400') : ''}
+      </button>`).join('');
+  const arg = lista(false), afuera = lista(true);
+  return `
+    <input type="hidden" name="cuadro" value="${esc(sel)}">
+    <button type="button" data-action="abrir-cuadros" class="${INPUT} mt-1 flex items-center gap-2 text-left">
+      ${k ? escudo(sel, 18) : ic('shield-check', 'text-slate-500')}
+      <span class="flex-1 truncate ${k ? 'text-slate-100' : 'text-slate-500'}">${k ? esc(k.n) : 'Elegí tu cuadro'}</span>
+      <span class="text-slate-500 transition ${ui.cuadrosAbierto ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
+    </button>
+    ${ui.cuadrosAbierto ? `
+      <div class="mt-1 rounded-xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+        <div class="p-2 border-b border-slate-800">
+          <input id="pf-cuadro-buscar" type="search" autocomplete="off" placeholder="Buscar… (ej: boca, racing)" value="${esc(ui.cuadroFiltro || '')}" class="${INPUT} !py-2 text-sm">
+        </div>
+        <div class="max-h-64 overflow-y-auto">
+          ${!filtro ? `<button type="button" data-action="elegir-cuadro" data-id="" class="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-800">— Ninguno —</button>` : ''}
+          ${arg ? `<p class="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Argentina</p>${arg}` : ''}
+          ${afuera ? `<p class="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Afuera</p>${afuera}` : ''}
+          ${!arg && !afuera ? '<p class="px-3 py-4 text-sm text-slate-500">No encontramos ese cuadro.</p>' : ''}
+        </div>
+      </div>` : ''}`;
 };
 
 // ---------------- Componentes ----------------
@@ -1449,25 +1471,27 @@ function radar(prom) {
 function camposPerfil(p = {}) {
   const foto = ui.foto ?? p.foto ?? '';
   return `
-    <div class="flex items-center gap-4">
-      ${avatar({ usuario: p.usuario || '?', foto }, 72)}
-      <div class="flex flex-col gap-1.5">
-        <label class="${BTN_SEC} text-sm cursor-pointer text-center">📷 ${foto ? 'Cambiar foto' : 'Subir foto'}
+    <div class="grid grid-cols-[auto_1fr] gap-4 items-start">
+      <div class="flex flex-col items-center gap-2 w-24">
+        ${avatar({ usuario: p.usuario || '?', foto }, 88)}
+        <label class="${BTN_CHIP} cursor-pointer w-full">${ic('pencil')} ${foto ? 'Cambiar' : 'Subir foto'}
           <input type="file" accept="image/*" data-change="foto" class="hidden">
         </label>
-        ${foto ? `<button type="button" data-action="quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
+        ${foto ? `<button type="button" data-action="quitar-foto" class="text-[11px] text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
+      </div>
+      <div class="space-y-3 min-w-0">
+        <label class="block text-sm text-slate-400">Edad
+          <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1 block !w-24">
+        </label>
+        <div class="text-sm text-slate-400">¿De qué cuadro sos?
+          ${selectorCuadro(ui.cuadroElegido ?? p.cuadro ?? '')}
+        </div>
       </div>
     </div>
-    <label class="block text-sm text-slate-400">Edad
-      <input id="pf-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} mt-1 block !w-28">
-    </label>
     <div>
       <p class="text-sm text-slate-400 mb-1">Posición</p>
       ${selectorPos('pf-pos', p.posicion || 'comodin')}
-    </div>
-    <label class="block text-sm text-slate-400">¿De qué cuadro sos?
-      ${selectorCuadro(p.cuadro || '')}
-    </label>`;
+    </div>`;
 }
 
 // La gente tiende a poner el mail del trabajo: acá va solo un nombre de usuario.
@@ -3608,7 +3632,7 @@ async function guardarPerfil(f) {
     // La ficha se copia en cada grupo para que solo la vean sus miembros.
     await Promise.allSettled((actual.grupos || []).map(g => F.updateDoc(F.doc(colMiembros(g.id), uid), datos)));
   }, '💾 Ficha guardada');
-  if (ok) ui.foto = null;
+  if (ok) { ui.foto = null; ui.cuadroElegido = undefined; }
   return ok;
 }
 
@@ -3838,6 +3862,13 @@ const acciones = {
     }, 'Saliste del grupo');
   },
   'quitar-foto': () => { ui.foto = ''; render(); },
+  'abrir-cuadros': () => {
+    ui.cuadrosAbierto = !ui.cuadrosAbierto;
+    ui.cuadroFiltro = '';
+    render();
+    if (ui.cuadrosAbierto) $('#pf-cuadro-buscar')?.focus();
+  },
+  'elegir-cuadro': ({ id }) => { ui.cuadroElegido = id; ui.cuadrosAbierto = false; ui.cuadroFiltro = ''; render(); },
   nivel: ({ id, delta }) => {
     const n = limitarNivel(nivelDe(id) + Number(delta));
     if (n !== nivelDe(id)) guardarNivel(id, n);
@@ -4114,6 +4145,7 @@ document.addEventListener('input', e => {
   if (t.id) t.dataset.dirty = '1';
   if (t.dataset.out) document.getElementById(t.dataset.out).textContent = t.value;
   if (t.id === 'l-usuario') actualizarAvisoUsuario();
+  if (t.id === 'pf-cuadro-buscar') { ui.cuadroFiltro = t.value; render(); }
 });
 document.addEventListener('submit', async e => {
   const form = e.target.closest('[data-form]');
