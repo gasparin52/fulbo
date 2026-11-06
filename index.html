@@ -224,6 +224,66 @@ const genId = (n = 20) => {
   return [...crypto.getRandomValues(new Uint8Array(n))].map(x => abc[x % abc.length]).join('');
 };
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Íconos de Lucide (lucide.dev, licencia ISC), copiados acá para no depender de afuera.
+// Para agregar uno: copiá el contenido del <svg> de lucide.dev/icons.
+const ICONOS = {
+  'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  'bell-off': '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+  'bell-ring': '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M4 2C2.8 3.7 2 5.7 2 8"/><path d="M22 8c0-2.3-.8-4.3-2-6"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  'book-open': '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  'calendar-plus': '<path d="M8 2v4"/><path d="M16 2v4"/><path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8"/><path d="M3 10h18"/><path d="M16 19h6"/><path d="M19 16v6"/>',
+  calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  'chart-column': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  'circle-alert': '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+  'circle-check': '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  'circle-help': '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  'circle-x': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+  'clipboard-list': '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  droplets: '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/>',
+  'eye-off': '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+  hourglass: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  'key-round': '<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  'lock-keyhole': '<circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  'log-out': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  'map-pin': '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  'party-popper': '<path d="M5.8 11.3 2 22l10.7-3.79"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10"/><path d="m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11c-.11.7-.72 1.22-1.43 1.22H17"/><path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7"/><path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+  scale: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
+  'scroll-text': '<path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
+  settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  'share-2': '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
+  'shield-check': '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+  smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+  swords: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>',
+  ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>',
+  timer: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+  'trash-2': '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+  'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  'user-round-cog': '<path d="M2 21a8 8 0 0 1 10.434-7.62"/><circle cx="10" cy="8" r="5"/><circle cx="18" cy="18" r="3"/><path d="m19.5 14.3-.4.9"/><path d="m16.9 20.8-.4.9"/><path d="m21.7 19.5-.9-.4"/><path d="m15.2 16.9-.9-.4"/><path d="m21.7 16.5-.9.4"/><path d="m15.2 19.1-.9.4"/><path d="m19.5 21.7-.4-.9"/><path d="m16.9 15.2-.4-.9"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  wind: '<path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  zap: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+};
+// ic('bell'): ícono del tamaño y color del texto; cls agrega clases (color, tamaño con !w-… !h-…).
+const ic = (n, cls = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="inline-block shrink-0 w-[1.1em] h-[1.1em] align-[-0.2em] ${cls}">${ICONOS[n]}</svg>`;
 const guardado = {
   get: k => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
@@ -612,17 +672,17 @@ function bloquePush() {
   const caja = html => `<div class="mt-4 rounded-xl border border-slate-700/60 bg-slate-800/50 p-3 text-sm">${html}</div>`;
   if (pushActivo()) return caja(`
     <div class="flex items-center gap-3">
-      <p class="flex-1">🔔 Te avisamos al celu si alguien se baja, faltan jugadores o se suspende.</p>
+      <p class="flex-1">${ic('bell-ring', 'text-emerald-400')} Te avisamos al celu si alguien se baja, faltan jugadores o se suspende.</p>
       <button data-action="desactivar-push" class="text-xs text-slate-400 underline shrink-0">Desactivar</button>
     </div>`);
   if (esIOS() && !instalada()) return caja(`
-    <p>🔕 <b>¿Querés que te llegue al celu?</b></p>
+    <p>${ic('bell-off')} <b>¿Querés que te llegue al celu?</b></p>
     <p class="text-xs text-slate-400 mt-1">En iPhone primero agregá Fulbo a la pantalla de inicio: en Safari tocá <b>Compartir</b> → <b>Agregar a inicio</b>. Abrila desde ese ícono y activalas desde acá.</p>`);
-  if (!pushPosible()) return caja('<p class="text-xs text-slate-400">🔕 Este navegador no permite notificaciones.</p>');
-  if (Notification.permission === 'denied') return caja('<p class="text-xs text-slate-400">🔕 Bloqueaste las notificaciones de esta página. Si querés que te lleguen, habilitalas en la configuración del navegador.</p>');
+  if (!pushPosible()) return caja('<p class="text-xs text-slate-400">' + ic('bell-off') + ' Este navegador no permite notificaciones.</p>');
+  if (Notification.permission === 'denied') return caja('<p class="text-xs text-slate-400">' + ic('bell-off') + ' Bloqueaste las notificaciones de esta página. Si querés que te lleguen, habilitalas en la configuración del navegador.</p>');
   return caja(`
     <div class="flex items-center gap-3">
-      <p class="flex-1">🔕 <b>Avisame al celu</b> <span class="text-slate-400">si alguien se baja, faltan jugadores o se suspende.</span></p>
+      <p class="flex-1">${ic('bell')} <b>Avisame al celu</b> <span class="text-slate-400">si alguien se baja, faltan jugadores o se suspende.</span></p>
       <button data-action="activar-push" class="${BTN_OK} text-sm shrink-0">Activar</button>
     </div>`);
 }
@@ -635,7 +695,7 @@ function campanita() {
   const n = avisosNuevos();
   return `
     <button data-action="abrir-avisos" title="Avisos" class="relative w-6 h-6 grid place-items-center shrink-0 opacity-90 hover:opacity-100">
-      <span class="text-sm leading-none">${pushActivo() || n ? '🔔' : '🔕'}</span>
+      <span class="leading-none text-slate-300">${ic(pushActivo() || n ? 'bell' : 'bell-off', '!w-4 !h-4')}</span>
       ${n ? `<span class="absolute -top-1.5 -right-1.5 min-w-[0.95rem] h-[0.95rem] px-0.5 rounded-full bg-red-500 text-[9px] font-bold text-white grid place-items-center">${n}</span>` : ''}
     </button>`;
 }
@@ -643,7 +703,7 @@ function modalAvisos() {
   const avisos = avisosGrupo();
   return modal(`
     <div class="flex items-center justify-between">
-      <h2 class="text-xl font-black">🔔 Avisos</h2>
+      <h2 class="text-xl font-black">${ic('bell')} Avisos</h2>
       <button data-action="cerrar-modal" class="text-slate-400 hover:text-slate-200 px-2 text-lg">✕</button>
     </div>
     ${avisos.length ? `
@@ -664,7 +724,7 @@ function tarjetaAvisos(d) {
   const partes = [];
   if (p.suspendido) partes.push(`
     <div class="rounded-2xl border border-red-500/40 bg-red-500/15 px-4 py-3">
-      <p class="font-bold text-red-200">🚫 Partido suspendido</p>
+      <p class="font-bold text-red-200">${ic('ban')} Partido suspendido</p>
       <p class="text-sm text-red-100/90 mt-0.5">${esc(p.suspendido)}</p>
     </div>`);
   const dias = p.fecha ? Math.round((Date.parse(p.fecha + 'T12:00:00Z') - Date.parse(hoyArg() + 'T12:00:00Z')) / DIA) : -1;
@@ -672,7 +732,7 @@ function tarjetaAvisos(d) {
   if (!p.suspendido && !equiposCerrados() && faltan > 0 && (dias === 0 || dias === 1)) {
     partes.push(`
       <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
-        <p class="font-bold text-amber-200">⚠️ ${faltan === 1 ? 'Falta 1' : `Faltan ${faltan}`} para ${dias ? 'mañana' : 'hoy'}</p>
+        <p class="font-bold text-amber-200">${ic('triangle-alert')} ${faltan === 1 ? 'Falta 1' : `Faltan ${faltan}`} para ${dias ? 'mañana' : 'hoy'}</p>
         <p class="text-sm text-amber-100/80 mt-0.5">Somos ${d.titulares.length}/${d.cupo}. Si conocés a alguien, invitalo.</p>
       </div>`);
     // Una vez por fecha y por día, el primero que lo ve le pide al servidor que avise.
@@ -1276,7 +1336,7 @@ function actualizarAvisoUsuario() {
 function vistaRecuperar() {
   return `
     <div class="text-center pt-6">
-      <div class="text-5xl">🔑</div>
+      <div class="text-5xl text-emerald-400">${ic('key-round')}</div>
       <h1 class="text-2xl font-black mt-2">Recuperar acceso de admin</h1>
       <p class="text-slate-400 text-sm mt-1">Para la cuenta <b>${esc(CONFIG.superadmin)}</b>. Necesitás el código de recuperación que está guardado en Vercel (RECOVERY_CODE).</p>
     </div>
@@ -1302,7 +1362,7 @@ function vistaLogin() {
       <h1 class="text-3xl font-black mt-2">Fulbo</h1>
       <p class="text-slate-400 text-sm mt-1">Anotate, armá tu ficha y calificá a tus compañeros</p>
     </div>
-    ${invitado ? `<p class="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-center">🎟️ Te invitaron a un grupo. Entrá o creá tu cuenta para sumarte.</p>` : ''}
+    ${invitado ? `<p class="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-center">${ic('ticket')} Te invitaron a un grupo. Entrá o creá tu cuenta para sumarte.</p>` : ''}
     ${card(`
       <div class="grid grid-cols-2 gap-1 p-1 bg-slate-800 rounded-xl mb-4">${tab('entrar', 'Entrar')}${tab('registro', 'Crear cuenta')}</div>
       <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
@@ -1315,7 +1375,7 @@ function vistaLogin() {
           </div>` : ''}
         <div class="relative">
           <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="${reg && CONFIG.publico ? 8 : 6}" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? (CONFIG.publico ? ' (8+, letras y números)' : ' (mínimo 6 caracteres)') : ''}" class="${INPUT} pr-12">
-          <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ui.verPass ? '🙈' : '👁️'}</button>
+          <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ic(ui.verPass ? 'eye-off' : 'eye')}</button>
         </div>
         ${reg && CONFIG.publico ? `<input id="l-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetí la contraseña" class="${INPUT}">` : ''}
         ${reg ? camposPerfil() : ''}
@@ -1329,7 +1389,7 @@ function vistaLogin() {
       ${reg && !CONFIG.publico ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
       ${!reg && CONFIG.publico ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="text-sm text-slate-400 hover:text-slate-200 underline">¿Te olvidaste la contraseña?</button></div>' : ''}
     `)}
-    <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">❓ ¿Primera vez? Mirá cómo se usa</a>
+    <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} ¿Primera vez? Mirá cómo se usa</a>
     ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}
     ${pie()}`;
 }
@@ -1343,7 +1403,7 @@ const pie = () => CONFIG.publico ? `
   </p>` : '';
 const encabezado = (icono, titulo, texto = '') => `
   <div class="text-center pt-6">
-    <div class="text-5xl">${icono}</div>
+    <div class="text-5xl text-emerald-400">${icono}</div>
     <h1 class="text-2xl font-black mt-2">${titulo}</h1>
     ${texto ? `<p class="text-slate-400 text-sm mt-1">${texto}</p>` : ''}
   </div>`;
@@ -1352,16 +1412,16 @@ const camposClave = (usuario = '') => `
   <input id="c-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetila" class="${INPUT}">
   <div class="flex items-center justify-between gap-2 text-xs text-slate-500">
     <span>${REQUISITOS_CLAVE}</span>
-    <button type="button" data-action="ver-pass" class="underline shrink-0">${ui.verPass ? '🙈 Ocultar' : '👁️ Mostrar'}</button>
+    <button type="button" data-action="ver-pass" class="underline shrink-0">${ui.verPass ? ic('eye-off') + ' Ocultar' : ic('eye') + ' Mostrar'}</button>
   </div>`;
 // Revisa la contraseña nueva y su repetición; devuelve el error o ''.
 const revisarClave = (f, usuario) => claveSegura(f.get('pass'), usuario) || (f.get('pass') !== f.get('pass2') ? 'Las contraseñas no coinciden' : '');
 
 function vistaOlvide() {
   return `
-    ${encabezado('🔑', '¿Te olvidaste la contraseña?', 'Te mandamos un link a tu mail para elegir una nueva.')}
+    ${encabezado(ic('key-round'), '¿Te olvidaste la contraseña?', 'Te mandamos un link a tu mail para elegir una nueva.')}
     ${card(ui.olvideEnviado ? `
-      <p class="text-sm">📧 Si hay una cuenta con ese usuario o mail (y el mail está confirmado), te llegó un link. <b>Dura 1 hora.</b></p>
+      <p class="text-sm">${ic('mail')} Si hay una cuenta con ese usuario o mail (y el mail está confirmado), te llegó un link. <b>Dura 1 hora.</b></p>
       <p class="text-xs text-slate-500 mt-2">Revisá también la carpeta de spam. Si no tenías mail cargado, pedile al admin de tu grupo que te ponga una contraseña nueva.</p>
     ` : `
       <form data-form="olvide" class="space-y-3">
@@ -1375,7 +1435,7 @@ function vistaOlvide() {
 
 function vistaNuevaClave(token) {
   return `
-    ${encabezado('🔐', 'Elegí tu contraseña nueva')}
+    ${encabezado(ic('lock-keyhole'), 'Elegí tu contraseña nueva')}
     ${card(`
       <form data-form="nueva-clave" class="space-y-3">
         <input type="hidden" name="token" value="${esc(token)}">
@@ -1397,7 +1457,7 @@ function vistaVerificar(token) {
   }
   const listo = estado && estado !== 'cargando';
   return `
-    ${encabezado(!listo ? '⏳' : estado.ok ? '✅' : '⚠️', !listo ? 'Confirmando tu mail…' : estado.ok ? '¡Mail confirmado!' : 'No se pudo confirmar', listo ? (estado.ok ? `Si te olvidás la contraseña, te mandamos el link a ${esc(estado.mail)}.` : esc(estado.error)) : '')}
+    ${encabezado(ic(!listo ? 'hourglass' : estado.ok ? 'circle-check' : 'triangle-alert'), !listo ? 'Confirmando tu mail…' : estado.ok ? '¡Mail confirmado!' : 'No se pudo confirmar', listo ? (estado.ok ? `Si te olvidás la contraseña, te mandamos el link a ${esc(estado.mail)}.` : esc(estado.error)) : '')}
     ${listo ? `<a href="#/" class="${BTN_OK} block text-center">Ir a Fulbo</a>` : ''}`;
 }
 
@@ -1413,15 +1473,15 @@ function pendienteActualizar() {
 function vistaActualizar() {
   const clave = guardado.get(CLAVE_ACTUALIZAR) === 'clave';
   return `
-    ${encabezado('🛡️', 'Actualizá tu cuenta', 'Fulbo ahora es público, así que pedimos cuentas más seguras. Es una sola vez.')}
+    ${encabezado(ic('shield-check'), 'Actualizá tu cuenta', 'Fulbo ahora es público, así que pedimos cuentas más seguras. Es una sola vez.')}
     ${clave ? card(`
-      <h2 class="font-bold mb-1">🔐 Contraseña nueva</h2>
+      <h2 class="font-bold mb-1">${ic('lock-keyhole')} Contraseña nueva</h2>
       <p class="text-sm text-slate-400 mb-3">Tu contraseña actual es muy corta o fácil de adivinar.</p>
       <form data-form="actualizar-clave" class="space-y-3">
         ${camposClave()}
         <button class="${BTN_OK} w-full">Guardar contraseña</button>
       </form>`) : card(`
-      <h2 class="font-bold mb-1">📧 Tu mail de recuperación</h2>
+      <h2 class="font-bold mb-1">${ic('mail')} Tu mail de recuperación</h2>
       <p class="text-sm text-slate-400 mb-3">Si algún día te olvidás la contraseña, te mandamos un link acá. No lo ve nadie más ni te vamos a mandar publicidad.</p>
       <form data-form="mail" class="space-y-3">
         <input id="a-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail" class="${INPUT}">
@@ -1436,7 +1496,7 @@ function tarjetaMail() {
   if (!CONFIG.publico || !p?.mail || p.verificado) return '';
   return `
     <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm flex items-center gap-3">
-      <p class="flex-1">📧 <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. Revisá también spam.</p>
+      <p class="flex-1">${ic('mail')} <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. Revisá también spam.</p>
       <button data-action="reenviar-mail" class="text-xs text-amber-200 underline shrink-0">Reenviar</button>
     </div>`;
 }
@@ -1446,9 +1506,9 @@ function tarjetaCuenta() {
   if (!CONFIG.publico) return '';
   const p = D.privado;
   const estado = !p?.mail ? '<span class="text-amber-300">Sin mail: si te olvidás la contraseña no la vas a poder recuperar.</span>'
-    : p.verificado ? '<span class="text-emerald-400">✅ Confirmado</span>' : '<span class="text-amber-300">⏳ Falta confirmarlo (revisá tu mail)</span>';
+    : p.verificado ? `<span class="text-emerald-400">${ic('circle-check')} Confirmado</span>` : `<span class="text-amber-300">${ic('hourglass')} Falta confirmarlo (revisá tu mail)</span>`;
   return card(`
-    <h2 class="text-lg font-bold mb-3">🔐 Tu cuenta</h2>
+    <h2 class="text-lg font-bold mb-3">${ic('lock-keyhole')} Tu cuenta</h2>
     <form data-form="mail" class="space-y-2">
       <label class="block text-sm text-slate-400">Mail de recuperación
         <input id="f-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" value="${esc(p?.mail || '')}" placeholder="Tu mail" class="${INPUT} mt-1">
@@ -1504,19 +1564,19 @@ function vistaGrupos(conVolver) {
       <ul class="divide-y divide-slate-800">
         ${grupos.map(g => `
           <li class="flex items-center gap-2 py-2">
-            <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex-1 text-left font-medium hover:text-emerald-300">${g.id === D.gid ? '✅ ' : ''}${esc(g.nombre)}</button>
+            <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex-1 text-left font-medium hover:text-emerald-300">${g.id === D.gid ? ic('check', 'text-emerald-400') + ' ' : ''}${esc(g.nombre)}</button>
             <button data-action="salir-grupo" data-gid="${g.id}" class="text-xs text-slate-500 hover:text-red-300">Salir del grupo</button>
           </li>`).join('')}
       </ul>`) : `<p class="text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`}
     ${card(`
-      <h2 class="text-lg font-bold">🎟️ Unirme a un grupo</h2>
+      <h2 class="text-lg font-bold">${ic('ticket')} Unirme a un grupo</h2>
       <p class="text-sm text-slate-400 mb-3">Abrí el link de invitación que te pasaron, o pegalo acá.</p>
       <form data-form="unirse" class="flex gap-2">
         <input id="u-link" name="link" required placeholder="Link de invitación" class="${INPUT}">
         <button class="${BTN_OK} shrink-0">Unirme</button>
       </form>`)}
     ${card(`
-      <h2 class="text-lg font-bold">➕ Crear un grupo</h2>
+      <h2 class="text-lg font-bold">${ic('plus')} Crear un grupo</h2>
       <p class="text-sm text-slate-400 mb-3">Vas a ser el admin: armás los partidos, los equipos e invitás a los demás.</p>
       <form data-form="crear-grupo" class="flex gap-2">
         <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
@@ -1540,7 +1600,7 @@ function topBar() {
         <span class="block text-xs text-slate-500 group-hover:text-slate-300">Grupo ▾</span>
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
-      <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">❓ Ayuda</a>
+      <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} Ayuda</a>
       ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       ${campanita()}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
@@ -1611,11 +1671,11 @@ function guia() {
     </div>`, 'Tocá <b>Agregar</b>, arriba a la derecha.'],
     [inicio(), 'Listo: abrí Fulbo desde el ícono ⚽. En iPhone las <b>notificaciones solo andan</b> si la abrís desde acá.'],
   ]);
-  const barraApp = (bell = false) => `<div class="flex items-center gap-1.5 px-2 py-2 bg-slate-950/60"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">G</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span><span class="text-amber-300 underline text-[8px]">Ayuda</span>${bell ? toca('<span class="px-0.5">🔔</span>') : '<span>🔔</span>'}<span class="text-slate-500 text-[8px]">Salir</span></div>`;
+  const barraApp = (bell = false) => `<div class="flex items-center gap-1.5 px-2 py-2 bg-slate-950/60"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">G</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span><span class="text-amber-300 underline text-[8px]">Ayuda</span>${bell ? toca('<span class="px-0.5">' + ic('bell') + '</span>') : ic('bell')}<span class="text-slate-500 text-[8px]">Salir</span></div>`;
   const notis = tira([
-    [`${barraApp(true)}${fondoApp()}`, 'Tocá la <b>campanita 🔔</b> de arriba.', true],
+    [`${barraApp(true)}${fondoApp()}`, 'Tocá la <b>campanita</b> ' + ic('bell') + ' de arriba.', true],
     [`${barraApp()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-6 rounded-xl bg-slate-800 border border-slate-600 p-2 space-y-1.5">
-      <p class="font-bold text-[10px]">🔔 Avisos</p><p class="text-slate-400">😢 Pepe se bajó</p>
+      <p class="font-bold text-[10px]">${ic('bell')} Avisos</p><p class="text-slate-400">😢 Pepe se bajó</p>
       <div class="rounded-lg bg-slate-700/60 p-1.5 flex items-center gap-1"><span class="flex-1">Avisame al celu</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-0.5">Activar</span>')}</div>
     </div></div>`, 'Tocá <b>Activar</b>.', true],
     [`${barraChrome()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-2 rounded-xl bg-white shadow-xl p-2 space-y-2">
@@ -1625,35 +1685,35 @@ function guia() {
   ]);
   const anotarse = tira([
     [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-slate-400 mb-2">No estás anotado para este partido</p>${toca('<span class="block w-[112px] rounded-lg bg-emerald-500 text-slate-950 font-bold text-center py-1.5 text-[10px]">⚽ ¡Me anoto!</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Para jugar, tocá <b>¡Me anoto!</b>. Si ya está lleno, entrás de suplente.', true],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-emerald-400 mb-2">✅ Estás anotado · titular #3</p>${toca('<span class="block w-[112px] rounded-lg bg-slate-700 text-red-300 font-bold text-center py-1.5 text-[10px]">Me bajo 😢</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Si no podés ir, tocá <b>Me bajo</b> lo antes posible y confirmá. Avisando con tiempo no pasa nada.', true],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="h-14 rounded-lg bg-slate-800"></div><div class="rounded-lg bg-slate-800 p-2"><div class="flex items-center justify-between mb-1.5"><b>📣 Tribuna</b>${toca('<span class="rounded bg-slate-700 px-1 py-0.5">📣 Voy a la tribuna</span>')}</div><p class="text-slate-500">¿No jugás pero vas a ir a alentar?</p></div></div>`, 'Si no jugás pero vas a ir a ver, sumate a la <b>Tribuna</b> (abajo de los equipos).', true],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-emerald-400 mb-2">${ic('circle-check')} Estás anotado · titular #3</p>${toca('<span class="block w-[112px] rounded-lg bg-slate-700 text-red-300 font-bold text-center py-1.5 text-[10px]">Me bajo 😢</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Si no podés ir, tocá <b>Me bajo</b> lo antes posible y confirmá. Avisando con tiempo no pasa nada.', true],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="h-14 rounded-lg bg-slate-800"></div><div class="rounded-lg bg-slate-800 p-2"><div class="flex items-center justify-between mb-1.5"><b>${ic('megaphone')} Tribuna</b>${toca('<span class="rounded bg-slate-700 px-1 py-0.5">' + ic('megaphone') + ' Voy a la tribuna</span>')}</div><p class="text-slate-500">¿No jugás pero vas a ir a alentar?</p></div></div>`, 'Si no jugás pero vas a ir a ver, sumate a la <b>Tribuna</b> (abajo de los equipos).', true],
   ]);
   const link = tira([
-    [`${barraApp()}<div class="flex-1 p-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>🔧 Panel admin</b><p class="text-slate-400">🎟️ Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div></div></div>`, 'El <b>admin</b> baja hasta el <b>Panel admin</b> y toca <b>Copiar</b> en el link de invitación.', true],
+    [`${barraApp()}<div class="flex-1 p-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>${ic('settings')} Panel admin</b><p class="text-slate-400">${ic('ticket')} Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div></div></div>`, 'El <b>admin</b> baja hasta el <b>Panel admin</b> y toca <b>Copiar</b> en el link de invitación.', true],
     [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp (mantené apretado el cuadro de texto → <b>Pegar</b>) y lo manda.'],
     [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5 text-center"><div class="text-2xl mt-2">⚽</div><b class="text-[11px]">Fulbo</b><p class="rounded bg-emerald-500/15 text-emerald-300 p-1">🎟️ Te invitaron a un grupo</p><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5"><span class="py-1">Entrar</span>${toca('<span class="block rounded bg-slate-950 py-1 px-1">Crear cuenta</span>')}</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Nombre de usuario</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Contraseña</div></div>`, 'El que lo abre toca <b>Crear cuenta</b> (o <b>Entrar</b> si ya tiene) y queda adentro del grupo.'],
   ]);
   const cuenta = tira([
     [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••</div><p class="text-slate-500 text-[8px]">Anotá la contraseña en algún lado</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. <b>Anotala</b>: si te la olvidás, el admin te pone una nueva.'],
     [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="flex items-center gap-2">${toca('<span class="w-8 h-8 rounded-full bg-emerald-700 grid place-items-center font-bold">J</span>')}<span class="rounded bg-slate-800 px-1.5 py-1">📷 Subir foto</span></div><p class="text-slate-400 pt-1">Edad</p><div class="w-10 rounded bg-slate-800 px-1.5 py-1">30</div><p class="text-slate-400">Posición</p><div class="flex gap-0.5">${['🃏', '🧤', '🛡️', '⚙️', '⚽'].map((e, i) => `<span class="flex-1 rounded py-1 text-center ${i === 4 ? 'bg-emerald-500/20 ring-1 ring-emerald-500' : 'bg-slate-800'}">${e}</span>`).join('')}</div><p class="text-slate-400">¿De qué cuadro sos?</p><div class="rounded bg-slate-800 px-1.5 py-1">Boca Juniors ▾</div></div>`, 'Completá tu ficha: foto, edad, posición y tu cuadro. Después la cambiás tocando tu foto, arriba a la izquierda.'],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>👥 Jugadores</b>${toca('<span class="block w-[112px] rounded bg-amber-400 text-slate-950 font-bold text-center py-1">⚡ Calificar rápido (4)</span>')}<div class="grid grid-cols-3 gap-1 pt-1">${'BJPT'.slice(0, 3).split('').map(l => `<span class="rounded bg-slate-700/60 py-2 text-center font-bold">${l}</span>`).join('')}</div></div></div>`, 'Calificá a tus compañeros con <b>⚡ Calificar rápido</b>. Sirve solo para armar equipos parejos; nadie ve lo que pusiste.', true],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>${ic('users')} Jugadores</b>${toca('<span class="block w-[112px] rounded bg-amber-400 text-slate-950 font-bold text-center py-1">' + ic('zap') + ' Calificar rápido (4)</span>')}<div class="grid grid-cols-3 gap-1 pt-1">${'BJPT'.slice(0, 3).split('').map(l => `<span class="rounded bg-slate-700/60 py-2 text-center font-bold">${l}</span>`).join('')}</div></div></div>`, 'Calificá a tus compañeros con <b>⚡ Calificar rápido</b>. Sirve solo para armar equipos parejos; nadie ve lo que pusiste.', true],
   ]);
   const paso = (titulo, cuerpo, abierto = false) => `
     <details class="group rounded-xl border border-slate-800 bg-slate-900/40" ${abierto ? 'open' : ''}>
-      <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-3 font-semibold">${titulo}<span class="text-slate-500 transition group-open:rotate-180">▾</span></summary>
+      <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-3 font-semibold"><span>${titulo}</span><span class="text-slate-500 transition group-open:rotate-180">▾</span></summary>
       <div class="px-3 pb-3">${cuerpo}</div>
     </details>`;
   const nota = t => `<p class="text-xs text-slate-400 mt-2">${t}</p>`;
   return card(`
-    <h2 class="text-lg font-bold">📱 Guía paso a paso</h2>
+    <h2 class="text-lg font-bold">${ic('smartphone', 'text-emerald-400')} Guía paso a paso</h2>
     <p class="text-sm text-slate-400 mt-1 mb-3">Tocá cada tema para ver dónde hay que tocar. Deslizá las pantallas para el costado.</p>
     <div class="space-y-2">
-      ${paso(ios ? '📲 Instalar la app (iPhone)' : '📲 Instalar la app (Android)', (ios ? iphone : android) + nota('No hace falta ninguna tienda: se instala desde el navegador y ocupa casi nada.'), true)}
+      ${paso(ic('smartphone') + (ios ? ' Instalar la app (iPhone)' : ' Instalar la app (Android)'), (ios ? iphone : android) + nota('No hace falta ninguna tienda: se instala desde el navegador y ocupa casi nada.'), true)}
       ${paso(ios ? '🤖 ¿Tenés Android?' : '🍎 ¿Tenés iPhone?', ios ? android : iphone)}
-      ${paso('👤 Crear tu cuenta, tu ficha y calificar', cuenta)}
+      ${paso(ic('user') + ' Crear tu cuenta, tu ficha y calificar', cuenta)}
       ${paso('⚽ Anotarte, bajarte o ir a la tribuna', anotarse)}
-      ${paso('🔔 Recibir avisos en el celu', notis + nota('En iPhone primero tenés que instalarla (paso 📲) y abrirla desde el ícono.'))}
-      ${paso('🔗 Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede entrar.'))}
+      ${paso(ic('bell') + ' Recibir avisos en el celu', notis + nota('En iPhone primero tenés que instalarla (paso de instalar) y abrirla desde el ícono.'))}
+      ${paso(ic('link') + ' Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede entrar.'))}
     </div>`);
 }
 
@@ -1676,7 +1736,7 @@ function paginaLegal(icono, titulo, secciones) {
 }
 
 function vistaTerminos() {
-  return paginaLegal('📜', 'Términos y condiciones', [
+  return paginaLegal(ic('scroll-text', 'text-emerald-400'), 'Términos y condiciones', [
     ['1. Qué es Fulbo', [
       'Fulbo (fulbo5.com) es una herramienta <b>gratuita</b> para organizar partidos de fútbol 5 entre conocidos: anotarse, armar equipos parejos, calificarse y votar al jugador del partido.',
       'Al crear una cuenta o usar la página aceptás estos términos y la <a href="#/privacidad" class="underline">política de privacidad</a>. Si no estás de acuerdo, no la uses.',
@@ -1688,7 +1748,7 @@ function vistaTerminos() {
     ['3. Tu cuenta', [
       'Sos responsable de cuidar tu contraseña y de lo que se haga con tu cuenta. Si creés que alguien entró, cambiala desde tu ficha.',
       'Cargá un mail real: es la única forma de recuperar la cuenta si te olvidás la contraseña.',
-      'Podés borrar tu cuenta cuando quieras desde tu ficha (🔐 Tu cuenta → Borrar mi cuenta).',
+      'Podés borrar tu cuenta cuando quieras desde tu ficha (' + ic('lock-keyhole') + ' Tu cuenta → Borrar mi cuenta).',
     ]],
     ['4. Cómo hay que usarla', [
       'Con respeto. Las calificaciones sirven <b>solo para armar equipos parejos</b>: no las uses para burlarte, discriminar ni acosar a nadie.',
@@ -1720,7 +1780,7 @@ function vistaTerminos() {
 }
 
 function vistaPrivacidad() {
-  return paginaLegal('🔒', 'Política de privacidad', [
+  return paginaLegal(ic('lock', 'text-emerald-400'), 'Política de privacidad', [
     ['Qué datos guardamos', [
       'De tu cuenta: <b>nombre de usuario</b>, <b>contraseña</b> (cifrada: nadie la puede ver, ni nosotros) y tu <b>mail de recuperación</b>.',
       'De tu ficha: <b>edad</b>, <b>posición</b>, <b>cuadro</b> y, si la subís, tu <b>foto</b>. No pedimos nombre real, teléfono ni documento.',
@@ -1750,7 +1810,7 @@ function vistaPrivacidad() {
       'Mientras tengas la cuenta. Si la borrás, se borran tu ficha, tu mail, tus calificaciones y tu lugar en los grupos. Pueden quedar copias de seguridad por un tiempo limitado.',
     ]],
     ['Tus derechos', [
-      'Podés ver y corregir tus datos desde tu ficha, y <b>borrar tu cuenta</b> desde ahí mismo (🔐 Tu cuenta).',
+      'Podés ver y corregir tus datos desde tu ficha, y <b>borrar tu cuenta</b> desde ahí mismo (' + ic('lock-keyhole') + ' Tu cuenta).',
       'Para cualquier otro pedido sobre tus datos (acceso, rectificación o supresión) escribí a {contacto}. Te respondemos dentro de los plazos de la Ley 25.326 de Protección de Datos Personales.',
       'Si no te responden, podés reclamar ante la <b>Agencia de Acceso a la Información Pública</b> (argentina.gob.ar/aaip), autoridad de control de esa ley.',
     ]],
@@ -1773,21 +1833,21 @@ function vistaReglas() {
   return `
     <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
     <div>
-      <h1 class="text-2xl font-black">❓ Ayuda</h1>
+      <h1 class="text-2xl font-black">${ic('circle-help', 'text-emerald-400')} Ayuda</h1>
       <p class="text-sm text-slate-400 mt-1">Cómo se usa, paso a paso, y las reglas del grupo.</p>
     </div>
     ${guia()}
-    <h2 class="text-xl font-black pt-2">📖 Reglas</h2>
+    <h2 class="text-xl font-black pt-2">${ic('book-open', 'text-emerald-400')} Reglas</h2>
     ${seccion('⚽ Anotarse', [
       'Tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido.',
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
-      'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Todos quedan en la <b>🔔 campanita</b> de arriba (el número rojo son los que no viste) y desde ahí activás las notificaciones al celu.',
+      'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Todos quedan en la <b>' + ic('bell') + ' campanita</b> de arriba (el número rojo son los que no viste) y desde ahí activás las notificaciones al celu.',
       'Podés <b>instalar Fulbo como app</b> (mirá la guía de arriba).',
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
-    ${seccion('🆚 Equipos', [
+    ${seccion(ic('swords') + ' Equipos', [
       'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
@@ -1795,18 +1855,18 @@ function vistaReglas() {
       'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
-    ${seccion('⏱️ El día del partido', [
+    ${seccion(ic('timer') + ' El día del partido', [
       'El admin carga la <b>duración</b> del partido (hasta 2 h).',
       '<b>Media hora antes</b> se cierran los equipos: ya no se rearman solos ni se pueden pedir cambios.',
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
     ])}
-    ${seccion('📊 Calificaciones', [
+    ${seccion(ic('chart-column') + ' Calificaciones', [
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
       'Las ponen los compañeros (también a los invitados sin cuenta que anota el admin): <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
       'En la app no se muestra quién votó qué: solo los promedios.',
       'Al que califica a todos muy bajo le aparece la etiqueta <b>😈 hater</b>: si con 3 o más compañeros calificados pone en promedio 3 o menos, o pone 2,5 puntos o más por debajo de lo que les ponen los demás. Se va sola si ajusta sus votos.',
-      'Con <b>⚡ Calificar rápido</b> (en Jugadores) pasás por todos los que te faltan, de a uno. Después del partido también aparece para calificar a los que jugaron.',
+      'Con <b>' + ic('zap') + ' Calificar rápido</b> (en Jugadores) pasás por todos los que te faltan, de a uno. Después del partido también aparece para calificar a los que jugaron.',
       'Una vez que calificaste a alguien, tu calificación queda <b>oculta</b> en su ficha hasta que tocás <b>Actualizar voto</b>, así nadie la ve si le mostrás el celu.',
       'El que calificó a casi todo el grupo (80% o más) lleva un <b>🧐 Scout</b> al lado del nombre.',
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
@@ -1823,13 +1883,13 @@ function vistaReglas() {
       'El que tiene una falta aprobada lleva una <b>🟥</b> en su ficha y en la lista. La tarjeta <b>se va cuando se anotó en 2 fechas</b> más.',
       '<b>Castigo:</b> en la primera fecha en que se anota después de la falta, si se llena la lista, los que se anotan después le pasan adelante y queda de suplente. Si no se llena, juega igual.',
     ])}
-    ${seccion('📋 Asistencia', [
+    ${seccion(ic('clipboard-list') + ' Asistencia', [
       'Cada uno tiene un <b>porcentaje de asistencia</b> en su ficha (últimos 90 días): cuántas veces jugó contra cuántas falló.',
       'Bajarse <b>con tiempo no afecta</b>. Bajarse <b>el día del partido</b> (menos de 24 h antes) cuenta un poco, y <b>a último momento</b> (menos de 6 h antes) cuenta más. <b>Faltar sin avisar</b> (🟥) es lo que más pesa.',
       'Si había <b>lluvia</b> pronosticada o el partido <b>se suspendió</b>, la baja no cuenta. Un admin también puede perdonar una baja.',
       'Con menos de 70% aparece un <b>⏰</b> al lado del nombre.',
     ])}
-    ${seccion('👤 Tu cuenta y el grupo', [
+    ${seccion(ic('user') + ' Tu cuenta y el grupo', [
       'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición, foto y de qué cuadro sos.',
       'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
@@ -1903,9 +1963,9 @@ function header(d) {
         <div class="min-w-0">
           <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
           <div class="mt-2 flex flex-wrap gap-1.5 text-sm">
-            ${fecha ? `<span class="${chip}">📅 <b class="font-semibold text-slate-100">${esc(fecha[0].toUpperCase() + fecha.slice(1))}</b>${falta ? `<span class="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300">${falta}</span>` : ''}</span>` : ''}
-            ${p.cuando ? `<span class="${chip}">🕗 <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></span>` : ''}
-            ${p.lugar ? `<a href="${esc(mapa)}" target="_blank" rel="noopener" title="Ver en el mapa" class="${chip} min-w-0 hover:border-slate-500">📍 <b class="font-semibold text-slate-100 truncate">${esc(p.lugar)}</b></a>` : ''}
+            ${fecha ? `<span class="${chip}">${ic('calendar', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(fecha[0].toUpperCase() + fecha.slice(1))}</b>${falta ? `<span class="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300">${falta}</span>` : ''}</span>` : ''}
+            ${p.cuando ? `<span class="${chip}">${ic('clock', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></span>` : ''}
+            ${p.lugar ? `<a href="${esc(mapa)}" target="_blank" rel="noopener" title="Ver en el mapa" class="${chip} min-w-0 hover:border-slate-500">${ic('map-pin', 'text-slate-400')} <b class="font-semibold text-slate-100 truncate">${esc(p.lugar)}</b></a>` : ''}
           </div>
         </div>
         <div class="text-right shrink-0">
@@ -1925,8 +1985,8 @@ function miEstado(d) {
   const iT = d.titulares.findIndex(p => p.id === uid);
   const iS = d.suplentes.findIndex(p => p.id === uid);
   const anotado = iT >= 0 || iS >= 0;
-  const estado = iT >= 0 ? `<span class="text-emerald-400">✅ Estás anotado · titular #${iT + 1}</span>`
-    : iS >= 0 ? `<span class="text-amber-400">⏳ Estás de suplente S${iS + 1}</span>`
+  const estado = iT >= 0 ? `<span class="text-emerald-400">${ic('circle-check')} Estás anotado · titular #${iT + 1}</span>`
+    : iS >= 0 ? `<span class="text-amber-400">${ic('hourglass')} Estás de suplente S${iS + 1}</span>`
     : `<span class="text-slate-400">No estás anotado para este partido</span>`;
   const lleno = d.titulares.length >= d.cupo;
   return card(`
@@ -1964,15 +2024,15 @@ function lista(d) {
     </li>`).join('');
   return card(`
     <div class="flex items-center justify-between mb-2">
-      <h2 class="text-lg font-bold">✅ Titulares</h2>
-      <button data-action="copiar" class="${BTN} bg-green-600 hover:bg-green-500 text-white text-sm py-2">📋 Copiar para WhatsApp</button>
+      <h2 class="text-lg font-bold">${ic('circle-check', 'text-emerald-400')} Titulares</h2>
+      <button data-action="copiar" class="${BTN} bg-green-600 hover:bg-green-500 text-white text-sm py-2">${ic('copy')} Copiar para WhatsApp</button>
     </div>
     <ul class="divide-y divide-slate-800">
       ${d.titulares.map((p, i) => filaJugador(p, i + 1, 'bg-emerald-500/15 text-emerald-300')).join('')}
       ${libres}
     </ul>
     ${d.suplentes.length ? `
-      <h3 class="text-base font-bold mt-5 mb-1">🔁 Suplentes</h3>
+      <h3 class="text-base font-bold mt-5 mb-1">${ic('repeat', 'text-amber-300')} Suplentes</h3>
       <ul class="divide-y divide-slate-800">
         ${d.suplentes.map((p, i) => filaJugador(p, 'S' + (i + 1), 'bg-amber-500/15 text-amber-300')).join('')}
       </ul>` : ''}
@@ -1989,10 +2049,10 @@ function tarjetaPublico() {
   if (!gente.length && !puedo) return '';
   return card(`
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-base font-bold">📣 Tribuna${gente.length ? ` <span class="text-slate-400 font-medium">(${gente.length})</span>` : ''}</h2>
+      <h2 class="text-base font-bold">${ic('megaphone', 'text-amber-300')} Tribuna${gente.length ? ` <span class="text-slate-400 font-medium">(${gente.length})</span>` : ''}</h2>
       ${puedo ? (voy
         ? `<button data-action="publico-no" class="${BTN_SEC} text-xs py-1.5">Ya no voy</button>`
-        : `<button data-action="publico-si" class="${BTN_SEC} text-xs py-1.5">📣 Voy a la tribuna</button>`) : ''}
+        : `<button data-action="publico-si" class="${BTN_SEC} text-xs py-1.5">${ic('megaphone')} Voy a la tribuna</button>`) : ''}
     </div>
     ${gente.length ? `
       <ul class="mt-3 flex flex-wrap gap-2">
@@ -2011,13 +2071,13 @@ function equipos(d) {
   const vigentes = eq && !equiposDesactualizados(d);
   const botones = editor ? `
     <div class="grid grid-cols-2 gap-2 mt-3">
-      <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">⚖️ Armar equilibrados</button>
+      <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">${ic('scale')} Armar equilibrados</button>
       <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
     </div>
     ${eq ? `<button data-action="borrar-equipos" class="mt-2 text-xs text-slate-500 hover:text-red-300 underline">Borrar equipos</button>` : ''}` : '';
   if (!eq) {
     return card(`
-      <h2 class="text-lg font-bold">🆚 Equipos</h2>
+      <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
       <p class="text-sm text-slate-400 mt-1">Todavía no se armaron los equipos.</p>
       ${botones}`);
   }
@@ -2036,7 +2096,7 @@ function equipos(d) {
             <li class="flex items-center gap-2.5">
               ${avatar(p, 30)}
               <a href="#/jugador/${p.id}" class="flex-1 min-w-0">
-                <span class="block font-semibold truncate">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse">🔄</span>' : ''}</span>
+                <span class="block font-semibold truncate">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse" class="text-sky-300">' + ic('arrow-left-right') + '</span>' : ''}</span>
                 <span class="block text-[11px] text-slate-500">${pos(p).emoji} ${pos(p).corto}</span>
               </a>
               <span class="opacity-70">${chipNota(p.id)}</span>
@@ -2045,7 +2105,7 @@ function equipos(d) {
         </ul>
         ${sups.length ? `
           <div class="mt-3 pt-2 border-t border-slate-700/50">
-            <p class="text-[11px] font-semibold uppercase tracking-wide text-amber-300/80 mb-1.5">🔁 Suplentes</p>
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-amber-300/80 mb-1.5">${ic('repeat')} Suplentes</p>
             <ul class="space-y-1.5 text-sm text-slate-300">
               ${sups.map(p => `
                 <li class="flex items-center gap-2">
@@ -2066,14 +2126,14 @@ function equipos(d) {
   const abiertos = vigentes && miEquipo && !editor && !equiposCerrados();
   const pedido = abiertos ? (miSolicitud && miSolicitud.a !== miEquipo
     ? `<div class="flex items-center justify-between gap-2 text-xs bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
-         <span>🔄 Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}.</span>
+         <span>${ic('arrow-left-right')} Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}.</span>
          <button data-action="cancelar-solicitud" class="text-slate-400 underline shrink-0">Cancelar</button>
        </div>`
-    : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full text-xs py-2">🔄 Pasarme al otro equipo</button>`) : '';
+    : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full text-xs py-2">${ic('arrow-left-right')} Pasarme al otro equipo</button>`) : '';
 
   const pendientes = editor && vigentes && solicitudes.length ? `
     <div class="mt-3 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
-      <h3 class="text-sm font-bold mb-2">🔄 Pedidos de cambio (${solicitudes.length})</h3>
+      <h3 class="text-sm font-bold mb-2">${ic('arrow-left-right')} Pedidos de cambio (${solicitudes.length})</h3>
       <ul class="space-y-2">
         ${solicitudes.map(([id, s]) => `
           <li class="flex items-center gap-2 text-sm">
@@ -2103,17 +2163,17 @@ function equipos(d) {
     ? `<button data-action="rehacer-cancelar" class="${BTN} w-full text-xs py-2 bg-violet-500/15 text-violet-200 border border-violet-500/30" title="Nadie ve quién lo pidió">🙋 Pediste rehacerlos · Cancelar</button>`
     : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full text-xs py-2">🙋 Pedir rehacerlos</button>`) : '';
 
-  const modo = eq.editado ? '✏️ editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : '⚖️ equilibrado';
+  const modo = eq.editado ? ic('pencil') + ' editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : ic('scale') + ' equilibrado';
   const dif = Math.abs(prom('A') - prom('B'));
   return card(`
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-lg font-bold">🆚 Equipos</h2>
+      <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
       <div class="flex items-center gap-2">
         <span class="text-xs text-slate-500">${modo}</span>
-        ${editor && vigentes ? `<button data-action="editar-equipos" class="text-xs rounded-lg px-2.5 py-1 ${editando ? 'bg-emerald-500 text-slate-950 font-semibold' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}">${editando ? '✓ Listo' : '✏️ Editar'}</button>` : ''}
+        ${editor && vigentes ? `<button data-action="editar-equipos" class="text-xs rounded-lg px-2.5 py-1 ${editando ? 'bg-emerald-500 text-slate-950 font-semibold' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}">${editando ? ic('check') + ' Listo' : ic('pencil') + ' Editar'}</button>` : ''}
       </div>
     </div>
-    ${vigentes ? '' : `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">⚠️ La lista de titulares cambió desde que se armaron. ${editor ? 'Volvé a armarlos.' : 'Los van a rearmar.'}</p>`}
+    ${vigentes ? '' : `<p class="mt-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">${ic('triangle-alert')} La lista de titulares cambió desde que se armaron. ${editor ? 'Volvé a armarlos.' : 'Los van a rearmar.'}</p>`}
     ${pendientes}
     <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
       <div>
@@ -2126,7 +2186,7 @@ function equipos(d) {
         ${editor ? `<p class="text-xs text-slate-400">prom <b class="text-slate-200">${prom('B').toFixed(1)}</b></p>` : `<p class="text-xs text-slate-500">${eq.B.length} jugadores</p>`}
       </div>
     </div>
-    ${editor ? `<p class="text-center text-[11px] mt-1 ${dif <= 0.3 ? 'text-emerald-400' : dif <= 0.8 ? 'text-amber-300' : 'text-red-300'}">⚖️ Diferencia: ${dif.toFixed(1)}</p>` : ''}
+    ${editor ? `<p class="text-center text-[11px] mt-1 ${dif <= 0.3 ? 'text-emerald-400' : dif <= 0.8 ? 'text-amber-300' : 'text-red-300'}">${ic('scale')} Diferencia: ${dif.toFixed(1)}</p>` : ''}
     <div class="grid sm:grid-cols-2 gap-3 mt-3">
       ${columna('A', 'border-red-500', 'bg-red-500/5', 'text-red-300')}
       ${columna('B', 'border-sky-500', 'bg-sky-500/5', 'text-sky-300')}
@@ -2138,7 +2198,7 @@ function equipos(d) {
         ${botones}
       </div>` : ''}
     <div class="grid ${pedido && botonRehacer ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-3">${pedido}${botonRehacer}</div>
-    ${vigentes ? `<button data-action="copiar-equipos" class="${BTN_SEC} w-full mt-2 text-xs py-2">📋 Copiar equipos para WhatsApp</button>` : ''}
+    ${vigentes ? `<button data-action="copiar-equipos" class="${BTN_SEC} w-full mt-2 text-xs py-2">${ic('copy')} Copiar equipos para WhatsApp</button>` : ''}
     ${editor && !vigentes ? botones : ''}`);
 }
 
@@ -2170,9 +2230,9 @@ function tarjetaMvp() {
           ${editar}
         </div>
         ${voto
-          ? `<div class="mt-3 flex items-center gap-2 text-sm">✅ Votaste a ${quien(voto)}
+          ? `<div class="mt-3 flex items-center gap-2 text-sm">${ic('circle-check', 'text-emerald-400')} Votaste a ${quien(voto)}
                <button data-action="mvp-votar" class="ml-auto text-xs text-slate-400 underline shrink-0">Cambiar</button></div>`
-          : `<p class="mt-3 text-sm text-amber-200">⚠️ Todavía no votaste.</p>
+          : `<p class="mt-3 text-sm text-amber-200">${ic('triangle-alert')} Todavía no votaste.</p>
              <button data-action="mvp-votar" class="${BTN} w-full mt-2 bg-amber-400 hover:bg-amber-300 text-slate-950">🏆 Votar al mejor del partido</button>`}
         ${sinMiVoto(m.candidatos).length ? `
           <div class="mt-3 pt-3 border-t border-amber-500/20 flex items-center gap-3">
@@ -2195,7 +2255,7 @@ function tarjetaMvp() {
            </div>`).join('')}
        </div>
        <p class="text-center text-xs text-slate-400 mt-2">${r.ganadores.length > 1 ? 'Empate con' : 'Con'} ${r.max} de ${r.total} votos</p>
-       <button data-action="mvp-copiar" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">📋 Copiar resultado para WhatsApp</button>`;
+       <button data-action="mvp-copiar" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">${ic('copy')} Copiar resultado para WhatsApp</button>`;
   return `
     <div class="${CARD} border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-slate-900">
       <h2 class="text-lg font-black">🏆 Jugador del partido</h2>
@@ -2352,7 +2412,7 @@ function tarjetaPartido() {
   if (f === 'normal') return '';
   if (f === 'cerrado') return `
     <div class="rounded-2xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm">
-      🔒 <b>Equipos cerrados.</b> El partido empieza a las ${esc(t.hora)} (<span data-falta="${t.inicio}">en ${Math.max(1, Math.ceil((t.inicio - Date.now()) / 60e3))} min</span>).
+      ${ic('lock')} <b>Equipos cerrados.</b> El partido empieza a las ${esc(t.hora)} (<span data-falta="${t.inicio}">en ${Math.max(1, Math.ceil((t.inicio - Date.now()) / 60e3))} min</span>).
     </div>`;
   if (f === 'terminado') return `
     <div class="rounded-2xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm">🏁 <b>Terminó el partido.</b> La lista queda cerrada hasta la próxima fecha.</div>`;
@@ -2411,7 +2471,7 @@ function modalCalificar() {
   const p = jugador(id);
   return modal(`
     <div class="flex items-center justify-between gap-2 mb-2">
-      <span class="text-xs text-slate-400">⚡ Calificar rápido · ${ui.colaPos + 1} de ${cola.length}</span>
+      <span class="text-xs text-slate-400">${ic('zap')} Calificar rápido · ${ui.colaPos + 1} de ${cola.length}</span>
       <button data-action="cerrar-modal" class="text-slate-400 hover:text-slate-200 px-2 text-lg">✕</button>
     </div>
     ${barra}
@@ -2478,7 +2538,7 @@ function tarjetaAsistencia(id) {
   const barraColor = { emerald: 'bg-emerald-400', amber: 'bg-amber-400', red: 'bg-red-400', slate: 'bg-slate-500' }[color];
   return card(`
     <div class="flex items-baseline justify-between gap-2">
-      <h2 class="font-bold">📋 Asistencia <span class="text-xs font-normal text-slate-500">(últimos 90 días)</span></h2>
+      <h2 class="font-bold">${ic('clipboard-list')} Asistencia <span class="text-xs font-normal text-slate-500">(últimos 90 días)</span></h2>
       <span class="font-black text-xl ${textoColor}">${a.pct == null ? '–' : a.pct + '%'}</span>
     </div>
     ${a.pct != null ? `<div class="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full ${barraColor}" style="width:${a.pct}%"></div></div>` : ''}
@@ -2615,7 +2675,7 @@ function renderModal() {
 
 const avisoCalificaciones = `
   <p class="text-xs text-sky-200 bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2 mb-3">
-    ℹ️ Las calificaciones sirven <b>solo para armar equipos equilibrados</b>. No son un ranking ni se usan para nada más.
+    ${ic('info')} Las calificaciones sirven <b>solo para armar equipos equilibrados</b>. No son un ranking ni se usan para nada más.
   </p>`;
 
 function jugadoresGrid() {
@@ -2627,10 +2687,10 @@ function jugadoresGrid() {
   const pendientes = ps.filter(p => p.id !== uid && !D.votos[p.id]?.[uid]).length;
   return card(`
     <div class="flex items-baseline justify-between mb-3">
-      <h2 class="text-lg font-bold">👥 Jugadores <span class="text-slate-500 font-normal text-sm">(${ps.length})</span></h2>
+      <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Jugadores <span class="text-slate-500 font-normal text-sm">(${ps.length})</span></h2>
       ${pendientes ? `<span class="text-xs text-amber-300">Te faltan calificar ${pendientes}</span>` : ''}
     </div>
-    ${pendientes ? `<button data-action="calificar-rapido" class="${BTN} w-full mb-3 text-sm bg-amber-400 hover:bg-amber-300 text-slate-950">⚡ Calificar rápido (${pendientes})</button>` : ''}
+    ${pendientes ? `<button data-action="calificar-rapido" class="${BTN} w-full mb-3 text-sm bg-amber-400 hover:bg-amber-300 text-slate-950">${ic('zap')} Calificar rápido (${pendientes})</button>` : ''}
     ${avisoCalificaciones}
     <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
       ${ps.map(p => {
@@ -2664,7 +2724,7 @@ function vistaFicha(id) {
       <div class="flex items-center gap-4">
         ${avatar(p, 96)}
         <div class="min-w-0 flex-1">
-          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">🛠️ armador</span>' : ''}</h1>
+          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">' + ic('wrench') + ' armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}${p.invitado ? ' · invitado (sin cuenta)' : ''}</p>
           ${CLUBES[p.cuadro] ? `
             <p class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-800 border border-slate-700 pl-1.5 pr-2.5 py-0.5 text-xs font-semibold text-slate-200">${escudo(p.cuadro, 18)} ${esc(CLUBES[p.cuadro].n)}</p>` : ''}
@@ -2708,7 +2768,7 @@ function vistaFicha(id) {
         <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
       </div>`) : ''}
     ${esYo ? card(`
-      <h2 class="text-lg font-bold mb-3">✏️ Editar mi ficha</h2>
+      <h2 class="text-lg font-bold mb-3">${ic('pencil')} Editar mi ficha</h2>
       <form data-form="perfil" class="space-y-4">
         ${camposPerfil(p)}
         <button class="${BTN_OK} w-full">Guardar</button>
@@ -2716,10 +2776,10 @@ function vistaFicha(id) {
       <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) + tarjetaCuenta() : miVoto && ui.votoAbierto !== id ? card(`
       <div class="flex items-center gap-3">
         <div class="flex-1">
-          <h2 class="font-bold">✅ Ya calificaste a ${esc(p.usuario)}</h2>
+          <h2 class="font-bold">${ic('circle-check', 'text-emerald-400')} Ya calificaste a ${esc(p.usuario)}</h2>
           <p class="text-xs text-slate-500">Tu calificación queda oculta, por si alguien mira tu celu.</p>
         </div>
-        <button data-action="abrir-voto" data-id="${id}" class="${BTN_SEC} text-sm shrink-0">✏️ Actualizar voto</button>
+        <button data-action="abrir-voto" data-id="${id}" class="${BTN_SEC} text-sm shrink-0">${ic('pencil')} Actualizar voto</button>
       </div>`) : card(`
       <div class="flex items-center justify-between gap-2">
         <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
@@ -2741,12 +2801,12 @@ function vistaFicha(id) {
       </form>`)}
     ${p.invitado ? '' : tarjetaAsistencia(id)}
     ${esAdmin() && !esYo ? card(`
-      <h2 class="text-sm font-bold text-slate-400 mb-2">🔧 Admin</h2>
+      <h2 class="text-sm font-bold text-slate-400 mb-2">${ic('settings')} Admin</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
         <label class="flex items-center gap-2">Nivel si no tiene votos
           ${stepper(nivelDe(id), `data-action="nivel" data-id="${id}"`)}
         </label>
-        ${admin || p.invitado ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">🛠️ ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
+        ${admin || p.invitado ? '' : `<button data-action="toggle-armador" data-id="${id}" class="${BTN} text-xs py-1.5 ${esArmador(id) ? 'bg-amber-500/20 text-amber-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('wrench')} ${esArmador(id) ? 'Quitar permiso de equipos' : 'Puede editar equipos'}</button>`}
         ${admin || p.invitado ? '' : `<button data-action="hacer-admin" data-id="${id}" class="${BTN_SEC} text-xs py-1.5">Hacer admin</button>`}
         ${p.invitado
           ? `<button data-action="borrar-invitado" data-id="${id}" class="${BTN} text-xs py-1.5 bg-red-950 hover:bg-red-900 text-red-200">Borrar invitado</button>`
@@ -2771,10 +2831,10 @@ function panelAdmin(d) {
     ...Object.keys(D.grupo.invitados).map(jugador),
   ];
   return card(`
-    <h2 class="text-lg font-bold">🔧 Panel admin</h2>
+    <h2 class="text-lg font-bold">${ic('settings')} Panel admin</h2>
 
     <div class="mt-4">
-      <h3 class="font-semibold text-sm text-slate-300">🎟️ Link de invitación</h3>
+      <h3 class="font-semibold text-sm text-slate-300">${ic('ticket')} Link de invitación</h3>
       <p class="text-xs text-slate-500 mb-2">Solo entra al grupo quien tenga este link. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
       <div class="flex gap-2">
         <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
@@ -2797,12 +2857,12 @@ function panelAdmin(d) {
       </label>
       <label class="text-sm text-slate-400 sm:col-span-2">Ciudad (para el clima)<input id="p-ciudad" name="ciudad" value="${esc(D.grupo.ciudad?.nombre || '')}" placeholder="Pinamar" maxlength="80" class="${INPUT} mt-1"></label>
       <div class="sm:col-span-2 flex gap-2">
-        <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">💾 Guardar partido</button>
-        <button type="button" data-action="nueva-fecha" class="${BTN} bg-red-950 hover:bg-red-900 text-red-200 text-sm">🗓️ Nueva fecha</button>
+        <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">${ic('save')} Guardar partido</button>
+        <button type="button" data-action="nueva-fecha" class="${BTN} bg-red-950 hover:bg-red-900 text-red-200 text-sm">${ic('calendar-plus')} Nueva fecha</button>
       </div>
       ${p.suspendido
-        ? `<button type="button" data-action="reactivar" class="${BTN} sm:col-span-2 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 text-sm">✅ Levantar la suspensión</button>`
-        : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">🚫 Suspender partido</button>`}
+        ? `<button type="button" data-action="reactivar" class="${BTN} sm:col-span-2 bg-emerald-900/60 hover:bg-emerald-900 text-emerald-200 text-sm">${ic('circle-check')} Levantar la suspensión</button>`
+        : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">${ic('ban')} Suspender partido</button>`}
     </form>
 
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
@@ -2813,17 +2873,17 @@ function panelAdmin(d) {
         return `
           <li class="py-2 flex flex-wrap items-center gap-2">
             ${avatar(j, 28)}
-            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : esArmador(j.id) ? ' <span class="text-xs text-amber-300">🛠️ armador</span>' : ''}</span>
+            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : esArmador(j.id) ? ' <span class="text-xs text-amber-300">' + ic('wrench') + ' armador</span>' : ''}</span>
             <span class="text-xs ${r.n ? 'text-emerald-300' : 'text-slate-500'}" title="Promedio de votos">${r.n ? `★ ${r.general.toFixed(1)} (${r.n})` : 'sin votos'}</span>
             <span title="Nivel si no tiene votos">${stepper(nivelDe(j.id), `data-action="nivel" data-id="${j.id}"`)}</span>
             <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
-            ${j.invitado ? `<button data-action="borrar-invitado" data-id="${j.id}" title="Borrar invitado" class="rounded-lg px-2 py-1.5 hover:bg-red-950">🗑️</button>` : ''}
+            ${j.invitado ? `<button data-action="borrar-invitado" data-id="${j.id}" title="Borrar invitado" class="rounded-lg px-2 py-1.5 hover:bg-red-950">${ic('trash-2')}</button>` : ''}
           </li>`;
       }).join('')}
     </ul>
 
     <form data-form="invitado" class="mt-5 space-y-2 rounded-xl border border-slate-800 p-3">
-      <h3 class="font-semibold text-sm text-slate-300">➕ Anotar invitado sin cuenta</h3>
+      <h3 class="font-semibold text-sm text-slate-300">${ic('plus')} Anotar invitado sin cuenta</h3>
       <input id="i-nombre" name="nombre" required maxlength="20" placeholder="Nombre" class="${INPUT}">
       ${selectorPos('i-pos')}
       <div class="flex items-center justify-between gap-3">
@@ -2883,13 +2943,13 @@ function vistaUsuarios() {
   return `
     <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
     <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-black">👤 Usuarios</h1>
+      <h1 class="text-2xl font-black">${ic('users')} Usuarios</h1>
       <button data-action="sa-recargar" class="text-xs text-slate-500 hover:text-slate-300 underline">Recargar</button>
     </div>
-    ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">⚠️ Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
-    ${SA.error ? `<p class="text-sm text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">❌ ${esc(SA.error)}</p>` : ''}
+    ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">${ic('triangle-alert')} Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
+    ${SA.error ? `<p class="text-sm text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">${ic('circle-x')} ${esc(SA.error)}</p>` : ''}
     ${card(`
-      <h2 class="text-lg font-bold mb-3">➕ Crear usuario</h2>
+      <h2 class="text-lg font-bold mb-3">${ic('plus')} Crear usuario</h2>
       <form data-form="sa-crear" class="space-y-2">
         <div class="grid grid-cols-2 gap-2">
           <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT}">
@@ -2911,9 +2971,9 @@ function vistaUsuarios() {
               <div class="text-xs text-slate-400">${pos(u).emoji} ${u.edad ? u.edad + ' años · ' : ''}${(u.grupos || []).length} ${(u.grupos || []).length === 1 ? 'grupo' : 'grupos'} · último ingreso ${fecha(u.ultimoIngreso)}</div>
             </div>
             <div class="flex gap-1 shrink-0">
-              <button data-action="sa-editar" data-uid="${u.uid}" title="Editar" class="w-9 h-9 rounded-lg hover:bg-slate-800">✏️</button>
-              <button data-action="sa-pass" data-uid="${u.uid}" title="Nueva contraseña" class="w-9 h-9 rounded-lg hover:bg-slate-800">🔑</button>
-              ${u.uid === miUid() ? '' : `<button data-action="sa-borrar" data-uid="${u.uid}" title="Borrar usuario" class="w-9 h-9 rounded-lg hover:bg-red-950">🗑️</button>`}
+              <button data-action="sa-editar" data-uid="${u.uid}" title="Editar" class="w-9 h-9 rounded-lg hover:bg-slate-800">${ic('pencil')}</button>
+              <button data-action="sa-pass" data-uid="${u.uid}" title="Nueva contraseña" class="w-9 h-9 rounded-lg hover:bg-slate-800">${ic('key-round')}</button>
+              ${u.uid === miUid() ? '' : `<button data-action="sa-borrar" data-uid="${u.uid}" title="Borrar usuario" class="w-9 h-9 rounded-lg hover:bg-red-950">${ic('trash-2')}</button>`}
             </div>
           </li>`).join('')}
       </ul>`}`)}`;
