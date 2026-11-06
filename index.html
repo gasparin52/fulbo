@@ -150,6 +150,9 @@ function horaDelPartido(p) {
   return `${m[1].padStart(2, '0')}:${m[2] || '00'}`;
 }
 // Duración (máximo 2 h), cierre de equipos y "en juego".
+// Modalidades de cancha: jugadores por equipo (el cupo de titulares es el doble).
+const MODALIDADES = [5, 6, 7, 8, 9, 11];
+const modalidadDe = cupo => cupo % 2 ? `${cupo} jugadores` : MODALIDADES.includes(cupo / 2) ? `Fútbol ${cupo / 2}` : `${cupo / 2} vs ${cupo / 2}`;
 const DURACION_DEFAULT = 60, DURACIONES = [30, 40, 50, 60, 70, 80, 90, 100, 110, 120];
 const CIERRE_EQUIPOS_MIN = 30;      // los equipos se cierran media hora antes
 const BLOQUEO_DESPUES_H = 6;        // después de terminar, la lista sigue bloqueada un rato
@@ -2339,6 +2342,7 @@ function vistaReglas() {
     <h2 class="text-xl font-black pt-2">${ic('book-open', 'text-emerald-400')} Reglas</h2>
     ${seccion('⚽ Anotarse', [
       'Tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido.',
+      'Cada grupo puede jugar <b>fútbol 5, 6, 7, 8, 9 u 11</b> (u otra cantidad): lo elige el admin en <b>Modalidad</b>, y el cupo de titulares es el doble de los que juegan por equipo.',
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
@@ -2505,6 +2509,7 @@ function header(d) {
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
           <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
+          <p class="text-xs font-semibold text-emerald-300/80 mt-0.5">${modalidadDe(d.cupo)}</p>
           <div class="mt-2 flex flex-wrap gap-1.5 text-sm">
             ${fecha ? `<span class="${chip}">${ic('calendar', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(fecha[0].toUpperCase() + fecha.slice(1))}</b>${falta ? `<span class="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300">${falta}</span>` : ''}</span>` : ''}
             ${p.cuando ? `<span class="${chip}">${ic('clock', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></span>` : ''}
@@ -3473,7 +3478,13 @@ function panelAdmin(d) {
       <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
       ${p.fecha && !horaValida(p.cuando) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
-      <label class="text-sm text-slate-400">Cupo titulares<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
+      <label class="text-sm text-slate-400">Modalidad
+        <select id="p-modalidad" data-change="modalidad" class="${INPUT} mt-1">
+          ${MODALIDADES.map(n => `<option value="${n * 2}" ${d.cupo === n * 2 ? 'selected' : ''}>Fútbol ${n} (${n} vs ${n})</option>`).join('')}
+          ${MODALIDADES.includes(d.cupo / 2) ? '' : `<option value="" selected>Otra: ${d.cupo} jugadores</option>`}
+        </select>
+      </label>
+      <label class="text-sm text-slate-400">Titulares en total<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Duración del partido
         <select id="p-duracion" name="duracion" class="${INPUT} mt-1">
           ${DURACIONES.map(m => `<option value="${m}" ${duracionDe(p) === m ? 'selected' : ''}>${m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`}</option>`).join('')}
@@ -3892,6 +3903,11 @@ const acciones = {
 const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n }, { merge: true }));
 
 const cambios = {
+  modalidad: el => {
+    const c = $('#p-cupo');
+    if (el.value && c) { c.value = el.value; c.dataset.dirty = '1'; }
+    el.dataset.dirty = '1';
+  },
   // Foto del grupo: la cambia un admin desde Administrar.
   'foto-grupo': async el => {
     const file = el.files?.[0];
