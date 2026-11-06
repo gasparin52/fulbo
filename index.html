@@ -471,7 +471,7 @@ A.onAuthStateChanged(auth, user => {
     subsUser.push(F.onSnapshot(F.doc(db, 'privado', user.uid), s => {
       D.privado = s.exists() ? s.data() : null;
       render();
-    }, e => { console.error(e); D.privado = null; render(); }));
+    }, e => { console.error(e); D.privado = { error: true }; render(); }));
   }
   render();
 });
@@ -1530,6 +1530,7 @@ function pendienteActualizar() {
   const f = guardado.get(CLAVE_ACTUALIZAR);
   if (!f || !CONFIG.publico) return false;
   if (D.privado === undefined) return 'cargando';
+  if (D.privado?.error) return f === 'clave';  // sin poder leer el mail, no se lo pide
   if (f === 'clave' || !D.privado?.mail) return true;
   guardado.set(CLAVE_ACTUALIZAR, null);
   return false;
@@ -1549,6 +1550,7 @@ function vistaActualizar() {
       <p class="text-sm text-slate-400 mb-3">Si algún día te olvidás la contraseña, te mandamos un link acá. No lo ve nadie más ni te vamos a mandar publicidad.</p>
       <form data-form="mail" class="space-y-3">
         <input id="a-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail" class="${INPUT}">
+        <p class="text-xs text-slate-500">Te llega un mail para confirmarlo. <b class="text-amber-300">Si no lo ves, buscalo en Correo no deseado o Spam</b> y marcalo como "No es spam".</p>
         <button class="${BTN_OK} w-full">Guardar mail</button>
       </form>`)}
     <div class="text-center"><button data-action="logout" class="text-sm text-slate-500 underline">Salir</button></div>`;
@@ -1560,7 +1562,7 @@ function tarjetaMail() {
   if (!CONFIG.publico || !p?.mail || p.verificado) return '';
   return `
     <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm flex items-center gap-3">
-      <p class="flex-1">${ic('mail')} <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. Revisá también spam.</p>
+      <p class="flex-1">${ic('mail')} <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. <b>Si no lo ves, buscalo en Correo no deseado o Spam.</b></p>
       <button data-action="reenviar-mail" class="text-xs text-amber-200 underline shrink-0">Reenviar</button>
     </div>`;
 }
@@ -3645,7 +3647,7 @@ const formularios = {
     if (ok) location.hash = '#/';
     return ok;
   },
-  mail: f => act(() => api('mail', { mail: f.get('mail') }, urlCuenta()), '📧 Te mandamos un link para confirmarlo'),
+  mail: f => act(() => api('mail', { mail: f.get('mail') }, urlCuenta()), '📧 Te mandamos un mail. Si no lo ves, buscalo en Correo no deseado'),
   'actualizar-clave': async f => {
     const error = revisarClave(f, D.perfil?.usuario);
     if (error) return toast(error);
