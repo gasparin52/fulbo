@@ -1994,6 +1994,34 @@ function tarjetaProximo() {
     </div>`;
 }
 
+function panelPerfil() {
+  const p = D.perfil;
+  return `
+    ${card(`
+      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mi ficha</h2>
+      <form data-form="perfil" class="space-y-4">
+        ${camposPerfil(p)}
+        <button class="${BTN_OK} w-full">Guardar</button>
+      </form>`)}
+    ${card(`
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale a tus grupos.'}</p>
+        <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
+      </div>`)}
+    ${(D.perfil.grupos || []).length ? card(`
+      <h2 class="text-base font-bold mb-2">${ic('log-out', 'text-slate-400')} Salir de un grupo</h2>
+      <ul class="divide-y divide-slate-800">
+        ${D.perfil.grupos.map(g => `
+          <li class="flex items-center gap-3 py-2 text-sm">
+            ${fotoGrupo(D.misGrupos[g.id] || g, 32)}
+            <span class="flex-1 font-medium truncate">${esc(D.misGrupos[g.id]?.nombre || g.nombre)}</span>
+            <button data-action="salir-grupo" data-gid="${g.id}" class="${BTN_CHIP} hover:!text-red-300">Salir</button>
+          </li>`).join('')}
+      </ul>`) : ''}
+    ${tarjetaCuenta()}
+    <button data-action="logout" class="${BTN} w-full inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-red-950 text-red-300">${ic('log-out')} Cerrar sesión</button>`;
+}
+
 // Pedidos míos para entrar a grupos, esperando que un admin los acepte.
 function tarjetaPedidos() {
   const pendientes = D.perfil.pendientes || [];
