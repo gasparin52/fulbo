@@ -13,7 +13,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 
 const DOMINIO = 'fulbo.app';
 const SUPERADMINS = (process.env.SUPERADMINS || 'gasparin').split(',').map(s => s.trim().toLowerCase());
-const ORIGENES = ['https://gasparin52.github.io', 'http://localhost:8791'];
+const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'http://localhost:8791'];
 const POSICIONES = ['comodin', 'arquero', 'defensor', 'medio', 'delantero'];
 
 class ErrorApi extends Error {

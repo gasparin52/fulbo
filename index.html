@@ -40,7 +40,8 @@ const CONFIG = {
   // Usuario con acceso al panel de usuarios (el servidor lo vuelve a verificar).
   superadmin: 'gasparin',
   // URL de la función de Vercel (api/admin.js).
-  api: 'https://fulbo-one.vercel.app/api/admin',
+  // En GitHub Pages va a Vercel; en fulbo5.com (que ya es Vercel) es la misma página.
+  api: location.hostname.endsWith('github.io') ? 'https://fulbo-one.vercel.app/api/admin' : '/api/admin',
   // Clave pública para notificaciones (Firebase → Configuración → Cloud Messaging →
   // Certificados push web). Vacía = no se ofrece activar notificaciones.
   vapid: 'BOuQtxpJuEOwCY9HNPwBglCpc5U2jBmXhHbScpfwjSh230p5VyCC2TAg7lnc1rmV2n0i_xRPyKAAKNzjThpHDMI',
@@ -1291,6 +1292,7 @@ function vistaLogin() {
       </form>
       ${reg ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
     `)}
+    <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">❓ ¿Primera vez? Mirá cómo se usa</a>
     ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}`;
 }
 
@@ -1356,11 +1358,121 @@ function topBar() {
         <span class="block text-xs text-slate-500 group-hover:text-slate-300">Grupo ▾</span>
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
-      <a href="#/reglas" class="text-xs text-amber-300 hover:text-amber-200 underline">📖 Reglas</a>
+      <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">❓ Ayuda</a>
       ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       ${campanita()}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
     </div>`;
+}
+
+// ---------------- Guía (pantallas dibujadas) ----------------
+// Mini pantallas de celular hechas con HTML para mostrar dónde tocar, sin capturas.
+const SITIO = location.hostname.endsWith('github.io') ? 'gasparin52.github.io/fulbo' : 'fulbo5.com';
+// Recuadro verde que marca qué tocar.
+const toca = (html, extra = '') => `<span class="relative inline-flex rounded-md ring-2 ring-emerald-500 ring-offset-1 ring-offset-white/0 ${extra}">${html}<span class="absolute -bottom-3.5 -right-2 text-sm animate-bounce">👆</span></span>`;
+function tel(cont, pie, n, oscuro = false) {
+  return `
+    <figure class="shrink-0 w-[150px] snap-start">
+      <div class="rounded-[22px] border-2 border-slate-600 bg-slate-950 p-1 shadow-lg">
+        <div class="rounded-[18px] overflow-hidden h-[260px] relative text-[9px] leading-tight flex flex-col ${oscuro ? 'bg-slate-900 text-slate-100' : 'bg-white text-slate-800'}">${cont}</div>
+      </div>
+      <figcaption class="text-xs text-slate-300 mt-2 leading-snug"><b class="text-emerald-400">${n}.</b> ${pie}</figcaption>
+    </figure>`;
+}
+const tira = pasos => `<div class="flex gap-3 overflow-x-auto snap-x pb-2 -mx-1 px-1">${pasos.map((p, i) => tel(p[0], p[1], i + 1, p[2])).join('')}</div>`;
+const fondoApp = (alto = 'flex-1') => `<div class="${alto} bg-slate-900 p-2 space-y-1.5"><div class="h-3 w-16 rounded bg-slate-700"></div><div class="h-10 rounded-lg bg-slate-800"></div><div class="h-6 rounded-lg bg-emerald-600/70"></div><div class="h-14 rounded-lg bg-slate-800"></div></div>`;
+const barraChrome = (menu = false) => `<div class="flex items-center gap-1 px-1.5 py-1.5 bg-slate-100 border-b border-slate-300"><span>🏠</span><span class="flex-1 truncate rounded-full bg-white border border-slate-300 px-2 py-0.5 text-[8px]">🔒 ${SITIO}</span>${menu ? toca('<b class="px-1 text-sm leading-none">⋮</b>') : '<b class="px-1 text-sm leading-none">⋮</b>'}</div>`;
+const icoFulbo = (size = 34) => `<img src="icono-192.png" alt="" style="width:${size}px;height:${size}px" class="rounded-xl">`;
+const inicio = () => `
+  <div class="flex-1 bg-gradient-to-b from-indigo-500 to-fuchsia-500 p-3 grid grid-cols-4 gap-2 content-start text-white text-center">
+    ${['📷', '📞', '💬', '🗺️', '🎵', '⚙️'].map(e => `<div><div class="w-[26px] h-[26px] mx-auto rounded-lg bg-white/30 grid place-items-center text-sm">${e}</div></div>`).join('')}
+    <div>${toca(icoFulbo(26))}<p class="mt-1 text-[8px]">Fulbo</p></div>
+  </div>`;
+const compartirIOS = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="2"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/></svg>`;
+const barraSafari = (marcar = false) => `
+  <div class="mt-auto bg-slate-100 border-t border-slate-300 px-2 pt-1.5 pb-2">
+    <div class="rounded-lg bg-white border border-slate-300 px-2 py-0.5 text-center text-[8px] mb-1.5">🔒 ${SITIO}</div>
+    <div class="flex justify-between items-center text-blue-600 text-sm px-1"><span>‹</span><span>›</span>${marcar ? toca(compartirIOS) : compartirIOS}<span>📖</span><span>⧉</span></div>
+  </div>`;
+
+function guia() {
+  const ios = esIOS();
+  const android = tira([
+    [`${barraChrome(true)}${fondoApp()}`, `Abrí <b>${SITIO}</b> en <b>Chrome</b> y tocá los <b>3 puntitos ⋮</b> de arriba a la derecha.`],
+    [`${barraChrome()}<div class="relative flex-1">${fondoApp('h-full')}
+      <div class="absolute right-1 top-1 w-[112px] rounded-lg bg-white shadow-xl border border-slate-200 py-1 text-[8.5px] space-y-0.5">
+        <p class="px-2 py-1">Nueva pestaña</p><p class="px-2 py-1">Historial</p><p class="px-2 py-1">Compartir…</p>
+        <p class="px-1 py-0.5">${toca('<span class="px-1 py-0.5 font-semibold">📲 Agregar a la pantalla principal</span>')}</p>
+        <p class="px-2 py-1">Configuración</p>
+      </div></div>`, 'Tocá <b>Instalar app</b> o <b>Agregar a la pantalla principal</b> (según el celu dice una u otra).'],
+    [`${barraChrome()}<div class="relative flex-1">${fondoApp('h-full')}
+      <div class="absolute inset-0 bg-black/40 grid place-items-center">
+        <div class="w-[118px] rounded-xl bg-white p-2.5 shadow-xl">
+          <p class="font-bold text-[10px] mb-1.5">¿Instalar app?</p>
+          <div class="flex items-center gap-1.5 mb-2.5">${icoFulbo(22)}<span>Fulbo</span></div>
+          <div class="flex justify-end gap-2 text-blue-600 font-semibold"><span>Cancelar</span>${toca('<span class="px-1">Instalar</span>')}</div>
+        </div></div></div>`, 'Confirmá con <b>Instalar</b>. Si solo te ofrece <b>Crear acceso directo</b>, también sirve.'],
+    [inicio(), 'Listo: aparece el ícono ⚽ en tu pantalla. Abrí Fulbo desde ahí, como cualquier app.'],
+  ]);
+  const iphone = tira([
+    [`${fondoApp()}${barraSafari(true)}`, `Abrí <b>${SITIO}</b> en <b>Safari</b> (tiene que ser Safari) y tocá <b>Compartir</b> (el cuadrado con la flecha).`],
+    [`<div class="relative flex-1 flex flex-col">${fondoApp('h-16')}
+      <div class="flex-1 bg-slate-100 rounded-t-xl -mt-2 p-2 space-y-1 text-[8.5px]">
+        <div class="rounded-lg bg-white px-2 py-1.5 flex justify-between"><span>Copiar</span><span>📋</span></div>
+        <div class="rounded-lg bg-white px-2 py-1.5 flex justify-between"><span>Agregar a favoritos</span><span>⭐</span></div>
+        <div>${toca('<span class="rounded-lg bg-white px-2 py-1.5 flex justify-between w-[118px]"><b>Agregar a inicio</b><span>➕</span></span>')}</div>
+        <div class="rounded-lg bg-white px-2 py-1.5 flex justify-between"><span>Imprimir</span><span>🖨️</span></div>
+      </div></div>`, 'Bajá un poco en el menú y tocá <b>Agregar a inicio</b>.'],
+    [`<div class="flex-1 bg-slate-100">
+      <div class="flex justify-between items-center px-2 py-2 bg-white border-b border-slate-200 text-blue-600"><span>Cancelar</span><b class="text-slate-800">Agregar a inicio</b>${toca('<b class="px-0.5">Agregar</b>')}</div>
+      <div class="m-2 rounded-lg bg-white p-2 flex items-center gap-2">${icoFulbo(28)}<div><p class="font-semibold">Fulbo</p><p class="text-slate-400 text-[8px]">${SITIO}</p></div></div>
+    </div>`, 'Tocá <b>Agregar</b>, arriba a la derecha.'],
+    [inicio(), 'Listo: abrí Fulbo desde el ícono ⚽. En iPhone las <b>notificaciones solo andan</b> si la abrís desde acá.'],
+  ]);
+  const barraApp = (bell = false) => `<div class="flex items-center gap-1.5 px-2 py-2 bg-slate-950/60"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">G</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span><span class="text-amber-300 underline text-[8px]">Ayuda</span>${bell ? toca('<span class="px-0.5">🔔</span>') : '<span>🔔</span>'}<span class="text-slate-500 text-[8px]">Salir</span></div>`;
+  const notis = tira([
+    [`${barraApp(true)}${fondoApp()}`, 'Tocá la <b>campanita 🔔</b> de arriba.', true],
+    [`${barraApp()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-6 rounded-xl bg-slate-800 border border-slate-600 p-2 space-y-1.5">
+      <p class="font-bold text-[10px]">🔔 Avisos</p><p class="text-slate-400">😢 Pepe se bajó</p>
+      <div class="rounded-lg bg-slate-700/60 p-1.5 flex items-center gap-1"><span class="flex-1">Avisame al celu</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-0.5">Activar</span>')}</div>
+    </div></div>`, 'Tocá <b>Activar</b>.', true],
+    [`${barraChrome()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-2 rounded-xl bg-white shadow-xl p-2 space-y-2">
+      <p>🔔 <b>${SITIO}</b> quiere enviarte notificaciones</p>
+      <div class="flex justify-end gap-2 text-blue-600 font-semibold"><span>Bloquear</span>${toca('<span class="px-1">Permitir</span>')}</div>
+    </div></div>`, 'Cuando el celu pregunta, tocá <b>Permitir</b>. Te va a avisar si alguien se baja, si faltan jugadores o si se suspende.'],
+  ]);
+  const anotarse = tira([
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-slate-400 mb-2">No estás anotado para este partido</p>${toca('<span class="block w-[112px] rounded-lg bg-emerald-500 text-slate-950 font-bold text-center py-1.5 text-[10px]">⚽ ¡Me anoto!</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Para jugar, tocá <b>¡Me anoto!</b>. Si ya está lleno, entrás de suplente.', true],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-emerald-400 mb-2">✅ Estás anotado · titular #3</p>${toca('<span class="block w-[112px] rounded-lg bg-slate-700 text-red-300 font-bold text-center py-1.5 text-[10px]">Me bajo 😢</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Si no podés ir, tocá <b>Me bajo</b> lo antes posible y confirmá. Avisando con tiempo no pasa nada.', true],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="h-14 rounded-lg bg-slate-800"></div><div class="rounded-lg bg-slate-800 p-2"><div class="flex items-center justify-between mb-1.5"><b>📣 Tribuna</b>${toca('<span class="rounded bg-slate-700 px-1 py-0.5">📣 Voy a la tribuna</span>')}</div><p class="text-slate-500">¿No jugás pero vas a ir a alentar?</p></div></div>`, 'Si no jugás pero vas a ir a ver, sumate a la <b>Tribuna</b> (abajo de los equipos).', true],
+  ]);
+  const link = tira([
+    [`${barraApp()}<div class="flex-1 p-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>🔧 Panel admin</b><p class="text-slate-400">🎟️ Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div></div></div>`, 'El <b>admin</b> baja hasta el <b>Panel admin</b> y toca <b>Copiar</b> en el link de invitación.', true],
+    [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp (mantené apretado el cuadro de texto → <b>Pegar</b>) y lo manda.'],
+    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5 text-center"><div class="text-2xl mt-2">⚽</div><b class="text-[11px]">Fulbo</b><p class="rounded bg-emerald-500/15 text-emerald-300 p-1">🎟️ Te invitaron a un grupo</p><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5"><span class="py-1">Entrar</span>${toca('<span class="block rounded bg-slate-950 py-1 px-1">Crear cuenta</span>')}</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Nombre de usuario</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Contraseña</div></div>`, 'El que lo abre toca <b>Crear cuenta</b> (o <b>Entrar</b> si ya tiene) y queda adentro del grupo.'],
+  ]);
+  const cuenta = tira([
+    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••</div><p class="text-slate-500 text-[8px]">Anotá la contraseña en algún lado</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. <b>Anotala</b>: si te la olvidás, el admin te pone una nueva.'],
+    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="flex items-center gap-2">${toca('<span class="w-8 h-8 rounded-full bg-emerald-700 grid place-items-center font-bold">J</span>')}<span class="rounded bg-slate-800 px-1.5 py-1">📷 Subir foto</span></div><p class="text-slate-400 pt-1">Edad</p><div class="w-10 rounded bg-slate-800 px-1.5 py-1">30</div><p class="text-slate-400">Posición</p><div class="flex gap-0.5">${['🃏', '🧤', '🛡️', '⚙️', '⚽'].map((e, i) => `<span class="flex-1 rounded py-1 text-center ${i === 4 ? 'bg-emerald-500/20 ring-1 ring-emerald-500' : 'bg-slate-800'}">${e}</span>`).join('')}</div><p class="text-slate-400">¿De qué cuadro sos?</p><div class="rounded bg-slate-800 px-1.5 py-1">Boca Juniors ▾</div></div>`, 'Completá tu ficha: foto, edad, posición y tu cuadro. Después la cambiás tocando tu foto, arriba a la izquierda.'],
+    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>👥 Jugadores</b>${toca('<span class="block w-[112px] rounded bg-amber-400 text-slate-950 font-bold text-center py-1">⚡ Calificar rápido (4)</span>')}<div class="grid grid-cols-3 gap-1 pt-1">${'BJPT'.slice(0, 3).split('').map(l => `<span class="rounded bg-slate-700/60 py-2 text-center font-bold">${l}</span>`).join('')}</div></div></div>`, 'Calificá a tus compañeros con <b>⚡ Calificar rápido</b>. Sirve solo para armar equipos parejos; nadie ve lo que pusiste.', true],
+  ]);
+  const paso = (titulo, cuerpo, abierto = false) => `
+    <details class="group rounded-xl border border-slate-800 bg-slate-900/40" ${abierto ? 'open' : ''}>
+      <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-3 font-semibold">${titulo}<span class="text-slate-500 transition group-open:rotate-180">▾</span></summary>
+      <div class="px-3 pb-3">${cuerpo}</div>
+    </details>`;
+  const nota = t => `<p class="text-xs text-slate-400 mt-2">${t}</p>`;
+  return card(`
+    <h2 class="text-lg font-bold">📱 Guía paso a paso</h2>
+    <p class="text-sm text-slate-400 mt-1 mb-3">Tocá cada tema para ver dónde hay que tocar. Deslizá las pantallas para el costado.</p>
+    <div class="space-y-2">
+      ${paso(ios ? '📲 Instalar la app (iPhone)' : '📲 Instalar la app (Android)', (ios ? iphone : android) + nota('No hace falta ninguna tienda: se instala desde el navegador y ocupa casi nada.'), true)}
+      ${paso(ios ? '🤖 ¿Tenés Android?' : '🍎 ¿Tenés iPhone?', ios ? android : iphone)}
+      ${paso('👤 Crear tu cuenta, tu ficha y calificar', cuenta)}
+      ${paso('⚽ Anotarte, bajarte o ir a la tribuna', anotarse)}
+      ${paso('🔔 Recibir avisos en el celu', notis + nota('En iPhone primero tenés que instalarla (paso 📲) y abrirla desde el ícono.'))}
+      ${paso('🔗 Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede entrar.'))}
+    </div>`);
 }
 
 // ---------------- Reglas ----------------
@@ -1373,16 +1485,18 @@ function vistaReglas() {
   return `
     <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
     <div>
-      <h1 class="text-2xl font-black">📖 Reglas y cómo funciona</h1>
-      <p class="text-sm text-slate-400 mt-1">Todo lo que tenés que saber para usar la app.</p>
+      <h1 class="text-2xl font-black">❓ Ayuda</h1>
+      <p class="text-sm text-slate-400 mt-1">Cómo se usa, paso a paso, y las reglas del grupo.</p>
     </div>
+    ${guia()}
+    <h2 class="text-xl font-black pt-2">📖 Reglas</h2>
     ${seccion('⚽ Anotarse', [
       'Tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido.',
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
       'Con <b>Copiar para WhatsApp</b> mandás la lista al grupo.',
       'Arriba aparecen los <b>avisos importantes</b>: si alguien se bajó, si faltan jugadores para hoy o mañana, o si el partido se <b>suspendió</b>. Todos quedan en la <b>🔔 campanita</b> de arriba (el número rojo son los que no viste) y desde ahí activás las notificaciones al celu.',
-      'Podés <b>instalar Fulbo como app</b>: en Android, Chrome te ofrece "Instalar app"; en iPhone, en Safari tocá Compartir → Agregar a inicio.',
+      'Podés <b>instalar Fulbo como app</b> (mirá la guía de arriba).',
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
     ${seccion('🆚 Equipos', [
@@ -1428,7 +1542,7 @@ function vistaReglas() {
       'Con menos de 70% aparece un <b>⏰</b> al lado del nombre.',
     ])}
     ${seccion('👤 Tu cuenta y el grupo', [
-      'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición y foto.',
+      'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición, foto y de qué cuadro sos.',
       'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
       '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
@@ -2565,11 +2679,11 @@ function render() {
 function renderVistas() {
   const el = $('#app');
   if (D.user === undefined) return pintar(el, cargando());
+  if (/^#\/(ayuda|reglas)$/.test(location.hash)) return pintar(el, vistaReglas());
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
   if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
-  if (location.hash === '#/reglas') return pintar(el, vistaReglas());
   if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);

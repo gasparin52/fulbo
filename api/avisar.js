@@ -10,7 +10,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 
-const ORIGENES = ['https://gasparin52.github.io', 'http://localhost:8791'];
+const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'http://localhost:8791'];
 const LINK = 'https://gasparin52.github.io/fulbo/';
 const MAX_AVISOS = 8;
 const DIA = 864e5;
