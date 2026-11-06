@@ -2071,8 +2071,9 @@ function navInferior() {
   if (!D.user || !D.perfil || pendienteActualizar()) return '';
   const h = location.hash;
   if (/^#\/(clave|verificar)\//.test(h)) return '';
-  // "Inicio" queda marcado también adentro de un grupo (los grupos están en el inicio).
-  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : ['#/inicio', '#/grupos', '', '#/'].includes(h) || (D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h)) ? 'inicio' : '';
+  // Adentro de un grupo no se muestra: se vuelve con la flecha de arriba.
+  if (D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h)) return '';
+  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : ['#/inicio', '#/grupos', '', '#/'].includes(h) ? 'inicio' : '';
   const item = (href, k, icono, txt) => `
     <a href="${href}" class="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition ${sec === k ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'}">
       ${sec === k ? '<span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400"></span>' : ''}
