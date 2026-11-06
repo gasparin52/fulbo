@@ -1238,9 +1238,7 @@ function camposPerfil(p = {}) {
 // La gente tiende a poner el mail del trabajo: acá va solo un nombre de usuario.
 function avisoMail(usuario) {
   if (!usuario.includes('@')) return '';
-  return /@uade\.edu\.ar/i.test(usuario)
-    ? '⚠️ No pongas tu mail de UADE. Acá va solo un nombre de usuario (ej: juanp), sin @.'
-    : '⚠️ Acá va un nombre de usuario, no un mail (sin @).';
+  return '⚠️ No pongas tu mail. Acá va solo un nombre de usuario (ej: juanp), sin @.';
 }
 function actualizarAvisoUsuario() {
   const input = $('#l-usuario'), aviso = $('#aviso-usuario');
