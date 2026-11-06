@@ -186,6 +186,7 @@ const datosGrupoIniciales = () => ({
 const normGrupo = d => {
   const g = { nombre: '', admins: [], armadores: [], codigo: '', baneados: [], ...datosGrupoIniciales(), ...(d || {}) };
   g.partido = { ...datosGrupoIniciales().partido, ...g.partido };
+  g.publico = g.publico || [];  // uids de los que van a mirar (no juegan)
   return g;
 };
 
@@ -1252,7 +1253,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
+  return [topBar(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico(), equipos(d), jugadoresGrid(), panelAdmin(d)].join('');
 }
 
 function topBar() {
@@ -1482,6 +1483,31 @@ function lista(d) {
         ${d.suplentes.map((p, i) => filaJugador(p, 'S' + (i + 1), 'bg-amber-500/15 text-amber-300')).join('')}
       </ul>` : ''}
     ${esAdmin() && D.grupo.anotados.length ? `<button data-action="reemplazar" class="${BTN_SEC} w-full mt-4 text-sm inline-flex items-center justify-center gap-2">${ICONO_REEMPLAZAR} Reemplazar a alguien</button>` : ''}
+  `);
+}
+
+// Los que van a ver el partido: no juegan, pero así saben quién más va.
+function tarjetaPublico() {
+  const yo = miUid();
+  const gente = D.grupo.publico.filter(id => jugador(id) || D.miembros[id]).map(id => ({ id, ...(jugador(id) || D.miembros[id]) }));
+  const voy = D.grupo.publico.includes(yo);
+  const puedo = !D.grupo.anotados.includes(yo) && fasePartido() !== 'terminado' && !D.grupo.partido.suspendido;
+  if (!gente.length && !puedo) return '';
+  return card(`
+    <div class="flex items-center justify-between gap-2">
+      <h2 class="text-base font-bold">👀 Van a mirar${gente.length ? ` <span class="text-slate-400 font-medium">(${gente.length})</span>` : ''}</h2>
+      ${puedo ? (voy
+        ? `<button data-action="publico-no" class="${BTN_SEC} text-xs py-1.5">Ya no voy</button>`
+        : `<button data-action="publico-si" class="${BTN_SEC} text-xs py-1.5">👀 Voy a mirar</button>`) : ''}
+    </div>
+    ${gente.length ? `
+      <ul class="mt-3 flex flex-wrap gap-2">
+        ${gente.map(p => `
+          <li class="inline-flex items-center gap-1.5 rounded-full bg-slate-800/70 pl-1 pr-3 py-1 text-sm">
+            ${avatar(p, 24)}
+            <span>${esc(p.usuario)}${p.id === yo ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}</span>
+          </li>`).join('')}
+      </ul>` : `<p class="mt-1 text-xs text-slate-500">¿No jugás pero vas a ir a ver? Avisá, así saben quién más va.</p>`}
   `);
 }
 
@@ -2540,7 +2566,12 @@ const acciones = {
     copiar(`🏆 *JUGADOR DEL PARTIDO* (${fechaLinda(m.id)})\n${r.ganadores.length > 1 ? '🤝 Empate: ' : '👑 '}${nombres} con ${r.max} de ${r.total} votos`);
   },
   logout: () => A.signOut(auth),
-  anotarme: () => listaBloqueada() ? toast('El partido ya empezó: la lista está cerrada') : actualizarGrupo(s => { if (!s.anotados.includes(miUid())) s.anotados.push(miUid()); }, '⚽ ¡Anotado!'),
+  anotarme: () => listaBloqueada() ? toast('El partido ya empezó: la lista está cerrada') : actualizarGrupo(s => {
+    if (!s.anotados.includes(miUid())) s.anotados.push(miUid());
+    s.publico = s.publico.filter(x => x !== miUid());  // si juega, ya no es público
+  }, '⚽ ¡Anotado!'),
+  'publico-si': () => actualizarGrupo(s => { if (!s.publico.includes(miUid())) s.publico.push(miUid()); }, '👀 ¡Te esperamos en la tribuna!'),
+  'publico-no': () => actualizarGrupo(s => { s.publico = s.publico.filter(x => x !== miUid()); }, 'Listo'),
   bajar: ({ id }) => {
     if (!jugador(id)) return;
     if (listaBloqueada() && !esAdmin()) return toast('El partido ya empezó: la lista está cerrada');
@@ -2619,7 +2650,7 @@ const acciones = {
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
     if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
-    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; delete s.partido.suspendido; s.avisos = []; }, '🗓️ Lista nueva');
+    actualizarGrupo(s => { s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.partido.fecha = ''; delete s.partido.suspendido; s.avisos = []; s.publico = []; }, '🗓️ Lista nueva');
   },
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];

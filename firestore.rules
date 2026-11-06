@@ -68,14 +68,16 @@ service cloud.firestore {
         && request.resource.data.creador == uid()
         && request.resource.data.admins == [uid()];
       // Los admins cambian todo; los armadores, los equipos y los pedidos de cambio;
-      // los demás solo se anotan o se bajan a sí mismos, piden cambiarse de equipo
-      // o piden rehacer los equipos.
+      // los demás solo se anotan o se bajan a sí mismos (como jugadores o como público),
+      // piden cambiarse de equipo o piden rehacer los equipos.
       allow update: if esAdmin(g)
         || (esArmador(g) && cambia().hasOnly(['equipos', 'solicitudes', 'rehacer']))
         || (
           esMiembro(g)
-          && cambia().hasOnly(['anotados', 'solicitudes'])
+          && cambia().hasOnly(['anotados', 'solicitudes', 'publico'])
           && request.resource.data.anotados.removeAll([uid()]) == resource.data.anotados.removeAll([uid()])
+          && request.resource.data.get('publico', []) is list && request.resource.data.get('publico', []).size() <= 60
+          && request.resource.data.get('publico', []).removeAll([uid()]) == resource.data.get('publico', []).removeAll([uid()])
           && soloMiSolicitud()
         )
         || (esMiembro(g) && cambia().hasOnly(['rehacer']) && cuentaMiPedido(g));
