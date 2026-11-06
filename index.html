@@ -260,6 +260,9 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.f
 // Íconos de Lucide (lucide.dev, licencia ISC), copiados acá para no depender de afuera.
 // Para agregar uno: copiá el contenido del <svg> de lucide.dev/icons.
 const ICONOS = {
+  'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  'arrow-left': '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  house: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   'bell-off': '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
@@ -464,10 +467,10 @@ A.onAuthStateChanged(auth, user => {
       D.perfil = s.exists() ? s.data() : null;
       if (D.perfil) D.registrando = false;
       suscribirMisGrupos();
-      // Con 2 o más grupos, la app arranca en "Mis partidos".
+      // La app arranca en el Inicio (partidos y grupos de cada uno).
       if (D.perfil && !ui.arranco) {
         ui.arranco = true;
-        if (!location.hash && (D.perfil.grupos || []).length >= 2) location.replace('#/grupos');
+        if (!location.hash) location.replace('#/inicio');
       }
       elegirGrupo();
       procesarInvitacion();
@@ -742,7 +745,7 @@ function bloquePush() {
   if (pushActivo()) return caja(`
     <div class="flex items-center gap-3">
       <p class="flex-1">${ic('bell-ring', 'text-emerald-400')} Te avisamos al celu si alguien se baja, faltan jugadores o se suspende.</p>
-      <button data-action="desactivar-push" class="text-xs text-slate-400 underline shrink-0">Desactivar</button>
+      <button data-action="desactivar-push" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Desactivar</button>
     </div>`);
   if (esIOS() && !instalada()) return caja(`
     <p>${ic('bell-off')} <b>¿Querés que te llegue al celu?</b></p>
@@ -763,9 +766,9 @@ const avisosNuevos = () => avisosGrupo().filter(a => a.ts > Number(guardado.get(
 function campanita() {
   const n = avisosNuevos();
   return `
-    <button data-action="abrir-avisos" title="Avisos" class="relative w-6 h-6 grid place-items-center shrink-0 opacity-90 hover:opacity-100">
-      <span class="leading-none text-slate-300">${ic(pushActivo() || n ? 'bell' : 'bell-off', '!w-4 !h-4')}</span>
-      ${n ? `<span class="absolute -top-1.5 -right-1.5 min-w-[0.95rem] h-[0.95rem] px-0.5 rounded-full bg-red-500 text-[9px] font-bold text-white grid place-items-center">${n}</span>` : ''}
+    <button data-action="abrir-avisos" title="Avisos" aria-label="Avisos" class="${BTN_ICONO}">
+      ${ic(pushActivo() || n ? 'bell' : 'bell-off', '!w-5 !h-5')}
+      ${n ? `<span class="absolute -top-1 -right-1 min-w-[0.95rem] h-[0.95rem] px-0.5 rounded-full bg-red-500 text-[9px] font-bold text-white grid place-items-center">${n}</span>` : ''}
     </button>`;
 }
 function modalAvisos() {
@@ -1347,6 +1350,9 @@ const INPUT = 'w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2.
 const BTN = 'rounded-xl px-4 py-2.5 font-semibold transition active:scale-[.98] disabled:opacity-40 disabled:pointer-events-none';
 const BTN_OK = `${BTN} bg-emerald-500 hover:bg-emerald-400 text-slate-950`;
 const BTN_SEC = `${BTN} bg-slate-800 hover:bg-slate-700`;
+// Botón chico (en vez de texto subrayado) y botón de ícono cuadrado.
+const BTN_CHIP = 'inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0';
+const BTN_ICONO = 'relative w-10 h-10 grid place-items-center rounded-xl bg-slate-800/70 hover:bg-slate-700 text-slate-300 transition shrink-0';
 const card = html => `<div class="${CARD}">${html}</div>`;
 // Selector de posición: radios ocultos con botones dibujados (el <select> nativo queda feo en el celular).
 const selectorPos = (pref, sel = 'comodin') => `
@@ -1474,18 +1480,18 @@ function vistaLogin() {
           </label>` : ''}
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
-      ${!reg ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="text-sm text-slate-400 hover:text-slate-200 underline">¿Te olvidaste la contraseña?</button></div>' : ''}
+      ${!reg ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400 hover:text-slate-200">¿Te olvidaste la contraseña?</button></div>' : ''}
     `)}
-    <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} ¿Primera vez? Mirá cómo se usa</a>
+    <a href="#/ayuda" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 !flex mx-auto w-fit !text-amber-300">${ic('circle-help')} ¿Primera vez? Mirá cómo se usa</a>
     ${pie()}`;
 }
 
 // Pie con los términos y la privacidad.
 const pie = () => CONFIG.publico ? `
   <p class="text-center text-xs text-slate-600 pt-4">
-    <a href="#/terminos" class="hover:text-slate-400 underline">Términos</a> ·
-    <a href="#/privacidad" class="hover:text-slate-400 underline">Privacidad</a> ·
-    <a href="#/ayuda" class="hover:text-slate-400 underline">Ayuda</a>
+    <a href="#/terminos" class="hover:text-slate-300">Términos</a> ·
+    <a href="#/privacidad" class="hover:text-slate-300">Privacidad</a> ·
+    <a href="#/ayuda" class="hover:text-slate-300">Ayuda</a>
   </p>` : '';
 const encabezado = (icono, titulo, texto = '') => `
   <div class="text-center pt-6">
@@ -1498,7 +1504,7 @@ const camposClave = (usuario = '') => `
   <input id="c-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetila" class="${INPUT}">
   <div class="flex items-center justify-between gap-2 text-xs text-slate-500">
     <span>${REQUISITOS_CLAVE}</span>
-    <button type="button" data-action="ver-pass" class="underline shrink-0">${ui.verPass ? ic('eye-off') + ' Ocultar' : ic('eye') + ' Mostrar'}</button>
+    <button type="button" data-action="ver-pass" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0">${ui.verPass ? ic('eye-off') + ' Ocultar' : ic('eye') + ' Mostrar'}</button>
   </div>`;
 // Revisa la contraseña nueva y su repetición; devuelve el error o ''.
 const revisarClave = (f, usuario) => claveSegura(f.get('pass'), usuario) || (f.get('pass') !== f.get('pass2') ? 'Las contraseñas no coinciden' : '');
@@ -1515,7 +1521,7 @@ function vistaOlvide() {
         <button class="${BTN_OK} w-full">Mandarme el link</button>
       </form>
     `)}
-    <div class="text-center"><button data-action="tab" data-tab="entrar" class="text-sm text-slate-400 hover:text-slate-200 underline">← Volver a entrar</button></div>
+    <div class="text-center"><button data-action="tab" data-tab="entrar" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400 hover:text-slate-200">← Volver a entrar</button></div>
     ${pie()}`;
 }
 
@@ -1577,7 +1583,7 @@ function vistaActualizar() {
         <p class="text-xs text-slate-500">Te llega un mail para confirmarlo. <b class="text-amber-300">Si no lo ves, buscalo en Correo no deseado o Spam</b> y marcalo como "No es spam".</p>
         <button class="${BTN_OK} w-full">Guardar mail</button>
       </form>`)}
-    <div class="text-center"><button data-action="logout" class="text-sm text-slate-500 underline">Salir</button></div>`;
+    <div class="text-center"><button data-action="logout" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500">Salir</button></div>`;
 }
 
 // Aviso para confirmar el mail.
@@ -1587,7 +1593,7 @@ function tarjetaMail() {
   return `
     <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm flex items-center gap-3">
       <p class="flex-1">${ic('mail')} <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. <b>Si no lo ves, buscalo en Correo no deseado o Spam.</b></p>
-      <button data-action="reenviar-mail" class="text-xs text-amber-200 underline shrink-0">Reenviar</button>
+      <button data-action="reenviar-mail" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-amber-200">Reenviar</button>
     </div>`;
 }
 
@@ -1621,7 +1627,7 @@ function tarjetaCuenta() {
             <button type="button" data-action="borrar-cuenta-abrir" class="${BTN_SEC} text-sm">Cancelar</button>
             <button class="${BTN} text-sm bg-red-600 hover:bg-red-500 text-white">Borrar mi cuenta</button>
           </div>
-        </form>` : `<button data-action="borrar-cuenta-abrir" class="text-xs text-slate-500 hover:text-red-300 underline">Borrar mi cuenta</button>`}
+        </form>` : `<button data-action="borrar-cuenta-abrir" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500 hover:text-red-300">Borrar mi cuenta</button>`}
     </div>`);
 }
 
@@ -1633,7 +1639,7 @@ function vistaCompletar() {
         ${camposPerfil({ usuario: usuarioDeAuth() })}
         <button class="${BTN_OK} w-full">Guardar</button>
       </form>`)}
-    <div class="text-center"><button data-action="logout" class="text-xs text-slate-500 underline">Salir</button></div>`;
+    <div class="text-center"><button data-action="logout" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500">Salir</button></div>`;
 }
 
 const usuarioDeAuth = () => (D.user?.email || '').split('@')[0];
@@ -1735,8 +1741,8 @@ function tarjetaMisPartidos() {
           </div>
           ${ui.agendar === x.id && x.t ? `
             <div class="mt-2 flex flex-wrap gap-2 text-xs">
-              <a href="${linkGoogleCalendar(x)}" target="_blank" rel="noopener" class="underline text-sky-300">Google Calendar</a>
-              <button data-action="bajar-ics" data-gid="${x.id}" class="underline text-sky-300">Calendario del celu (iPhone, Outlook…)</button>
+              <a href="${linkGoogleCalendar(x)}" target="_blank" rel="noopener" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-sky-300">Google Calendar</a>
+              <button data-action="bajar-ics" data-gid="${x.id}" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-sky-300">Calendario del celu (iPhone, Outlook…)</button>
             </div>` : ''}
         </div>
       </li>`;
@@ -1746,74 +1752,156 @@ function tarjetaMisPartidos() {
       <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Mis partidos</h2>
       ${semana ? `<span class="text-xs text-slate-400">Esta semana jugás <b class="text-slate-200">${semana}</b></span>` : ''}
     </div>
+    ${tiraSemana(ps)}
     <ul class="divide-y divide-slate-800">${ps.map(fila).join('')}</ul>`);
 }
 
-function vistaGrupos(conVolver) {
-  const grupos = D.perfil.grupos || [];
+// Semana: los próximos 7 días con un puntito donde hay partido (verde si estás anotado).
+function tiraSemana(ps) {
+  const hoy = hoyArg();
+  const dias = Array.from({ length: 7 }, (_, i) => new Date(Date.parse(hoy + 'T12:00:00Z') + i * DIA).toISOString().slice(0, 10));
   return `
-    <div class="flex items-center justify-between">
-      ${conVolver ? `<a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>` : `<h1 class="text-2xl font-black">Hola, ${esc(D.perfil.usuario)} 👋</h1>`}
-      <div class="flex gap-3">
-        <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
+    <div class="grid grid-cols-7 gap-1 mb-3">
+      ${dias.map(f => {
+        const del = ps.filter(x => x.p?.fecha === f && !x.p.suspendido);
+        const juego = del.some(x => ['titular', 'suplente'].includes(x.estado));
+        const d = new Date(f + 'T12:00:00-03:00');
+        return `
+          <div class="rounded-xl py-1.5 text-center ${f === hoy ? 'bg-emerald-500/15 text-emerald-200' : 'bg-slate-800/50 text-slate-300'}">
+            <p class="text-[10px] font-bold uppercase">${d.toLocaleDateString('es-AR', { weekday: 'short', timeZone: TZ }).replace('.', '').slice(0, 3)}</p>
+            <p class="text-base font-black leading-tight">${d.getUTCDate()}</p>
+            <p class="h-2 flex justify-center gap-0.5">${del.map(x => `<span class="w-1.5 h-1.5 rounded-full ${['titular', 'suplente'].includes(x.estado) ? 'bg-emerald-400' : 'bg-slate-500'}"></span>`).join('')}</p>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// Tarjetas de mis grupos: si soy admin, también "Administrar".
+function tarjetaMisGrupos() {
+  const grupos = D.perfil.grupos || [];
+  if (!grupos.length) return card(`
+    <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
+    <p class="text-sm text-slate-400 mt-1">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
+  return card(`
+    <h2 class="text-lg font-bold mb-3">${ic('users', 'text-emerald-400')} Mis grupos</h2>
+    <div class="grid sm:grid-cols-2 gap-2">
+      ${grupos.map(g => {
+        const x = D.misGrupos[g.id];
+        const admin = !!x?.admins.includes(miUid());
+        const p = x?.partido;
+        const prox = !x ? 'Cargando…' : p?.fecha ? [cuantoFalta(p.fecha) || fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ') : 'Sin fecha cargada';
+        const nombre = x?.nombre || g.nombre;
+        return `
+          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-3 flex flex-col gap-3">
+            <div class="flex items-start gap-3">
+              <span class="w-10 h-10 rounded-xl grid place-items-center text-lg font-black bg-emerald-500/15 text-emerald-300 shrink-0">${esc((nombre[0] || '?').toUpperCase())}</span>
+              <div class="min-w-0 flex-1">
+                <p class="font-bold truncate">${esc(nombre)}</p>
+                <p class="text-xs text-slate-400 truncate">${esc(prox)}${agendaActiva(x) ? ' · ' + esc(textoAgenda(x.agenda).replace('Todos los ', '')) : ''}</p>
+              </div>
+              <span class="text-[10px] font-bold uppercase rounded-md px-1.5 py-0.5 ${admin ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${admin ? 'Admin' : 'Jugador'}</span>
+            </div>
+            <div class="flex gap-2">
+              <button data-action="cambiar-grupo" data-gid="${g.id}" class="${BTN_OK} flex-1 text-sm py-2">Entrar</button>
+              ${admin ? `<button data-action="administrar" data-gid="${g.id}" class="${BTN_SEC} flex-1 text-sm py-2 inline-flex items-center justify-center gap-1.5">${ic('settings')} Administrar</button>` : ''}
+              <button data-action="salir-grupo" data-gid="${g.id}" title="Salir del grupo" aria-label="Salir del grupo" class="${BTN_ICONO} !w-9 !h-9 hover:!text-red-300">${ic('log-out')}</button>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`);
+}
+
+// Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
+function vistaInicio() {
+  const perfil = location.hash === '#/perfil';
+  const tab = (h, txt, activa) => `<a href="${h}" class="rounded-lg py-2 text-center text-sm font-semibold transition ${activa ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}">${txt}</a>`;
+  const yo = { ...D.perfil, id: miUid() };
+  return `
+    <div class="flex items-center gap-3">
+      ${avatar(yo, 48)}
+      <div class="min-w-0 flex-1">
+        <p class="text-xs text-slate-500">Hola,</p>
+        <p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>
       </div>
+      <a href="#/ayuda" class="${BTN_ICONO}" title="Ayuda" aria-label="Ayuda">${ic('circle-help', '!w-5 !h-5')}</a>
+      <button data-action="logout" class="${BTN_ICONO}" title="Salir" aria-label="Salir">${ic('log-out', '!w-5 !h-5')}</button>
     </div>
+    <nav class="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-900/70 border border-slate-800">
+      ${tab('#/inicio', ic('calendar') + ' Partidos y grupos', !perfil)}
+      ${tab('#/perfil', ic('user') + ' Mi perfil', perfil)}
+    </nav>
     ${tarjetaMail()}
+    ${perfil ? panelPerfil() : panelInicio()}
+    ${pie()}`;
+}
+
+function panelInicio() {
+  const pendientes = D.perfil.pendientes || [];
+  return `
     ${tarjetaMisPartidos()}
-    ${(D.perfil.pendientes || []).length ? card(`
+    ${pendientes.length ? card(`
       <h2 class="text-base font-bold mb-2">${ic('hourglass', 'text-amber-300')} Esperando que te acepten</h2>
       <ul class="divide-y divide-slate-800">
-        ${D.perfil.pendientes.map(g => `
+        ${pendientes.map(g => `
           <li class="flex items-center gap-2 py-2 text-sm">
             <span class="flex-1 font-medium">${esc(g.nombre)}</span>
-            <button data-action="cancelar-pedido" data-gid="${g.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Cancelar</button>
+            <button data-action="cancelar-pedido" data-gid="${g.id}" class="${BTN_CHIP}">Cancelar</button>
           </li>`).join('')}
       </ul>
       <p class="text-xs text-slate-500 mt-2">Le avisamos al admin. Cuando te acepte, el grupo aparece acá solo.</p>`) : ''}
-    ${grupos.length ? card(`
-      <h2 class="text-lg font-bold mb-2">${ic('users', 'text-emerald-400')} Tus grupos</h2>
-      <ul class="divide-y divide-slate-800">
-        ${grupos.map(g => `
-          <li class="flex items-center gap-2 py-2">
-            <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex-1 text-left font-medium hover:text-emerald-300">${g.id === D.gid ? ic('check', 'text-emerald-400') + ' ' : ''}${esc(g.nombre)}</button>
-            <button data-action="salir-grupo" data-gid="${g.id}" class="text-xs text-slate-500 hover:text-red-300">Salir del grupo</button>
-          </li>`).join('')}
-      </ul>`) : `<p class="text-slate-400">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`}
+    ${tarjetaMisGrupos()}
+    <div class="grid sm:grid-cols-2 gap-5">
+      ${card(`
+        <h2 class="text-base font-bold">${ic('ticket', 'text-emerald-400')} Unirme a un grupo</h2>
+        <p class="text-xs text-slate-400 mt-1 mb-3">Pegá el link de invitación que te pasaron.</p>
+        <form data-form="unirse" class="flex gap-2">
+          <input id="u-link" name="link" required placeholder="Link de invitación" class="${INPUT}">
+          <button class="${BTN_OK} shrink-0">Unirme</button>
+        </form>`)}
+      ${card(`
+        <h2 class="text-base font-bold">${ic('plus', 'text-emerald-400')} Crear un grupo</h2>
+        <p class="text-xs text-slate-400 mt-1 mb-3">Vas a ser el admin: armás los partidos e invitás a los demás.</p>
+        <form data-form="crear-grupo" class="flex gap-2">
+          <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
+          <button class="${BTN_OK} shrink-0">Crear</button>
+        </form>`)}
+    </div>`;
+}
+
+function panelPerfil() {
+  const p = D.perfil;
+  return `
     ${card(`
-      <h2 class="text-lg font-bold">${ic('ticket')} Unirme a un grupo</h2>
-      <p class="text-sm text-slate-400 mb-3">Abrí el link de invitación que te pasaron, o pegalo acá.</p>
-      <form data-form="unirse" class="flex gap-2">
-        <input id="u-link" name="link" required placeholder="Link de invitación" class="${INPUT}">
-        <button class="${BTN_OK} shrink-0">Unirme</button>
+      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mi ficha</h2>
+      <form data-form="perfil" class="space-y-4">
+        ${camposPerfil(p)}
+        <button class="${BTN_OK} w-full">Guardar</button>
       </form>`)}
     ${card(`
-      <h2 class="text-lg font-bold">${ic('plus')} Crear un grupo</h2>
-      <p class="text-sm text-slate-400 mb-3">Vas a ser el admin: armás los partidos, los equipos e invitás a los demás.</p>
-      <form data-form="crear-grupo" class="flex gap-2">
-        <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
-        <button class="${BTN_OK} shrink-0">Crear</button>
-      </form>`)}
-    ${tarjetaCuenta()}
-    ${pie()}`;
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale a tus grupos.'}</p>
+        <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
+      </div>`)}
+    ${tarjetaCuenta()}`;
 }
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), panelAdmin(d), pie()].join('');
+  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), pie()].join('');
 }
 
 function topBar() {
   const yo = D.miembros[miUid()];
   return `
-    <div class="flex items-center gap-3">
-      <a href="#/jugador/${miUid()}" title="Mi ficha">${avatar(yo, 40)}</a>
-      <a href="#/grupos" class="min-w-0 flex-1 group">
-        <span class="block text-xs text-slate-500 group-hover:text-slate-300">Mis partidos ▾</span>
-        <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
-      </a>
-      <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} Ayuda</a>
+    <div class="flex items-center gap-2">
+      <a href="#/inicio" class="${BTN_ICONO}" title="Inicio" aria-label="Volver al inicio">${ic('house', '!w-5 !h-5')}</a>
+      <div class="min-w-0 flex-1">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
+        <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
+      </div>
+      ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span class="hidden sm:inline">Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
       ${campanita()}
-      <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
+      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0">${avatar(yo, 40)}</a>
     </div>`;
 }
 
@@ -1932,7 +2020,7 @@ const ACTUALIZADO = 'noviembre de 2026';
 function paginaLegal(icono, titulo, secciones) {
   const contacto = `<a href="mailto:${esc(CONFIG.contacto)}" class="underline">${esc(CONFIG.contacto)}</a>`;
   return `
-    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <a href="#/" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 w-fit">← Volver</a>
     <div>
       <h1 class="text-2xl font-black">${icono} ${titulo}</h1>
       <p class="text-xs text-slate-500 mt-1">Última actualización: ${ACTUALIZADO}</p>
@@ -2041,7 +2129,7 @@ function vistaReglas() {
       ${items.map(i => `<li>${i}</li>`).join('')}
     </ul>`);
   return `
-    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <a href="#/" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 w-fit">← Volver</a>
     <div>
       <h1 class="text-2xl font-black">${ic('circle-help', 'text-emerald-400')} Ayuda</h1>
       <p class="text-sm text-slate-400 mt-1">Cómo se usa, paso a paso, y las reglas del grupo.</p>
@@ -2168,7 +2256,7 @@ function lineaAgenda() {
   const lista = ocurrencias(g.agenda, g.partido.fecha || ayerArg(), 3, true);
   const corta = f => { const t = fechaLinda(f); return t.slice(0, 3) + ' ' + t.split(' ')[1]; };
   const item = o => esAdmin()
-    ? `<button data-action="saltear" data-fecha="${o.fecha}" title="${o.salteada ? 'Volver a jugar esa fecha' : 'No se juega esa fecha (feriado, etc.)'}" class="underline decoration-dotted ${o.salteada ? 'line-through text-slate-600' : 'hover:text-slate-200'}">${corta(o.fecha)}</button>`
+    ? `<button data-action="saltear" data-fecha="${o.fecha}" title="${o.salteada ? 'Volver a jugar esa fecha' : 'No se juega esa fecha (feriado, etc.)'}" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-600 hover:text-slate-200">${corta(o.fecha)}</button>`
     : `<span class="${o.salteada ? 'line-through text-slate-600' : ''}">${corta(o.fecha)}</span>`;
   return `
     <p class="mt-2 text-xs text-slate-400">${ic('repeat', 'text-emerald-400')} ${esc(textoAgenda(g.agenda))}${lista.length ? ' · Después: ' + lista.map(item).join(', ') : ''}</p>
@@ -2196,7 +2284,7 @@ function formAgenda() {
       <h3 class="font-semibold text-sm text-slate-300">${ic('repeat')} Fecha fija ${agendaActiva(g) ? '<span class="text-xs font-normal text-emerald-400">activa</span>' : ''}</h3>
       <p class="text-xs text-slate-500">Si juegan siempre el mismo día, cargalo acá. Cuando termina un partido, la lista se vacía sola y se abre la fecha siguiente (la votación del mejor queda guardada).</p>
       ${Array.from({ length: filas }, (_, i) => fila(i)).join('')}
-      ${filas < 3 ? '<button type="button" data-action="agenda-mas" class="text-xs text-slate-400 underline">+ Otro día de la semana</button>' : ''}
+      ${filas < 3 ? '<button type="button" data-action="agenda-mas" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">+ Otro día de la semana</button>' : ''}
       <div class="flex gap-2 pt-1">
         <button class="${BTN} flex-1 bg-slate-700 hover:bg-slate-600 text-sm">${ic('save')} ${agendaActiva(g) ? 'Guardar fecha fija' : 'Activar fecha fija'}</button>
         ${agendaActiva(g) ? `<button type="button" data-action="agenda-quitar" class="${BTN} bg-slate-800 hover:bg-red-950 text-red-300 text-sm">Desactivar</button>` : ''}
@@ -2329,7 +2417,7 @@ function equipos(d) {
       <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">${ic('scale')} Armar equilibrados</button>
       <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
     </div>
-    ${eq ? `<button data-action="borrar-equipos" class="mt-2 text-xs text-slate-500 hover:text-red-300 underline">Borrar equipos</button>` : ''}` : '';
+    ${eq ? `<button data-action="borrar-equipos" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500 hover:text-red-300 mt-2">Borrar equipos</button>` : ''}` : '';
   if (!eq) {
     return card(`
       <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
@@ -2382,7 +2470,7 @@ function equipos(d) {
   const pedido = abiertos ? (miSolicitud && miSolicitud.a !== miEquipo
     ? `<div class="flex items-center justify-between gap-2 text-xs bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
          <span>${ic('arrow-left-right')} Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}.</span>
-         <button data-action="cancelar-solicitud" class="text-slate-400 underline shrink-0">Cancelar</button>
+         <button data-action="cancelar-solicitud" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Cancelar</button>
        </div>`
     : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full text-xs py-2">${ic('arrow-left-right')} Pasarme al otro equipo</button>`) : '';
 
@@ -2462,7 +2550,7 @@ function tarjetaMvp() {
   if (!m) return '';
   const quien = id => `${avatar(fichaCandidato(m, id), 28)}<b class="truncate">${esc(nombreCandidato(m, id))}</b>`;
   const editar = esAdmin() && estado !== 'cerrada'
-    ? `<button data-action="mvp-editar" class="text-xs text-slate-400 underline">Editar candidatos</button>` : '';
+    ? `<button data-action="mvp-editar" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Editar candidatos</button>` : '';
 
   if (estado === 'pendiente') {
     if (!esAdmin()) return '';
@@ -2486,7 +2574,7 @@ function tarjetaMvp() {
         </div>
         ${voto
           ? `<div class="mt-3 flex items-center gap-2 text-sm">${ic('circle-check', 'text-emerald-400')} Votaste a ${quien(voto)}
-               <button data-action="mvp-votar" class="ml-auto text-xs text-slate-400 underline shrink-0">Cambiar</button></div>`
+               <button data-action="mvp-votar" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400 ml-auto">Cambiar</button></div>`
           : `<p class="mt-3 text-sm text-amber-200">${ic('triangle-alert')} Todavía no votaste.</p>
              <button data-action="mvp-votar" class="${BTN} w-full mt-2 bg-amber-400 hover:bg-amber-300 text-slate-950">🏆 Votar al mejor del partido</button>`}
         ${sinMiVoto(m.candidatos).length ? `
@@ -2520,6 +2608,33 @@ function tarjetaMvp() {
 }
 
 // 🟥 Admins: reportes pendientes. Los que jugaron: botón para reportar (3 días después del partido).
+// Admins: aviso en el grupo de que hay gente esperando para entrar.
+function avisoPendientes() {
+  if (!esAdmin() || !D.pendientes.length) return '';
+  const n = D.pendientes.length;
+  return `
+    <a href="#/admin" class="flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 hover:bg-emerald-500/15 transition">
+      ${ic('user-plus', 'text-emerald-300 !w-5 !h-5')}
+      <span class="flex-1 text-sm"><b>${n} ${n === 1 ? 'persona quiere' : 'personas quieren'} entrar</b> al grupo</span>
+      <span class="${BTN_CHIP}">Revisar ${ic('chevron-right')}</span>
+    </a>`;
+}
+
+// Pantalla de administración del grupo (solo admins).
+function vistaAdmin() {
+  return `
+    <div class="flex items-center gap-2">
+      <a href="#/" class="${BTN_ICONO}" title="Volver al grupo" aria-label="Volver al grupo">${ic('arrow-left', '!w-5 !h-5')}</a>
+      <div class="min-w-0 flex-1">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-emerald-400">Administrar</p>
+        <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
+      </div>
+    </div>
+    ${tarjetaPendientes()}
+    ${panelAdmin(derivar())}
+    ${pie()}`;
+}
+
 function tarjetaPendientes() {
   if (!esAdmin() || !D.pendientes.length) return '';
   return card(`
@@ -2826,7 +2941,7 @@ function tarjetaAsistencia(id) {
         ${a.bajas.sort((x, y) => y.ts - x.ts).map(b => `
           <li class="flex items-center gap-2">
             <span class="flex-1">${b.tipo === 'ultimo' ? '⏰ A último momento' : '🕐 Tarde'}: se bajó ${b.horas < 1 ? 'menos de 1 h' : Math.floor(b.horas) + ' h'} antes, el ${esc(fechaLinda(b.fecha))}${b.excusa ? ` · ${excusa[b.excusa]}` : ''}</span>
-            ${esAdmin() ? `<button data-action="perdonar-baja" data-k="${esc(b.id)}" class="underline shrink-0">Perdonar</button>` : ''}
+            ${esAdmin() ? `<button data-action="perdonar-baja" data-k="${esc(b.id)}" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0">Perdonar</button>` : ''}
           </li>`).join('')}
       </ul>` : ''}`);
 }
@@ -2937,7 +3052,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar)/.test(location.hash);
+  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -2998,7 +3113,7 @@ function vistaFicha(id) {
   const rojas = rojasDe(id);
   const restan = Math.max(0, ...rojas.map(f => 2 - fechasDespues(f, id)));
   return `
-    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
+    <a href="#/" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 w-fit">← Volver</a>
     <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
       <div class="flex items-center gap-4">
         ${avatar(p, 96)}
@@ -3047,12 +3162,10 @@ function vistaFicha(id) {
         <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
       </div>`) : ''}
     ${esYo ? card(`
-      <h2 class="text-lg font-bold mb-3">${ic('pencil')} Editar mi ficha</h2>
-      <form data-form="perfil" class="space-y-4">
-        ${camposPerfil(p)}
-        <button class="${BTN_OK} w-full">Guardar</button>
-      </form>
-      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) + tarjetaCuenta() : miVoto && ui.votoAbierto !== id ? card(`
+      <div class="flex items-center gap-3">
+        <p class="flex-1 text-sm text-slate-400">Tu foto, posición, cuadro, mail y contraseña se cambian en tu perfil.</p>
+        <a href="#/perfil" class="${BTN_SEC} text-sm shrink-0">${ic('pencil')} Editar mi perfil</a>
+      </div>`) : miVoto && ui.votoAbierto !== id ? card(`
       <div class="flex items-center gap-3">
         <div class="flex-1">
           <h2 class="font-bold">${ic('circle-check', 'text-emerald-400')} Ya calificaste a ${esc(p.usuario)}</h2>
@@ -3062,7 +3175,7 @@ function vistaFicha(id) {
       </div>`) : card(`
       <div class="flex items-center justify-between gap-2">
         <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
-        ${miVoto ? '<button data-action="cerrar-voto" class="text-xs text-slate-400 underline">Ocultar</button>' : ''}
+        ${miVoto ? '<button data-action="cerrar-voto" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Ocultar</button>' : ''}
       </div>
       ${avisoCalificaciones}
       <p class="text-xs text-slate-500 mb-4">Del 1 al 10. Solo cuenta un voto tuyo: si lo cambiás, reemplaza al anterior.</p>
@@ -3095,7 +3208,7 @@ function vistaFicha(id) {
         ${rojas.map(f => `
           <div class="flex items-center gap-2">
             <span class="flex-1">🟥 Faltó el ${esc(fechaLinda(f.fecha))} · se va en ${2 - fechasDespues(f, id)} ${2 - fechasDespues(f, id) === 1 ? 'fecha' : 'fechas'} que se anote</span>
-            <button data-action="quitar-falta" data-k="${esc(f.id)}" class="text-xs text-slate-400 underline shrink-0">Quitar</button>
+            <button data-action="quitar-falta" data-k="${esc(f.id)}" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Quitar</button>
           </div>`).join('')}
         <button data-action="marcar-falta" data-id="${id}" class="${BTN} text-xs py-1.5 bg-slate-800 hover:bg-slate-700">🟥 Marcar que faltó sin avisar</button>
       </div>`) : ''}`;
@@ -3110,7 +3223,7 @@ function panelAdmin(d) {
     ...Object.keys(D.grupo.invitados).map(jugador),
   ];
   return card(`
-    <h2 class="text-lg font-bold">${ic('settings')} Panel admin</h2>
+    <h2 class="text-lg font-bold">${ic('settings', 'text-emerald-400')} Configuración del grupo</h2>
 
     <div class="mt-4">
       <h3 class="font-semibold text-sm text-slate-300">${ic('ticket')} Link de invitación</h3>
@@ -3118,12 +3231,12 @@ function panelAdmin(d) {
         <input type="checkbox" data-action="toggle-aprobacion" ${D.grupo.aprobacion !== false ? 'checked' : ''} class="mt-1 accent-emerald-500">
         <span>Un admin tiene que aceptar a los que entran con el link <span class="block text-xs text-slate-500">Recomendado: si el link se reenvía, no entra cualquiera.</span></span>
       </label>
-      <p class="text-xs text-slate-500 mb-2">Solo entra al grupo quien tenga este link. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
+      <p class="text-xs text-slate-500 mb-2">Mandáselo a los que quieras invitar. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
       <div class="flex gap-2">
         <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
         <button data-action="copiar-invitacion" class="${BTN_OK} text-sm shrink-0">Copiar</button>
       </div>
-      <button data-action="nuevo-codigo" class="mt-2 text-xs text-slate-500 hover:text-amber-300 underline">Generar link nuevo</button>
+      <button data-action="nuevo-codigo" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500 hover:text-amber-300 mt-2">Generar link nuevo</button>
     </div>
 
     <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-6">
@@ -3249,8 +3362,9 @@ function renderVistas() {
   if (!D.perfil) return pintar(el, vistaCompletar());
   const actualizar = pendienteActualizar();
   if (actualizar) return pintar(el, actualizar === 'cargando' ? cargando() : vistaActualizar());
-  if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
+  if (['#/inicio', '#/perfil', '#/grupos'].includes(location.hash) || !D.gid) return pintar(el, vistaInicio());
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
+  if (location.hash === '#/admin' && esAdmin()) return pintar(el, vistaAdmin());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
   if (m && jugador(m[1])) return pintar(el, vistaFicha(m[1]));
   pintar(el, vistaPrincipal());
@@ -3492,6 +3606,7 @@ const acciones = {
       location.hash = '';
     }
   },
+  administrar: ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = '#/admin'; render(); },
   'cambiar-grupo': ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = ''; render(); },
   'salir-grupo': async ({ gid }) => {
     const g = D.perfil.grupos.find(x => x.id === gid);
