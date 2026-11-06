@@ -147,19 +147,21 @@ const DURACION_DEFAULT = 60, DURACIONES = [30, 40, 50, 60, 70, 80, 90, 100, 110,
 const CIERRE_EQUIPOS_MIN = 30;      // los equipos se cierran media hora antes
 const BLOQUEO_DESPUES_H = 6;        // después de terminar, la lista sigue bloqueada un rato
 const duracionDe = p => Math.min(120, Math.max(30, Number(p.duracion) || DURACION_DEFAULT));
-function tiemposPartido() {
-  const p = D.grupo?.partido, h = p && horaDelPartido(p);
+function tiemposDe(p) {
+  const h = p && horaDelPartido(p);
   if (!p?.fecha || !h) return null;
   const inicio = Date.parse(`${p.fecha}T${h}:00-03:00`), dur = duracionDe(p) * 60e3;
   return { inicio, fin: inicio + dur, cierre: inicio - CIERRE_EQUIPOS_MIN * 60e3, dur, hora: h };
 }
+const tiemposPartido = () => tiemposDe(D.grupo?.partido);
 // 'normal' | 'cerrado' (equipos cerrados) | 'enjuego' | 'terminado' (recién terminado).
-function fasePartido() {
-  const t = tiemposPartido(), n = Date.now();
-  if (!t || D.grupo.partido.suspendido) return 'normal';
+function faseDe(p) {
+  const t = tiemposDe(p), n = Date.now();
+  if (!t || p.suspendido) return 'normal';
   if (n >= t.fin + BLOQUEO_DESPUES_H * 3600e3) return 'normal';
   return n >= t.fin ? 'terminado' : n >= t.inicio ? 'enjuego' : n >= t.cierre ? 'cerrado' : 'normal';
 }
+const fasePartido = () => faseDe(D.grupo?.partido);
 const listaBloqueada = () => ['enjuego', 'terminado'].includes(fasePartido());
 const equiposCerrados = () => fasePartido() !== 'normal';
 const reloj = ms => { const t = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
@@ -214,6 +216,7 @@ const D = {
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
 const ui = { tab: 'entrar', foto: null };  // foto: null = sin cambios, '' = quitar, dataURL = nueva
+let subsMisGrupos = {};  // gid -> cortar la suscripción
 let subsUser = [], subsGrupo = [], subsMvp = [], nivelesDe = null, mvpDe = null;
 
 // ---------------- Utilidades ----------------
@@ -400,8 +403,7 @@ async function act(fn, okMsg) {
 
 // Transacción sobre el documento del grupo. Solo escribe los campos que
 // cambiaron: los jugadores solo pueden tocar "anotados" (ver firestore.rules).
-function actualizarGrupo(mut, okMsg) {
-  const gid = D.gid;
+function actualizarGrupo(mut, okMsg, gid = D.gid) {
   return act(() => F.runTransaction(db, async tx => {
     const snap = await tx.get(refGrupo(gid));
     const antes = normGrupo(snap.data());
@@ -423,12 +425,20 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsUser);
   cortar(subsGrupo);
   cortar(subsMvp);
+  Object.values(subsMisGrupos).forEach(f => f());
+  subsMisGrupos = {};
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
       if (D.perfil) D.registrando = false;
+      suscribirMisGrupos();
+      // Con 2 o más grupos, la app arranca en "Mis partidos".
+      if (D.perfil && !ui.arranco) {
+        ui.arranco = true;
+        if (!location.hash && (D.perfil.grupos || []).length >= 2) location.replace('#/grupos');
+      }
       elegirGrupo();
       procesarInvitacion();
       render();
@@ -441,6 +451,21 @@ A.onAuthStateChanged(auth, user => {
   }
   render();
 });
+
+function suscribirMisGrupos() {
+  const ids = (D.perfil?.grupos || []).map(g => g.id);
+  for (const gid of Object.keys(subsMisGrupos)) if (!ids.includes(gid)) {
+    subsMisGrupos[gid]();
+    delete subsMisGrupos[gid];
+    delete D.misGrupos[gid];
+  }
+  for (const gid of ids) if (!subsMisGrupos[gid]) {
+    subsMisGrupos[gid] = F.onSnapshot(refGrupo(gid), s => {
+      D.misGrupos[gid] = s.exists() ? normGrupo(s.data()) : null;
+      render();
+    }, e => { console.error(e); D.misGrupos[gid] = null; });
+  }
+}
 
 function elegirGrupo() {
   const ids = (D.perfil?.grupos || []).map(g => g.id);
@@ -1549,6 +1574,116 @@ function vistaCompletar() {
 
 const usuarioDeAuth = () => (D.user?.email || '').split('@')[0];
 
+// ---------------- Mis partidos ----------------
+// El próximo partido de cada grupo del jugador, ordenado por fecha, con su estado y los choques.
+function misPartidos() {
+  const uid = miUid(), n = Date.now();
+  const ps = (D.perfil.grupos || []).map(({ id, nombre }) => {
+    const g = D.misGrupos[id];
+    if (!g) return { id, nombre, cargando: g === undefined };
+    const p = g.partido, t = tiemposDe(p), cupo = Number(p.cupo) || 10;
+    const i = g.anotados.indexOf(uid);
+    const estado = i >= 0 ? (i < cupo ? 'titular' : 'suplente') : g.publico.includes(uid) ? 'tribuna' : '';
+    // Ya jugado: terminó hace rato o la fecha quedó atrás.
+    const viejo = t ? n > t.fin + BLOQUEO_DESPUES_H * 3600e3 : p.fecha && p.fecha < hoyArg();
+    return { id, nombre: g.nombre || nombre, g, p, t, cupo, estado, sup: i - cupo + 1, fase: faseDe(p), viejo };
+  });
+  const orden = x => x.cargando || !x.g ? 4 : !x.p.fecha ? 3 : x.viejo ? 2 : 1;
+  ps.sort((a, b) => orden(a) - orden(b) || (a.t?.inicio || Date.parse(a.p?.fecha || 0)) - (b.t?.inicio || Date.parse(b.p?.fecha || 0)));
+  // Choques: partidos que vienen y se superponen en el horario.
+  const vivos = ps.filter(x => x.t && !x.viejo && !x.p.suspendido);
+  for (const a of vivos) a.choques = vivos.filter(b => b !== a && a.t.inicio < b.t.fin && b.t.inicio < a.t.fin);
+  return ps;
+}
+
+const utcIcs = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+function datosAgenda(x) {
+  return {
+    titulo: `⚽ ${x.nombre}`,
+    lugar: x.p.lugar || '',
+    detalle: `${x.p.titulo || 'Fulbo'}. Anotate o bajate en ${urlBase()}`,
+  };
+}
+const linkGoogleCalendar = x => {
+  const a = datosAgenda(x);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+    + `&text=${encodeURIComponent(a.titulo)}&dates=${utcIcs(x.t.inicio)}/${utcIcs(x.t.fin)}`
+    + `&location=${encodeURIComponent(a.lugar)}&details=${encodeURIComponent(a.detalle)}`;
+};
+function bajarIcs(x) {
+  const a = datosAgenda(x);
+  const txt = v => v.replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Fulbo//ES', 'BEGIN:VEVENT',
+    `UID:${x.id}-${x.p.fecha}@fulbo5.com`, `DTSTAMP:${utcIcs(Date.now())}`,
+    `DTSTART:${utcIcs(x.t.inicio)}`, `DTEND:${utcIcs(x.t.fin)}`,
+    `SUMMARY:${txt(a.titulo)}`, `LOCATION:${txt(a.lugar)}`, `DESCRIPTION:${txt(a.detalle)}`,
+    'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', 'DESCRIPTION:Partido en 2 horas', 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  const el = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([ics], { type: 'text/calendar' })),
+    download: `fulbo-${x.p.fecha}.ics`,
+  });
+  el.click();
+  setTimeout(() => URL.revokeObjectURL(el.href), 5000);
+}
+
+function tarjetaMisPartidos() {
+  const ps = misPartidos();
+  if (!ps.length) return '';
+  const semana = ps.filter(x => x.t && ['titular', 'suplente'].includes(x.estado) && !x.viejo && !x.p.suspendido && x.t.inicio - Date.now() < 7 * DIA).length;
+  const chip = (cls, html) => `<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}">${html}</span>`;
+  const fila = x => {
+    if (!x.g) return `<li class="py-3 text-sm text-slate-500">${esc(x.nombre)} · ${x.cargando ? 'Cargando…' : 'No se pudo cargar'}</li>`;
+    const d = x.p.fecha && new Date(`${x.p.fecha}T12:00:00-03:00`);
+    const dia = d ? d.toLocaleDateString('es-AR', { weekday: 'short', timeZone: TZ }).replace('.', '').toUpperCase() : '';
+    const estado = x.p.suspendido ? chip('bg-red-500/15 text-red-300', ic('ban') + ' Suspendido')
+      : x.fase === 'enjuego' ? chip('bg-emerald-500/20 text-emerald-300', '⚽ En juego')
+      : x.viejo ? chip('bg-slate-800 text-slate-400', 'Ya se jugó')
+      : x.estado === 'titular' ? chip('bg-emerald-500/15 text-emerald-300', ic('circle-check') + ' Titular')
+      : x.estado === 'suplente' ? chip('bg-amber-500/15 text-amber-300', ic('repeat') + ' Suplente S' + x.sup)
+      : x.estado === 'tribuna' ? chip('bg-sky-500/15 text-sky-300', ic('megaphone') + ' Tribuna')
+      : x.p.fecha ? chip('bg-slate-800 text-slate-400', 'No anotado') : '';
+    const abierto = x.p.fecha && !x.viejo && !x.p.suspendido && !['enjuego', 'terminado'].includes(x.fase);
+    const anotado = ['titular', 'suplente'].includes(x.estado);
+    const choques = (x.choques || []).map(o => {
+      const grave = anotado && ['titular', 'suplente'].includes(o.estado);
+      return `<p class="mt-1.5 text-xs ${grave ? 'text-red-300' : 'text-amber-300'}">${ic('triangle-alert')} ${grave ? 'Se te pisa con' : 'Mismo horario que'} <b>${esc(o.nombre)}</b> (${o.t.hora})${grave ? ': elegí uno y bajate del otro a tiempo.' : ''}</p>`;
+    }).join('');
+    return `
+      <li class="py-3 flex gap-3">
+        <div class="w-12 shrink-0 text-center rounded-xl py-1.5 ${x.viejo || !d ? 'bg-slate-800/60 text-slate-500' : 'bg-emerald-500/10 text-emerald-300'}">
+          ${d ? `<p class="text-[10px] font-bold tracking-wide">${dia}</p><p class="text-xl font-black leading-none">${d.getUTCDate()}</p>` : `<p class="text-lg leading-none py-1">${ic('calendar')}</p>`}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-2">
+            <button data-action="cambiar-grupo" data-gid="${x.id}" class="text-left font-bold hover:text-emerald-300 min-w-0 truncate">${esc(x.nombre)}</button>
+            ${estado}
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">
+            ${x.p.fecha ? [cuantoFalta(x.p.fecha), x.t ? x.t.hora : x.p.cuando, x.p.lugar].filter(Boolean).map(esc).join(' · ') : 'Todavía no hay fecha cargada'}
+          </p>
+          ${choques}
+          <div class="flex flex-wrap gap-2 mt-2">
+            ${abierto && !anotado ? `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN_OK} text-xs px-3 py-1.5">⚽ Me anoto</button>` : ''}
+            <button data-action="cambiar-grupo" data-gid="${x.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Ver partido</button>
+            ${abierto && x.t ? `<button data-action="agendar" data-gid="${x.id}" class="${BTN_SEC} text-xs px-3 py-1.5">${ic('calendar-plus')} Agendar</button>` : ''}
+          </div>
+          ${ui.agendar === x.id && x.t ? `
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              <a href="${linkGoogleCalendar(x)}" target="_blank" rel="noopener" class="underline text-sky-300">Google Calendar</a>
+              <button data-action="bajar-ics" data-gid="${x.id}" class="underline text-sky-300">Calendario del celu (iPhone, Outlook…)</button>
+            </div>` : ''}
+        </div>
+      </li>`;
+  };
+  return card(`
+    <div class="flex items-baseline justify-between gap-2">
+      <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Mis partidos</h2>
+      ${semana ? `<span class="text-xs text-slate-400">Esta semana jugás <b class="text-slate-200">${semana}</b></span>` : ''}
+    </div>
+    <ul class="divide-y divide-slate-800">${ps.map(fila).join('')}</ul>`);
+}
+
 function vistaGrupos(conVolver) {
   const grupos = D.perfil.grupos || [];
   return `
@@ -1559,8 +1694,10 @@ function vistaGrupos(conVolver) {
         <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
       </div>
     </div>
+    ${tarjetaMail()}
+    ${tarjetaMisPartidos()}
     ${grupos.length ? card(`
-      <h2 class="text-lg font-bold mb-2">Tus grupos</h2>
+      <h2 class="text-lg font-bold mb-2">${ic('users', 'text-emerald-400')} Tus grupos</h2>
       <ul class="divide-y divide-slate-800">
         ${grupos.map(g => `
           <li class="flex items-center gap-2 py-2">
@@ -1597,7 +1734,7 @@ function topBar() {
     <div class="flex items-center gap-3">
       <a href="#/jugador/${miUid()}" title="Mi ficha">${avatar(yo, 40)}</a>
       <a href="#/grupos" class="min-w-0 flex-1 group">
-        <span class="block text-xs text-slate-500 group-hover:text-slate-300">Grupo ▾</span>
+        <span class="block text-xs text-slate-500 group-hover:text-slate-300">Mis partidos ▾</span>
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
       <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} Ayuda</a>
@@ -1895,6 +2032,7 @@ function vistaReglas() {
       'La sesión dura 30 días; después te pide entrar de nuevo.',
       CONFIG.publico ? '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Si no tenías mail cargado, pedile al admin que te ponga una nueva.' : '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
       'El grupo es privado: solo entra quien tiene el link de invitación. No lo compartas fuera del grupo.',
+      'Si estás en varios grupos, en <b>Mis partidos</b> (arriba a la izquierda) ves el próximo partido de cada uno ordenado por fecha, si estás anotado, si se te pisan dos horarios, y lo podés <b>agendar</b> en tu calendario.',
     ])}
     ${pie()}`;
 }
@@ -3202,6 +3340,17 @@ const acciones = {
   },
   'abrir-avisos': () => { ui.modal = 'avisos'; guardado.set(claveVisto(), String(Date.now())); render(); },
   'activar-push': () => activarNotificaciones(),
+  'anotarme-en': ({ gid }) => {
+    const g = D.misGrupos[gid];
+    if (!g) return;
+    if (['enjuego', 'terminado'].includes(faseDe(g.partido))) return toast('Ese partido ya empezó: la lista está cerrada');
+    return actualizarGrupo(s => {
+      if (!s.anotados.includes(miUid())) s.anotados.push(miUid());
+      s.publico = s.publico.filter(x => x !== miUid());
+    }, `⚽ ¡Anotado en ${g.nombre}!`, gid);
+  },
+  agendar: ({ gid }) => { ui.agendar = ui.agendar === gid ? null : gid; render(); },
+  'bajar-ics': ({ gid }) => { const x = misPartidos().find(p => p.id === gid); if (x?.t) bajarIcs(x); },
   'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
   'borrar-cuenta-abrir': () => { ui.borrarCuenta = !ui.borrarCuenta; render(); },
   'desactivar-push': () => desactivarNotificaciones(),
