@@ -468,6 +468,7 @@ A.onAuthStateChanged(auth, user => {
       D.perfil = s.exists() ? s.data() : null;
       if (D.perfil) D.registrando = false;
       suscribirMisGrupos();
+      asegurarTokenEnGrupos();
       // La app arranca en el Inicio (partidos y grupos de cada uno).
       if (D.perfil && !ui.arranco) {
         ui.arranco = true;
@@ -705,8 +706,27 @@ async function avisar(tipo, datos = {}) {
 const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const pushPosible = () => !!CONFIG.vapid && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator;
-const clavePush = () => `${LS}push:${D.gid}:${miUid()}`;
-const pushActivo = () => pushPosible() && Notification.permission === 'granted' && !!guardado.get(clavePush());
+// El token de este celu queda en todos mis grupos (antes se guardaba por grupo).
+const clavePush = () => `${LS}push:${miUid()}`;
+const tokenGuardado = () => guardado.get(clavePush()) || guardado.get(`${LS}push:${D.gid}:${miUid()}`);
+const pushActivo = () => pushPosible() && Notification.permission === 'granted' && !!tokenGuardado();
+// Deja el token en un grupo (si no estaba). Se usa al activar y al entrar a un grupo nuevo.
+const registrados = new Set();
+async function registrarToken(gid, token) {
+  const ref = F.doc(db, 'grupos', gid, 'push', miUid());
+  await F.runTransaction(db, async tx => {
+    const viejos = (await tx.get(ref)).data()?.tokens || [];
+    if (viejos.includes(token)) return;
+    // Hasta 5 celus/compus por persona: se queda con los últimos.
+    tx.set(ref, { tokens: [...viejos, token].slice(-5), ts: Date.now() });
+  });
+  registrados.add(gid);
+}
+function asegurarTokenEnGrupos() {
+  const token = pushActivo() && tokenGuardado();
+  if (!token) return;
+  for (const g of D.perfil?.grupos || []) if (!registrados.has(g.id)) { registrados.add(g.id); registrarToken(g.id, token).catch(e => console.warn(e)); }
+}
 let mensajeria = null;
 async function tokenPush() {
   mensajeria ||= await import(`https://www.gstatic.com/firebasejs/${V}/firebase-messaging.js`);
@@ -719,23 +739,20 @@ async function activarNotificaciones() {
     toast('Sin permiso no te puedo avisar. Habilitalo en la configuración del navegador');
     return render();
   }
-  const gid = D.gid, uid = miUid();
   await act(async () => {
     const token = await tokenPush();
-    // Hasta 5 celus/compus por persona: se queda con los últimos.
-    await F.runTransaction(db, async tx => {
-      const ref = F.doc(db, 'grupos', gid, 'push', uid);
-      const viejos = (await tx.get(ref)).data()?.tokens || [];
-      tx.set(ref, { tokens: [...viejos.filter(t => t !== token), token].slice(-5), ts: Date.now() });
-    });
-    guardado.set(`${LS}push:${gid}:${uid}`, token);
-  }, '🔔 Listo, te avisamos si pasa algo');
+    await Promise.all((D.perfil.grupos || []).map(g => registrarToken(g.id, token)));
+    guardado.set(clavePush(), token);
+  }, '🔔 Listo, te avisamos si pasa algo en tus grupos');
   render();
 }
 async function desactivarNotificaciones() {
-  const token = guardado.get(clavePush());
-  await act(() => F.updateDoc(F.doc(db, 'grupos', D.gid, 'push', miUid()), { tokens: F.arrayRemove(token), ts: Date.now() }), '🔕 Avisos desactivados');
+  const token = tokenGuardado();
+  await act(() => Promise.all((D.perfil.grupos || []).map(g =>
+    F.updateDoc(F.doc(db, 'grupos', g.id, 'push', miUid()), { tokens: F.arrayRemove(token), ts: Date.now() }).catch(() => {}))), '🔕 Avisos desactivados');
   guardado.set(clavePush(), null);
+  guardado.set(`${LS}push:${D.gid}:${miUid()}`, null);
+  registrados.clear();
   render();
 }
 
@@ -761,9 +778,21 @@ function bloquePush() {
 }
 
 // 🔔 Campanita: los últimos avisos del grupo; el numerito cuenta los que no viste.
-const claveVisto = () => `${LS}avisos_visto:${D.gid}`;
-const avisosGrupo = () => (D.grupo?.avisos || []).filter(a => Date.now() - a.ts < 7 * DIA).slice().reverse();
-const avisosNuevos = () => avisosGrupo().filter(a => a.ts > Number(guardado.get(claveVisto()) || 0)).length;
+const claveVisto = () => `${LS}avisos_visto`;
+// Los avisos de la última semana de todos mis grupos, del más nuevo al más viejo.
+const avisosTodos = () => (D.perfil?.grupos || []).flatMap(({ id }) => {
+  const g = D.misGrupos?.[id];
+  return (g?.avisos || []).filter(a => Date.now() - a.ts < 7 * DIA).map(a => ({ ...a, gid: id, g }));
+}).sort((a, b) => b.ts - a.ts);
+const avisosNuevos = () => avisosTodos().filter(a => a.ts > Number(guardado.get(claveVisto()) || 0)).length;
+const filaAviso = a => `
+  <li class="flex items-start gap-3 py-2.5">
+    ${fotoGrupo(a.g, 32)}
+    <button data-action="cambiar-grupo" data-gid="${a.gid}" class="text-left min-w-0 flex-1">
+      <span class="block font-semibold text-sm">${esc(a.titulo)}</span>
+      <span class="block text-xs text-slate-400">${esc(a.g.nombre)} · ${esc(a.texto)} · ${esc(haceCuanto(a.ts))}</span>
+    </button>
+  </li>`;
 function campanita() {
   const n = avisosNuevos();
   return `
@@ -773,7 +802,7 @@ function campanita() {
     </button>`;
 }
 function modalAvisos() {
-  const avisos = avisosGrupo();
+  const avisos = avisosTodos();
   return modal(`
     <div class="flex items-center justify-between">
       <h2 class="text-xl font-black">${ic('bell')} Avisos</h2>
@@ -781,12 +810,8 @@ function modalAvisos() {
     </div>
     ${avisos.length ? `
       <ul class="mt-3 divide-y divide-slate-800">
-        ${avisos.map(a => `
-          <li class="py-2.5">
-            <p class="font-semibold text-sm">${esc(a.titulo)}</p>
-            <p class="text-xs text-slate-400">${esc(a.texto)} · ${esc(haceCuanto(a.ts))}</p>
-          </li>`).join('')}
-      </ul>` : '<p class="mt-3 text-sm text-slate-400">No hay avisos esta semana. Acá vas a ver si alguien se baja, si faltan jugadores o si se suspende el partido.</p>'}
+        ${avisos.map(filaAviso).join('')}
+      </ul>` : '<p class="mt-3 text-sm text-slate-400">No hay avisos esta semana. Acá vas a ver, de todos tus grupos, si alguien se baja, si faltan jugadores o si se suspende un partido.</p>'}
     ${bloquePush()}`);
 }
 
@@ -1710,7 +1735,7 @@ function bajarIcs(x) {
   setTimeout(() => URL.revokeObjectURL(el.href), 5000);
 }
 
-function tarjetaMisPartidos() {
+function tarjetaMisPartidos(completo = false) {
   const ps = misPartidos();
   if (!ps.length) return '';
   const semana = ps.filter(x => x.t && ['titular', 'suplente'].includes(x.estado) && !x.viejo && !x.p.suspendido && x.t.inicio - Date.now() < 7 * DIA).length;
@@ -1760,6 +1785,14 @@ function tarjetaMisPartidos() {
         </div>
       </li>`;
   };
+  if (completo) {
+    // Pestaña Calendario: todo, cargando de a 10 a medida que se baja.
+    const lim = ui.calLimite || 10;
+    return card(`
+      ${tiraSemana(ps)}
+      <ul class="divide-y divide-slate-800">${ps.slice(0, lim).map(fila).join('')}</ul>
+      ${ps.length > lim ? `<button data-action="mas-cal" data-perezoso class="${BTN_SEC} w-full text-sm mt-2">Ver más (${ps.length - lim})</button>` : ''}`);
+  }
   // Plegable: se recuerda si lo dejaste abierto.
   const desplegado = guardado.get(LS + 'cal') === '1';
   const prox = ps.find(x => x.t && !x.viejo && !x.p.suspendido);
@@ -1840,8 +1873,7 @@ function tarjetaMisGrupos() {
     <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
     <p class="text-sm text-slate-400 mt-1">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
   return card(`
-    <h2 class="text-lg font-bold mb-2">${ic('users', 'text-emerald-400')} Mis grupos</h2>
-    <ul class="divide-y divide-slate-800/80 -mx-1">
+    <ul class="divide-y divide-slate-800/80 -mx-1 -my-1">
       ${grupos.map(g => {
         const x = D.misGrupos[g.id];
         const admin = !!x?.admins.includes(miUid());
@@ -1864,39 +1896,84 @@ function tarjetaMisGrupos() {
 }
 // Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
 function vistaInicio() {
-  const perfil = location.hash === '#/perfil';
+  const h = location.hash;
+  const sec = h === '#/perfil' ? 'perfil' : h === '#/grupos' ? 'grupos' : h === '#/calendario' ? 'calendario' : 'inicio';
   const yo = { ...D.perfil, id: miUid() };
+  const titulo = { grupos: 'Mis grupos', calendario: 'Calendario', perfil: 'Mi perfil' }[sec];
   return `
     <div class="flex items-center gap-3">
-      ${avatarAmpliable(yo, 48)}
+      ${avatarAmpliable(yo, 44)}
       <div class="min-w-0 flex-1">
-        <p class="text-xs text-slate-500">Hola,</p>
-        <p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>
+        ${titulo ? `<p class="text-xs text-slate-500">${esc(D.perfil.usuario)}</p><h1 class="text-2xl font-black truncate leading-tight">${titulo}</h1>`
+          : `<p class="text-xs text-slate-500">Hola,</p><p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>`}
       </div>
       <a href="#/ayuda" class="${BTN_ICONO}" title="Ayuda" aria-label="Ayuda">${ic('circle-help', '!w-5 !h-5')}</a>
+      ${campanita()}
     </div>
-    ${perfil ? '<h1 class="text-2xl font-black">Mi perfil</h1>' : ''}
     ${tarjetaMail()}
-    ${perfil ? panelPerfil() : panelInicio()}
+    ${sec === 'perfil' ? panelPerfil() : sec === 'grupos' ? panelGrupos() : sec === 'calendario' ? (tarjetaMisPartidos(true) || card('<p class="text-sm text-slate-400">Todavía no tenés partidos. Unite a un grupo para ver sus fechas acá.</p>')) : panelInicio()}
     ${pie()}`;
 }
-
+// Inicio: lo de hoy (o el próximo partido) y las novedades del día.
 function panelInicio() {
-  const pendientes = D.perfil.pendientes || [];
+  const hoy = tarjetaHoy();
+  const novedades = avisosTodos().filter(a => new Date(a.ts - 3 * 3600e3).toISOString().slice(0, 10) === hoyArg());
   return `
-    ${tarjetaHoy()}
+    ${hoy || tarjetaProximo()}
+    ${novedades.length ? card(`
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="text-lg font-bold">${ic('bell', 'text-amber-300')} Novedades de hoy</h2>
+        ${novedades.length > 5 ? `<button data-action="abrir-avisos" class="${BTN_CHIP}">Ver todas (${novedades.length})</button>` : ''}
+      </div>
+      <ul class="divide-y divide-slate-800 mt-1">${novedades.slice(0, 5).map(filaAviso).join('')}</ul>`) : ''}
+    ${tarjetaPedidos()}
+    ${(D.perfil.grupos || []).length ? '' : card(`
+      <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Empezá por un grupo</h2>
+      <p class="text-sm text-slate-400 mt-1">Pedile el link de invitación a quien organiza, o creá tu propio grupo.</p>
+      <a href="#/grupos" class="${BTN_OK} w-full mt-3 inline-flex items-center justify-center gap-1.5">Ir a Grupos ${ic('chevron-right')}</a>`)}`;
+}
+
+// Si hoy no hay partido: el próximo, más chico.
+function tarjetaProximo() {
+  const x = misPartidos().find(p => p.t && !p.viejo && !p.p.suspendido);
+  if (!x) return (D.perfil.grupos || []).length ? card('<p class="text-sm text-slate-400">No hay partidos próximos en tus grupos. Cuando un admin cargue una fecha, aparece acá.</p>') : '';
+  const anotado = ['titular', 'suplente'].includes(x.estado);
+  return `
+    <div data-action="cambiar-grupo" data-gid="${x.id}" role="link" class="cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/70 p-4 hover:border-slate-600 transition">
+      <p class="text-xs font-bold uppercase tracking-wider text-sky-300">Próximo partido</p>
+      <div class="flex items-center gap-3 mt-2">
+        ${fotoGrupo(x.g, 44)}
+        <div class="min-w-0 flex-1">
+          <p class="font-black text-lg leading-tight">${esc(cuantoFalta(x.p.fecha) || fechaLinda(x.p.fecha))} · ${esc(x.t.hora)}</p>
+          <p class="text-sm text-slate-300 truncate">${esc(x.nombre)}${x.p.lugar ? ' · ' + esc(x.p.lugar) : ''}</p>
+        </div>
+        ${anotado ? `<span class="text-xs font-bold rounded-full px-2 py-1 bg-emerald-500/15 text-emerald-300">${x.estado === 'titular' ? 'Titular' : 'Suplente S' + x.sup}</span>`
+          : `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN_OK} text-xs px-3 py-1.5">⚽ Me anoto</button>`}
+      </div>
+    </div>`;
+}
+
+// Pedidos míos para entrar a grupos, esperando que un admin los acepte.
+function tarjetaPedidos() {
+  const pendientes = D.perfil.pendientes || [];
+  if (!pendientes.length) return '';
+  return card(`
+    <h2 class="text-base font-bold mb-2">${ic('hourglass', 'text-amber-300')} Esperando que te acepten</h2>
+    <ul class="divide-y divide-slate-800">
+      ${pendientes.map(g => `
+        <li class="flex items-center gap-2 py-2 text-sm">
+          <span class="flex-1 font-medium">${esc(g.nombre)}</span>
+          <button data-action="cancelar-pedido" data-gid="${g.id}" class="${BTN_CHIP}">Cancelar</button>
+        </li>`).join('')}
+    </ul>
+    <p class="text-xs text-slate-500 mt-2">Le avisamos al admin. Cuando te acepte, el grupo aparece en Grupos.</p>`);
+}
+
+// Grupos: mis grupos, pedidos pendientes y unirse o crear.
+function panelGrupos() {
+  return `
     ${tarjetaMisGrupos()}
-    ${pendientes.length ? card(`
-      <h2 class="text-base font-bold mb-2">${ic('hourglass', 'text-amber-300')} Esperando que te acepten</h2>
-      <ul class="divide-y divide-slate-800">
-        ${pendientes.map(g => `
-          <li class="flex items-center gap-2 py-2 text-sm">
-            <span class="flex-1 font-medium">${esc(g.nombre)}</span>
-            <button data-action="cancelar-pedido" data-gid="${g.id}" class="${BTN_CHIP}">Cancelar</button>
-          </li>`).join('')}
-      </ul>
-      <p class="text-xs text-slate-500 mt-2">Le avisamos al admin. Cuando te acepte, el grupo aparece acá solo.</p>`) : ''}
-    ${tarjetaMisPartidos()}
+    ${tarjetaPedidos()}
     ${card(`
       <div class="grid grid-cols-2 gap-2">
         <button data-action="sumarse" data-que="unirse" class="${BTN} text-sm inline-flex items-center justify-center gap-1.5 ${ui.sumarse === 'unirse' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('ticket')} Unirme</button>
@@ -1912,8 +1989,7 @@ function panelInicio() {
           <button class="${BTN_OK} shrink-0">Crear</button>
         </form>
         <p class="text-xs text-slate-500 mt-2">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`)}`;
-}
-function panelPerfil() {
+}function panelPerfil() {
   const p = D.perfil;
   return `
     ${card(`
@@ -1963,48 +2039,45 @@ function vistaPrincipal() {
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = t === 'equipos' ? [equipos(d) || sinEquipos, tarjetaPublico()]
     : t === 'jugadores' ? [jugadoresGrid()]
-    // Partido: lo de la fecha y, al final, el botón para anotarse o bajarse (queda fijo abajo).
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), lista(d),
-      `<div class="sticky bottom-[76px] z-10 shadow-2xl shadow-black/70 rounded-2xl bg-slate-900 ring-1 ring-slate-700">${miEstado(d)}</div>`];
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d)];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
 // Barra fija abajo, como en las apps del celu.
-const RUTAS_FUERA_DEL_GRUPO = ['#/inicio', '#/grupos', '#/perfil', '#/ayuda', '#/reglas', '#/terminos', '#/privacidad'];
+const RUTAS_FUERA_DEL_GRUPO = ['#/inicio', '#/grupos', '#/calendario', '#/perfil', '#/ayuda', '#/reglas', '#/terminos', '#/privacidad'];
 function navInferior() {
   if (!D.user || !D.perfil || pendienteActualizar()) return '';
   const h = location.hash;
   if (/^#\/(clave|verificar)\//.test(h)) return '';
-  const enGrupo = !!D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h);
-  const inicio = !enGrupo && h !== '#/perfil' && !['#/ayuda', '#/reglas', '#/terminos', '#/privacidad'].includes(h);
-  const n = D.grupo ? avisosNuevos() : 0;
-  const clase = activo => `relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition ${activo ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'}`;
-  const marca = activo => activo ? '<span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400"></span>' : '';
-  const nombre = D.grupo?.nombre || D.perfil.grupos?.find(g => g.id === D.gid)?.nombre || 'Grupo';
+  // "Grupos" queda marcado también adentro de un grupo.
+  const sec = h === '#/perfil' ? 'perfil' : h === '#/calendario' ? 'calendario' : h === '#/grupos' || (D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h)) ? 'grupos' : h === '#/inicio' || !h || h === '#/' ? 'inicio' : '';
+  const item = (href, k, icono, txt) => `
+    <a href="${href}" class="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition ${sec === k ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'}">
+      ${sec === k ? '<span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400"></span>' : ''}
+      ${ic(icono, '!w-6 !h-6')}${txt}
+    </a>`;
   return `
     <div class="fixed bottom-0 inset-x-0 z-30 border-t border-slate-800 bg-slate-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div class="max-w-2xl mx-auto grid grid-cols-4">
-        <a href="#/inicio" class="${clase(inicio)}">${marca(inicio)}${ic('house', '!w-6 !h-6')}Inicio</a>
-        ${D.gid ? `<a href="#/" class="${clase(enGrupo)}">${marca(enGrupo)}${ic('users', '!w-6 !h-6')}<span class="max-w-full truncate px-1">${esc(nombre)}</span></a>`
-          : `<span class="${clase(false)} opacity-40">${ic('users', '!w-6 !h-6')}Grupo</span>`}
-        ${D.grupo ? `<button data-action="abrir-avisos" class="${clase(false)}">${ic(pushActivo() || n ? 'bell' : 'bell-off', '!w-6 !h-6')}Avisos${n ? `<span class="absolute top-1 left-1/2 ml-1.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] font-bold text-white grid place-items-center">${n}</span>` : ''}</button>`
-          : `<span class="${clase(false)} opacity-40">${ic('bell', '!w-6 !h-6')}Avisos</span>`}
-        <a href="#/perfil" class="${clase(h === '#/perfil')}">${marca(h === '#/perfil')}${ic('user', '!w-6 !h-6')}Perfil</a>
+        ${item('#/inicio', 'inicio', 'house', 'Inicio')}
+        ${item('#/grupos', 'grupos', 'users', 'Grupos')}
+        ${item('#/calendario', 'calendario', 'calendar', 'Calendario')}
+        ${item('#/perfil', 'perfil', 'user', 'Perfil')}
       </div>
     </div>`;
 }
-
 function topBar() {
   const yo = D.miembros[miUid()];
   return `
     <div class="flex items-center gap-2">
+      <a href="#/grupos" class="${BTN_ICONO} !w-9" title="Mis grupos" aria-label="Volver a mis grupos">${ic('arrow-left', '!w-5 !h-5')}</a>
       ${fotoGrupo(D.grupo, 40)}
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
       </div>
-      ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span>Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
-      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0">${avatar(yo, 40)}</a>
+      ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span class="hidden sm:inline">Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
+      ${campanita()}
     </div>`;
 }
 
@@ -3178,7 +3251,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil)/.test(location.hash);
+  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil|grupos|calendario)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -3447,6 +3520,16 @@ async function api(accion, datos = {}, url, renovar = false) {
 }
 
 // ---------------- Render ----------------
+// Carga perezosa: un botón con data-perezoso se "toca" solo cuando aparece en pantalla.
+function activarCargaPerezosa() {
+  const b = document.querySelector('#app [data-perezoso]');
+  if (!b || b._obs || !('IntersectionObserver' in window)) return;
+  b._obs = new IntersectionObserver(es => {
+    if (es[0].isIntersecting) { b._obs.disconnect(); b.click(); }
+  }, { rootMargin: '200px' });
+  b._obs.observe(b);
+}
+
 // Re-renderiza sin perder lo que el usuario está escribiendo.
 function pintar(el, html) {
   if (el._html === html) return;
@@ -3468,7 +3551,8 @@ function render() {
   renderVistas();
   pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
-  pintar($('#modal'), listo ? renderModal() : '');
+  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : '');
+  activarCargaPerezosa();
   if (listo) {
     asegurarRotacion();
     asegurarVotacion();
@@ -3489,7 +3573,7 @@ function renderVistas() {
   if (!D.perfil) return pintar(el, vistaCompletar());
   const actualizar = pendienteActualizar();
   if (actualizar) return pintar(el, actualizar === 'cargando' ? cargando() : vistaActualizar());
-  if (['#/inicio', '#/perfil', '#/grupos'].includes(location.hash) || !D.gid) return pintar(el, vistaInicio());
+  if (['#/inicio', '#/perfil', '#/grupos', '#/calendario'].includes(location.hash) || !D.gid) return pintar(el, vistaInicio());
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   if (location.hash === '#/admin' && esAdmin()) return pintar(el, vistaAdmin());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
@@ -3685,6 +3769,7 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
   'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
+  'mas-cal': () => { ui.calLimite = (ui.calLimite || 10) + 10; render(); },
   sumarse: ({ que }) => { ui.sumarse = ui.sumarse === que ? null : que; render(); },
   'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),
   'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
