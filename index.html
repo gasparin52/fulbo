@@ -1861,7 +1861,6 @@ function tarjetaHoy() {
   return hoy.map(x => {
     const anotado = ['titular', 'suplente'].includes(x.estado);
     const juego = x.fase === 'enjuego';
-    const abierto = !x.p.suspendido && !['enjuego', 'terminado'].includes(x.fase);
     const fondo = x.p.suspendido ? 'from-red-600 to-rose-700 text-white' : anotado ? 'from-emerald-400 to-teal-500 text-slate-950' : 'from-slate-700 to-slate-800 text-white';
     const cupo = x.cupo, anotados = Math.min(x.g.anotados.length, cupo), faltan = cupo - anotados, sups = Math.max(0, x.g.anotados.length - cupo);
     const estadoCupo = x.p.suspendido ? '' : faltan > 0
@@ -1882,10 +1881,7 @@ function tarjetaHoy() {
             ${x.p.lugar ? `<p class="text-sm opacity-80 truncate">${ic('map-pin')} ${esc(x.p.lugar)}</p>` : ''}
           </div>
         </div>
-        <div class="flex gap-2 mt-4">
-          <button data-action="cambiar-grupo" data-gid="${x.id}" class="${BTN} flex-1 text-sm py-2 bg-slate-950/85 hover:bg-slate-950 text-white">${juego ? 'Ver en vivo' : 'Ver partido'}</button>
-          ${abierto && !anotado ? `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN} flex-1 text-sm py-2 bg-white hover:bg-slate-100 text-slate-950">⚽ Me anoto</button>` : ''}
-        </div>
+        <p class="mt-3 text-right text-xs font-bold opacity-80">${juego ? 'Ver en vivo' : 'Ver partido'} ${ic('chevron-right')}</p>
       </div>`;
   }).join('');
 }
@@ -1972,7 +1968,7 @@ function tarjetaProximo() {
           <p class="text-sm text-slate-300 truncate">${esc(x.nombre)}${x.p.lugar ? ' · ' + esc(x.p.lugar) : ''}</p>
         </div>
         ${anotado ? `<span class="text-xs font-bold rounded-full px-2 py-1 bg-emerald-500/15 text-emerald-300">${x.estado === 'titular' ? 'Titular' : 'Suplente S' + x.sup}</span>`
-          : `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN_OK} text-xs px-3 py-1.5">⚽ Me anoto</button>`}
+          : `<span class="text-slate-500">${ic('chevron-right', '!w-5 !h-5')}</span>`}
       </div>
     </div>`;
 }
@@ -2061,9 +2057,9 @@ function vistaPrincipal() {
   const sinEquipos = card(`
     <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
-  const contenido = t === 'equipos' ? [equipos(d) || sinEquipos, tarjetaPublico()]
+  const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d)];
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -2530,8 +2526,12 @@ function miEstado(d) {
   const anotado = iT >= 0 || iS >= 0;
   const estado = iT >= 0 ? `<span class="text-emerald-400">${ic('circle-check')} Estás anotado · titular #${iT + 1}</span>`
     : iS >= 0 ? `<span class="text-amber-400">${ic('hourglass')} Estás de suplente S${iS + 1}</span>`
+    : D.grupo.publico.includes(uid) ? `<span class="text-sky-300">${ic('megaphone')} Vas a la tribuna (no jugás)</span>`
     : `<span class="text-slate-400">No estás anotado para este partido</span>`;
   const lleno = d.titulares.length >= d.cupo;
+  const tribuna = !D.grupo.partido.suspendido && (D.grupo.publico.includes(uid)
+    ? `<button data-action="publico-no" class="${BTN_CHIP} w-full mt-2 !py-2">Ya no voy a la tribuna</button>`
+    : `<button data-action="publico-si" class="${BTN_SEC} w-full mt-2 text-sm inline-flex items-center justify-center gap-1.5">${ic('megaphone')} No juego, voy a la tribuna</button>`);
   return card(`
     <p class="text-sm">${estado}</p>
     ${castigado(uid) ? `<p class="mt-2 text-xs text-red-200 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">🟥 Tenés una tarjeta roja por faltar sin avisar: esta fecha, si se llena la lista, los que se anoten después te pasan adelante y quedás de suplente.</p>` : ''}
@@ -2539,7 +2539,7 @@ function miEstado(d) {
       ? `<p class="mt-3 text-xs text-slate-400">${fasePartido() === 'enjuego' ? '⚽ El partido está en juego' : '🏁 El partido terminó'}: la lista está cerrada.</p>`
       : anotado
       ? `<button data-action="bajar" data-id="${uid}" class="${BTN} w-full mt-3 bg-slate-800 hover:bg-red-950 text-red-300 border border-red-900/50">Me bajo 😢</button>`
-      : `<button data-action="anotarme" class="${BTN_OK} w-full mt-3 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>`}
+      : `<button data-action="anotarme" class="${BTN_OK} w-full mt-3 text-lg">⚽ ¡Me anoto!${lleno ? ' <span class="text-sm font-medium">(entrás de suplente)</span>' : ''}</button>${tribuna || ''}`}
   `);
 }
 
