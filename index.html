@@ -3024,10 +3024,16 @@ function tarjetaPartido() {
     </div>`;
   if (f === 'terminado') return `
     <div class="rounded-2xl border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm">🏁 <b>Terminó el partido.</b> La lista queda cerrada hasta la próxima fecha.</div>`;
+  // Cada equipo con el puntaje de cada uno y sus suplentes (por si les toca entrar).
+  const d = derivar();
+  const sups = e => suplentesDe(e, d);
   const col = (e, color) => `
     <div class="rounded-xl border ${color} p-2.5">
       <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}</p>
-      <ul class="space-y-1 text-sm">${(eq?.[e] || []).map(jugador).filter(Boolean).map(p => `<li class="flex items-center gap-1.5 truncate">${avatar(p, 18)}<span class="truncate">${esc(p.usuario)}</span></li>`).join('')}</ul>
+      <ul class="space-y-1 text-sm">${(eq?.[e] || []).map(jugador).filter(Boolean).map(p => `<li class="flex items-center gap-1.5 min-w-0">${avatar(p, 18)}<span class="truncate flex-1">${esc(p.usuario)}</span>${chipNota(p.id)}</li>`).join('')}</ul>
+      ${sups(e).length ? `
+        <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
+        <ul class="space-y-1 text-sm text-slate-300">${sups(e).map(p => `<li class="flex items-center gap-1.5 min-w-0"><span class="text-[9px] font-bold rounded px-1 bg-amber-500/15 text-amber-300 shrink-0">S${d.suplentes.indexOf(p) + 1}</span>${avatar(p, 18)}<span class="truncate flex-1">${esc(p.usuario)}</span>${chipNota(p.id)}</li>`).join('')}</ul>` : ''}
     </div>`;
   const pct = Math.min(100, (Date.now() - t.inicio) / t.dur * 100);
   return `
