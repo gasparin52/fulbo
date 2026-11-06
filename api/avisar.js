@@ -77,6 +77,44 @@ async function armarAviso(gid, g, tipo, datos, quien) {
   throw new ErrorApi(400, 'Aviso desconocido');
 }
 
+// ---- Asistencia ----
+// Una baja de titular a menos de 24 h del partido cuenta como "tarde"; a menos de 6 h,
+// como "a último momento". No cuenta si estaba suspendido o se pronosticaba lluvia.
+const HORA_DEFAULT = '20:00';
+const horaDe = p => (/^([01]\d|2[0-3]):[0-5]\d$/.test(p.cuando || '') ? p.cuando : HORA_DEFAULT);
+const horasAntes = p => (Date.parse(`${p.fecha}T${horaDe(p)}:00-03:00`) - Date.now()) / 3600e3;
+async function llueve(g, p) {
+  const c = g.ciudad;
+  if (!c?.lat) return false;
+  try {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}`
+      + `&hourly=precipitation_probability,weather_code&timezone=America%2FArgentina%2FBuenos_Aires&start_date=${p.fecha}&end_date=${p.fecha}`);
+    const h = (await r.json()).hourly;
+    const i = h.time.indexOf(`${p.fecha}T${horaDe(p).slice(0, 2)}:00`);
+    const codigo = h.weather_code[i];
+    return h.precipitation_probability[i] >= 60 || (codigo >= 51 && codigo <= 67) || codigo >= 80;
+  } catch (e) {
+    console.warn(e);
+    return false;
+  }
+}
+async function registrarBaja(gid, g, id, titular, por) {
+  const p = g.partido || {};
+  if (!titular || !id || !p.fecha || (g.anotados || []).includes(id) || g.invitados?.[id]) return;
+  const horas = horasAntes(p);
+  if (horas >= 24 || horas < -3) return;  // con tiempo, o ya terminado: no cuenta
+  const excusa = p.suspendido ? 'suspendido' : (await llueve(g, p)) ? 'lluvia' : null;
+  await db.doc(`grupos/${gid}/bajas/${p.fecha}_${id}`).set({
+    fecha: p.fecha, target: id, tipo: horas < 6 ? 'ultimo' : 'tarde',
+    horas: Math.max(0, Math.round(horas * 10) / 10), excusa, por, ts: Date.now(),
+  });
+}
+async function excusarBajas(gid, fecha, excusa) {
+  if (!fecha) return;
+  const qs = await db.collection(`grupos/${gid}/bajas`).where('fecha', '==', fecha).get();
+  await Promise.all(qs.docs.map(d => d.ref.update({ excusa })));
+}
+
 async function notificar(gid, uids, aviso) {
   const docs = await Promise.all(uids.map(u => db.doc(`grupos/${gid}/push/${u}`).get()));
   const tokens = docs.flatMap(d => d.data()?.tokens || []);
@@ -109,6 +147,12 @@ export default async function handler(req, res) {
     if (!gid || !(await db.doc(`grupos/${gid}/miembros/${uid}`).get()).exists) throw new ErrorApi(403, 'No sos del grupo');
 
     const ref = db.doc(`grupos/${gid}`);
+    // Asistencia: bajas tardías y, si se suspende, perdonarlas.
+    if (body.tipo === 'baja' || body.tipo === 'suspendido') {
+      const g = (await ref.get()).data() || {};
+      if (body.tipo === 'baja') await registrarBaja(gid, g, String(body.id || ''), body.titular === true, uid);
+      else if (g.partido?.suspendido && (g.admins || []).includes(uid)) await excusarBajas(gid, g.partido.fecha, 'suspendido');
+    }
     // La transacción evita que dos avisos iguales salgan a la vez.
     const aviso = await db.runTransaction(async tx => {
       const g = (await tx.get(ref)).data() || {};

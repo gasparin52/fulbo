@@ -108,6 +108,7 @@ const refMvp = (g, fecha) => F.doc(db, 'grupos', g, 'mvp', fecha);
 const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'votos');
 const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
 const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
+const colBajas = g => F.collection(db, 'grupos', g, 'bajas');
 const colRehacer = g => F.collection(db, 'grupos', g, 'rehacer');
 const refRehacer = (g, u) => F.doc(db, 'grupos', g, 'rehacer', u);
 
@@ -171,6 +172,7 @@ const D = {
   cargado: {},         // { votos, niveles, mvps, faltas }: ya llegó la primera lectura
   faltas: [],          // 🟥 aprobadas: { id, fecha, target, nombre }
   reportes: [],        // admins: todos los pendientes; los demás, solo los suyos
+  bajas: [],           // bajas tardías (las registra api/avisar.js): { fecha, target, tipo, horas, excusa }
   rehacer: [],         // pedidos para rehacer los equipos: admins, todos; los demás, solo el suyo
   registrando: false,
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
@@ -313,7 +315,7 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [] });
+  Object.assign(D, { user, perfil: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -334,7 +336,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [] });
+  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -367,6 +369,10 @@ function elegirGrupo() {
     D.mvp = d ? { ...d, miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
     actualizarSubsMvp();
     cargarHistorialMvp();
+    render();
+  }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(colBajas(gid), qs => {
+    D.bajas = qs.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   }, e => console.warn(e.code)));
   subsGrupo.push(F.onSnapshot(colFaltas(gid), qs => {
@@ -412,6 +418,9 @@ const rondaActual = () => {
   return eq?.ronda && rh?.ronda === eq.ronda ? eq.ronda : null;
 };
 const pedidosRehacer = () => (rondaActual() ? D.grupo.rehacer.n : 0);
+// Con el 60% de los titulares que tienen cuenta (los invitados no votan) se rehacen solos.
+const PORCENTAJE_REHACER = 0.6;
+const umbralRehacer = d => Math.max(2, Math.ceil(PORCENTAJE_REHACER * d.titulares.filter(p => !p.invitado).length));
 const quienesRehacer = () => D.rehacer.filter(r => r.ronda && r.ronda === rondaActual()).map(r => r.id);
 // Al armar equipos nuevos empieza otra ronda y los pedidos vuelven a cero.
 function nuevaRonda(s) {
@@ -857,7 +866,7 @@ const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== 
 
 // Cuando se llena el cupo, el primer admin o armador que tiene la app abierta arma
 // los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
-let autoArmado = null, supsRepartidos = null, rondaIniciada = null;
+let autoArmado = null, supsRepartidos = null, rondaIniciada = null, rehechos = null;
 function asegurarEquipos() {
   const c = D.cargado;
   if (!puedeEditarEquipos() || !D.miembros || !c.votos || !c.niveles || !c.mvps || !c.faltas) return;
@@ -874,6 +883,18 @@ function asegurarEquipos() {
       supsRepartidos = clave;
       actualizarGrupo(s => { if (s.equipos) repartirSuplentes(s); });
     }
+  }
+  const ronda = rondaActual();
+  if (ronda && !equiposDesactualizados(d) && pedidosRehacer() >= umbralRehacer(d) && rehechos !== ronda) {
+    rehechos = ronda;
+    actualizarGrupo(s => {
+      if (!s.equipos || s.rehacer?.ronda !== ronda || s.rehacer.n < umbralRehacer(dividir(s))) return;
+      const { titulares } = dividir(s);
+      s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base: baseKey(titulares) };
+      repartirSuplentes(s);
+      nuevaRonda(s);
+      s.solicitudes = {};
+    }, '🔄 La mayoría pidió rehacerlos: equipos nuevos');
   }
   if (d.titulares.length < d.cupo) return;
   const clave = `${D.gid}/${baseKey(d.titulares)}`;
@@ -1248,7 +1269,7 @@ function vistaReglas() {
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
-      'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando se vuelven a armar, el contador empieza de cero.',
+      'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
     ${seccion('📊 Calificaciones', [
@@ -1269,6 +1290,12 @@ function vistaReglas() {
       '<b>Solo cuenta si un admin lo aprueba.</b> El reportado no ve quién lo reportó. No es para joder ni vengarse de nadie: los reportes truchos se rechazan.',
       'El que tiene una falta aprobada lleva una <b>🟥</b> en su ficha y en la lista. La tarjeta <b>se va cuando se anotó en 2 fechas</b> más.',
       '<b>Castigo:</b> en la primera fecha en que se anota después de la falta, si se llena la lista, los que se anotan después le pasan adelante y queda de suplente. Si no se llena, juega igual.',
+    ])}
+    ${seccion('📋 Asistencia', [
+      'Cada uno tiene un <b>porcentaje de asistencia</b> en su ficha (últimos 90 días): cuántas veces jugó contra cuántas falló.',
+      'Bajarse <b>con tiempo no afecta</b>. Bajarse <b>el día del partido</b> (menos de 24 h antes) cuenta un poco, y <b>a último momento</b> (menos de 6 h antes) cuenta más. <b>Faltar sin avisar</b> (🟥) es lo que más pesa.',
+      'Si había <b>lluvia</b> pronosticada o el partido <b>se suspendió</b>, la baja no cuenta. Un admin también puede perdonar una baja.',
+      'Con menos de 70% aparece un <b>⏰</b> al lado del nombre.',
     ])}
     ${seccion('👤 Tu cuenta y el grupo', [
       'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición y foto.',
@@ -1381,7 +1408,7 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaAsistencia(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -1498,13 +1525,19 @@ function equipos(d) {
   // Pedidos para rehacer los equipos: todos ven cuántos; quiénes, solo los admins.
   const nRehacer = vigentes ? pedidosRehacer() : 0;
   const quienes = esAdmin() ? quienesRehacer().map(id => jugador(id)?.usuario || D.miembros[id]?.usuario).filter(Boolean) : [];
+  const umbral = umbralRehacer(d), pct = Math.min(100, Math.round(100 * nRehacer / umbral));
   const avisoRehacer = nRehacer ? `
     <div class="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm">
-      🙋 <b>${nRehacer}</b> ${nRehacer === 1 ? 'pidió' : 'pidieron'} rehacer los equipos
+      <div class="flex items-baseline justify-between gap-2">
+        <span>🙋 <b>${nRehacer}</b> de <b>${umbral}</b> pidieron rehacer los equipos</span>
+        <span class="text-xs font-bold text-violet-200">${pct}%</span>
+      </div>
+      <div class="mt-1.5 h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-violet-400 transition-all" style="width:${pct}%"></div></div>
+      <p class="text-[11px] text-slate-400 mt-1">Con ${umbral} (el ${Math.round(PORCENTAJE_REHACER * 100)}% de los titulares) se rehacen solos, equilibrados.</p>
       ${quienes.length ? `<p class="text-xs text-violet-200/80 mt-1">${quienes.map(esc).join(', ')} <span class="text-slate-500">(solo lo ven los admins)</span></p>` : ''}
     </div>` : '';
   const yaPedi = D.rehacer.some(r => r.id === yo && r.ronda === rondaActual());
-  const botonRehacer = vigentes && rondaActual() && !editor && D.grupo.anotados.includes(yo) ? (yaPedi
+  const botonRehacer = vigentes && rondaActual() && !editor && miEquipo ? (yaPedi
     ? `<div class="mt-3 flex items-center justify-between gap-2 text-sm bg-violet-500/10 border border-violet-500/20 rounded-xl px-3 py-2">
          <span>🙋 Pediste rehacer los equipos. Nadie ve quién lo pidió.</span>
          <button data-action="rehacer-cancelar" class="text-xs text-slate-400 underline shrink-0">Cancelar</button>
@@ -1702,6 +1735,54 @@ function modalReemplazar() {
       <button class="${BTN} w-full bg-sky-500 hover:bg-sky-400 text-slate-950">Reemplazar</button>
     </form>
     <button data-action="reemplazar" class="w-full mt-2 py-2 text-sm text-slate-400">← Elegir a otro</button>`);
+}
+
+// ---------------- 📋 Asistencia ----------------
+// Mira los últimos 90 días: partidos jugados contra faltas sin avisar (pesan 2), bajas
+// a último momento, menos de 6 h antes (pesan 1) y bajas tarde, menos de 24 h (pesan ½).
+// No cuentan las bajas con lluvia o con el partido suspendido.
+const VENTANA_ASISTENCIA = 90 * DIA;
+function asistenciaDe(id) {
+  const desde = Date.now() - VENTANA_ASISTENCIA;
+  const reciente = f => inicioDia(f) >= desde;
+  const faltas = D.faltas.filter(f => f.target === id && reciente(f.fecha));
+  const jugados = (D.mvps || []).filter(m => reciente(m.fecha) && m.candidatos?.includes(id) && !faltas.some(f => f.fecha === m.fecha)).length;
+  const bajas = D.bajas.filter(b => b.target === id && reciente(b.fecha));
+  // Si después se volvió a anotar y jugó esa fecha, la baja no cuenta.
+  const jugo = f => (D.mvps || []).some(m => m.fecha === f && m.candidatos?.includes(id));
+  const cuentan = bajas.filter(b => !b.excusa && !jugo(b.fecha));
+  const ultimo = cuentan.filter(b => b.tipo === 'ultimo').length, tarde = cuentan.length - ultimo;
+  const peso = jugados + 2 * faltas.length + ultimo + 0.5 * tarde;
+  return { jugados, faltas: faltas.length, ultimo, tarde, bajas, pct: peso ? Math.round(100 * jugados / peso) : null };
+}
+const nivelAsistencia = pct => pct >= 90 ? ['emerald', 'Confiable'] : pct >= 70 ? ['amber', 'Regular'] : ['red', 'Se baja seguido'];
+// Al lado del nombre, solo si viene fallando: ⏰.
+function marcaAsistencia(id) {
+  const a = asistenciaDe(id);
+  return a.pct != null && a.pct < 70 ? ` <span class="text-xs" title="Asistencia ${a.pct}%: se baja seguido a último momento o falta">⏰</span>` : '';
+}
+function tarjetaAsistencia(id) {
+  const a = asistenciaDe(id);
+  if (a.pct == null && !a.bajas.length) return '';
+  const [color, nivel] = a.pct == null ? ['slate', 'Sin partidos'] : nivelAsistencia(a.pct);
+  const excusa = { lluvia: '🌧️ había lluvia, no cuenta', suspendido: '🚫 se suspendió, no cuenta' };
+  const textoColor = { emerald: 'text-emerald-300', amber: 'text-amber-300', red: 'text-red-300', slate: 'text-slate-400' }[color];
+  const barraColor = { emerald: 'bg-emerald-400', amber: 'bg-amber-400', red: 'bg-red-400', slate: 'bg-slate-500' }[color];
+  return card(`
+    <div class="flex items-baseline justify-between gap-2">
+      <h2 class="font-bold">📋 Asistencia <span class="text-xs font-normal text-slate-500">(últimos 90 días)</span></h2>
+      <span class="font-black text-xl ${textoColor}">${a.pct == null ? '–' : a.pct + '%'}</span>
+    </div>
+    ${a.pct != null ? `<div class="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full ${barraColor}" style="width:${a.pct}%"></div></div>` : ''}
+    <p class="text-sm mt-2"><b class="${textoColor}">${nivel}</b> · ${a.jugados} jugados${a.faltas ? ` · ${a.faltas} 🟥 sin avisar` : ''}${a.ultimo ? ` · ${a.ultimo} a último momento` : ''}${a.tarde ? ` · ${a.tarde} tarde` : ''}</p>
+    ${a.bajas.length ? `
+      <ul class="mt-2 space-y-1 text-xs text-slate-400">
+        ${a.bajas.sort((x, y) => y.ts - x.ts).map(b => `
+          <li class="flex items-center gap-2">
+            <span class="flex-1">${b.tipo === 'ultimo' ? '⏰ A último momento' : '🕐 Tarde'}: se bajó ${b.horas < 1 ? 'menos de 1 h' : Math.floor(b.horas) + ' h'} antes, el ${esc(fechaLinda(b.fecha))}${b.excusa ? ` · ${excusa[b.excusa]}` : ''}</span>
+            ${esAdmin() ? `<button data-action="perdonar-baja" data-k="${esc(b.id)}" class="underline shrink-0">Perdonar</button>` : ''}
+          </li>`).join('')}
+      </ul>` : ''}`);
 }
 
 // Al lado del nombre: 🟥 (o 🟥2) mientras tenga faltas vigentes.
@@ -1937,6 +2018,7 @@ function vistaFicha(id) {
         }).join('')}
         <button class="${BTN_OK} w-full">${miVoto ? 'Actualizar voto' : 'Guardar voto'}</button>
       </form>`)}
+    ${p.invitado ? '' : tarjetaAsistencia(id)}
     ${esAdmin() && !esYo ? card(`
       <h2 class="text-sm font-bold text-slate-400 mb-2">🔧 Admin</h2>
       <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -2258,7 +2340,8 @@ const acciones = {
   bajar: ({ id }) => {
     const p = jugador(id);
     if (!p || !confirm(id === miUid() ? '¿Seguro que te bajás?' : `¿Bajar a ${p.usuario} de la lista?`)) return;
-    actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista').then(ok => ok && avisar('baja', { id }));
+    const titular = derivar().titulares.some(x => x.id === id);
+    actualizarGrupo(s => { s.anotados = s.anotados.filter(x => x !== id); }, 'Bajado de la lista').then(ok => ok && avisar('baja', { id, titular }));
   },
   copiar: () => copiar(mensajeWsp()),
   'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
@@ -2298,6 +2381,10 @@ const acciones = {
       .then(ok => ok && avisar('suspendido'));
   },
   reactivar: () => actualizarGrupo(s => { delete s.partido.suspendido; }, '✅ Se levantó la suspensión').then(ok => ok && avisar('reactivado')),
+  'perdonar-baja': ({ k }) => {
+    if (!confirm('¿Perdonar esta baja? Deja de contar para la asistencia.')) return;
+    act(() => F.deleteDoc(F.doc(db, 'grupos', D.gid, 'bajas', k)), 'Baja perdonada');
+  },
   'abrir-avisos': () => { ui.modal = 'avisos'; guardado.set(claveVisto(), String(Date.now())); render(); },
   'activar-push': () => activarNotificaciones(),
   'desactivar-push': () => desactivarNotificaciones(),

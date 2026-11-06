@@ -217,6 +217,13 @@ service cloud.firestore {
           && request.resource.data.tokens is list && request.resource.data.tokens.size() <= 5;
       }
 
+      // Bajas tardías (asistencia): las registra solo el servidor (api/avisar.js).
+      // Las ve todo el grupo y un admin las puede perdonar (borrar).
+      match /bajas/{b} {
+        allow read: if esMiembro(g);
+        allow delete: if esAdmin(g);
+      }
+
       // Faltas aprobadas: las ve todo el grupo, las pone o las saca solo un admin.
       match /faltas/{f} {
         allow read: if esMiembro(g);
