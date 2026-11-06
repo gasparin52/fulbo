@@ -1277,6 +1277,9 @@ function vistaReglas() {
       'Las ponen los compañeros (también a los invitados sin cuenta que anota el admin): <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
       'En la app no se muestra quién votó qué: solo los promedios.',
       'Al que califica a todos muy bajo le aparece la etiqueta <b>😈 hater</b>: si con 3 o más compañeros calificados pone en promedio 3 o menos, o pone 2,5 puntos o más por debajo de lo que les ponen los demás. Se va sola si ajusta sus votos.',
+      'Con <b>⚡ Calificar rápido</b> (en Jugadores) pasás por todos los que te faltan, de a uno. Después del partido también aparece para calificar a los que jugaron.',
+      'Una vez que calificaste a alguien, tu calificación queda <b>oculta</b> en su ficha hasta que tocás <b>Actualizar voto</b>, así nadie la ve si le mostrás el celu.',
+      'El que calificó a casi todo el grupo (80% o más) lleva un <b>🧐 Scout</b> al lado del nombre.',
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
     ])}
     ${seccion('🏆 Jugador del partido', [
@@ -1408,7 +1411,7 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaAsistencia(p.id)}${marcaHater(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaAsistencia(p.id)}${marcaHater(p.id)}${marcaScout(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
@@ -1596,6 +1599,11 @@ function tarjetaMvp() {
                <button data-action="mvp-votar" class="ml-auto text-xs text-slate-400 underline shrink-0">Cambiar</button></div>`
           : `<p class="mt-3 text-sm text-amber-200">⚠️ Todavía no votaste.</p>
              <button data-action="mvp-votar" class="${BTN} w-full mt-2 bg-amber-400 hover:bg-amber-300 text-slate-950">🏆 Votar al mejor del partido</button>`}
+        ${sinMiVoto(m.candidatos).length ? `
+          <div class="mt-3 pt-3 border-t border-amber-500/20 flex items-center gap-3">
+            <p class="flex-1 text-xs text-slate-300">Ya que estás, calificá a los que jugaron y todavía no calificaste.</p>
+            <button data-action="calificar-rapido" data-ids="${esc(m.candidatos.join(','))}" class="${BTN_SEC} text-xs shrink-0">⭐ Calificar (${sinMiVoto(m.candidatos).length})</button>
+          </div>` : ''}
       </div>`;
   }
 
@@ -1735,6 +1743,63 @@ function modalReemplazar() {
       <button class="${BTN} w-full bg-sky-500 hover:bg-sky-400 text-slate-950">Reemplazar</button>
     </form>
     <button data-action="reemplazar" class="w-full mt-2 py-2 text-sm text-slate-400">← Elegir a otro</button>`);
+}
+
+// ---------------- ⭐ Calificar ----------------
+const guardarVoto = (id, stats) => act(() => F.setDoc(F.doc(colVotos(D.gid), `${miUid()}_${id}`), { voter: miUid(), target: id, stats, ts: Date.now() }), '⭐ Voto guardado');
+// A quiénes me falta calificar (de una lista, o de todo el grupo).
+function sinMiVoto(ids) {
+  const uid = miUid();
+  const todos = ids || [...Object.keys(D.miembros), ...Object.keys(D.grupo.invitados)];
+  return todos.filter(id => id !== uid && jugador(id) && !D.votos[id]?.[uid]);
+}
+// Modo rápido: los compañeros de a uno, con las barras en 5. "Saltar" lo deja para después.
+function modalCalificar() {
+  const cola = ui.cola || [], id = cola[ui.colaPos];
+  const progreso = Math.round(100 * Math.min(ui.colaPos, cola.length) / (cola.length || 1));
+  const barra = `<div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-emerald-400 transition-all" style="width:${progreso}%"></div></div>`;
+  if (!id) return modal(`
+    <div class="text-center py-4">
+      <div class="text-5xl">🎉</div>
+      <h2 class="text-xl font-black mt-2">¡Listo!</h2>
+      <p class="text-sm text-slate-400 mt-1">Gracias: con tus votos los equipos salen más parejos.</p>
+      <button data-action="cerrar-modal" class="${BTN_OK} w-full mt-4">Cerrar</button>
+    </div>`);
+  const p = jugador(id);
+  return modal(`
+    <div class="flex items-center justify-between gap-2 mb-2">
+      <span class="text-xs text-slate-400">⚡ Calificar rápido · ${ui.colaPos + 1} de ${cola.length}</span>
+      <button data-action="cerrar-modal" class="text-slate-400 hover:text-slate-200 px-2 text-lg">✕</button>
+    </div>
+    ${barra}
+    <div class="flex items-center gap-3 mt-4 mb-3">
+      ${avatar(p, 48)}
+      <div class="min-w-0">
+        <p class="text-lg font-black truncate">${esc(p.usuario)}${p.invitado ? ' <span class="text-xs font-normal text-slate-500">(invitado)</span>' : ''}</p>
+        <p class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</p>
+      </div>
+    </div>
+    <form data-form="voto-rapido" data-id="${id}" class="space-y-2.5">
+      ${STATS.map(s => `
+        <label class="flex items-center gap-3 text-sm">
+          <span class="w-28 shrink-0 text-slate-300">${s.emoji} ${s.label}</span>
+          <input id="q-${id}-${s.k}" name="${s.k}" type="range" min="1" max="10" step="1" value="5" data-out="qo-${id}-${s.k}" class="flex-1">
+          <span id="qo-${id}-${s.k}" class="w-6 text-right font-mono font-bold">5</span>
+        </label>`).join('')}
+      <div class="flex gap-2 pt-2">
+        <button type="button" data-action="rapido-saltar" class="${BTN_SEC} text-sm">Saltar</button>
+        <button class="${BTN_OK} flex-1">Guardar y seguir →</button>
+      </div>
+    </form>
+    <p class="text-[11px] text-slate-500 mt-3">Del 1 al 10. Las calificaciones solo sirven para equilibrar equipos. Las podés cambiar después desde la ficha.</p>`);
+}
+
+// 🧐 Scout: calificó al 80% o más del grupo (con al menos 3 compañeros).
+function marcaScout(id) {
+  if (!D.miembros?.[id]) return '';
+  const otros = [...Object.keys(D.miembros), ...Object.keys(D.grupo.invitados)].filter(x => x !== id);
+  const votados = otros.filter(t => D.votos[t]?.[id]).length;
+  return otros.length >= 3 && votados / otros.length >= 0.8 ? ' <span class="text-xs" title="Scout: calificó a casi todo el grupo">🧐</span>' : '';
 }
 
 // ---------------- 📋 Asistencia ----------------
@@ -1902,7 +1967,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : '';
 }
 
 const avisoCalificaciones = `
@@ -1922,6 +1987,7 @@ function jugadoresGrid() {
       <h2 class="text-lg font-bold">👥 Jugadores <span class="text-slate-500 font-normal text-sm">(${ps.length})</span></h2>
       ${pendientes ? `<span class="text-xs text-amber-300">Te faltan calificar ${pendientes}</span>` : ''}
     </div>
+    ${pendientes ? `<button data-action="calificar-rapido" class="${BTN} w-full mb-3 text-sm bg-amber-400 hover:bg-amber-300 text-slate-950">⚡ Calificar rápido (${pendientes})</button>` : ''}
     ${avisoCalificaciones}
     <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
       ${ps.map(p => {
@@ -2002,8 +2068,18 @@ function vistaFicha(id) {
         ${camposPerfil(p)}
         <button class="${BTN_OK} w-full">Guardar</button>
       </form>
-      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) : card(`
-      <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
+      <p class="text-xs text-slate-500 mt-3">No te podés calificar a vos mismo 😉</p>`) : miVoto && ui.votoAbierto !== id ? card(`
+      <div class="flex items-center gap-3">
+        <div class="flex-1">
+          <h2 class="font-bold">✅ Ya calificaste a ${esc(p.usuario)}</h2>
+          <p class="text-xs text-slate-500">Tu calificación queda oculta, por si alguien mira tu celu.</p>
+        </div>
+        <button data-action="abrir-voto" data-id="${id}" class="${BTN_SEC} text-sm shrink-0">✏️ Actualizar voto</button>
+      </div>`) : card(`
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="text-lg font-bold">⭐ ${miVoto ? 'Tu calificación' : `Calificá a ${esc(p.usuario)}`}</h2>
+        ${miVoto ? '<button data-action="cerrar-voto" class="text-xs text-slate-400 underline">Ocultar</button>' : ''}
+      </div>
       ${avisoCalificaciones}
       <p class="text-xs text-slate-500 mb-4">Del 1 al 10. Solo cuenta un voto tuyo: si lo cambiás, reemplaza al anterior.</p>
       <form data-form="voto" data-id="${id}" class="space-y-3">
@@ -2381,6 +2457,16 @@ const acciones = {
       .then(ok => ok && avisar('suspendido'));
   },
   reactivar: () => actualizarGrupo(s => { delete s.partido.suspendido; }, '✅ Se levantó la suspensión').then(ok => ok && avisar('reactivado')),
+  'abrir-voto': ({ id }) => { ui.votoAbierto = id; render(); },
+  'cerrar-voto': () => { ui.votoAbierto = null; render(); },
+  'calificar-rapido': ({ ids }) => {
+    ui.cola = sinMiVoto(ids ? ids.split(',') : null);
+    ui.colaPos = 0;
+    if (!ui.cola.length) return toast('Ya calificaste a todos 👌');
+    ui.modal = 'calificar';
+    render();
+  },
+  'rapido-saltar': () => { ui.colaPos++; render(); },
   'perdonar-baja': ({ k }) => {
     if (!confirm('¿Perdonar esta baja? Deja de contar para la asistencia.')) return;
     act(() => F.deleteDoc(F.doc(db, 'grupos', D.gid, 'bajas', k)), 'Baja perdonada');
@@ -2535,7 +2621,14 @@ const formularios = {
   },
   voto: (f, { id }) => {
     const stats = Object.fromEntries(STATS.map(s => [s.k, parseInt(f.get(s.k))]));
-    return act(() => F.setDoc(F.doc(colVotos(D.gid), `${miUid()}_${id}`), { voter: miUid(), target: id, stats, ts: Date.now() }), '⭐ Voto guardado');
+    return guardarVoto(id, stats).then(ok => { if (ok) ui.votoAbierto = null; return ok; });
+  },
+  // Modo rápido: guarda y pasa al siguiente.
+  'voto-rapido': async (f, { id }) => {
+    const stats = Object.fromEntries(STATS.map(s => [s.k, parseInt(f.get(s.k))]));
+    const ok = await guardarVoto(id, stats);
+    if (ok) ui.colaPos++;
+    return ok;
   },
   'sa-crear': async f => {
     const usuario = f.get('usuario').trim(), pass = f.get('pass');
