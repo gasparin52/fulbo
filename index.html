@@ -1383,6 +1383,15 @@ const ICONO_REEMPLAZAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="
 const ICONO_SACAR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="22" x2="16" y1="11" y2="11"/></svg>';
 const cargando = (msg = 'Cargando…') => `<p class="text-slate-400 py-10 text-center">${msg}</p>`;
 
+// Foto del grupo (la sube un admin); si no tiene, la inicial con un color propio.
+function fotoGrupo(g, size = 40) {
+  const st = `width:${size}px;height:${size}px`;
+  if (g?.foto) return `<img src="${esc(g.foto)}" alt="" style="${st}" class="rounded-xl object-cover shrink-0 bg-slate-800">`;
+  const n = g?.nombre || '?';
+  const hue = [...n].reduce((h, c) => h + c.charCodeAt(0) * 7, 0) % 360;
+  return `<span style="${st};background:hsl(${hue} 45% 20%);color:hsl(${hue} 75% 72%);font-size:${Math.round(size * 0.45)}px" class="rounded-xl grid place-items-center font-black shrink-0">${esc(n[0].toUpperCase())}</span>`;
+}
+
 function avatar(p, size = 40) {
   const s = `width:${size}px;height:${size}px`;
   if (p?.foto) return `<img src="${esc(p.foto)}" alt="" style="${s}" class="rounded-full object-cover shrink-0 bg-slate-800">`;
@@ -1721,7 +1730,7 @@ function tarjetaMisPartidos() {
     }).join('');
     return `
       <li class="py-3 flex gap-3">
-        <div class="w-12 shrink-0 text-center rounded-xl py-1.5 ${x.viejo || !d ? 'bg-slate-800/60 text-slate-500' : 'bg-emerald-500/10 text-emerald-300'}">
+        <div class="w-12 shrink-0 text-center rounded-xl py-1.5 ${x.viejo || !d ? 'bg-slate-800/60 text-slate-500' : 'bg-sky-500/10 text-sky-300'}">
           ${d ? `<p class="text-[10px] font-bold tracking-wide">${dia}</p><p class="text-xl font-black leading-none">${d.getUTCDate()}</p>` : `<p class="text-lg leading-none py-1">${ic('calendar')}</p>`}
         </div>
         <div class="flex-1 min-w-0">
@@ -1734,10 +1743,10 @@ function tarjetaMisPartidos() {
           </p>
           ${agendaActiva(x.g) ? `<p class="text-[11px] text-slate-500 mt-0.5">${ic('repeat')} ${esc(textoAgenda(x.g.agenda))}${(() => { const [o] = proximasFechas(x.g.agenda, x.p.fecha || ayerArg()); return o ? ` · después: ${esc(fechaLinda(o.fecha))}` : ''; })()}</p>` : ''}
           ${choques}
-          <div class="flex flex-wrap gap-2 mt-2">
+          <div class="flex items-center gap-2 mt-2">
             ${abierto && !anotado ? `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN_OK} text-xs px-3 py-1.5">⚽ Me anoto</button>` : ''}
-            <button data-action="cambiar-grupo" data-gid="${x.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Ver partido</button>
-            ${abierto && x.t ? `<button data-action="agendar" data-gid="${x.id}" class="${BTN_SEC} text-xs px-3 py-1.5">${ic('calendar-plus')} Agendar</button>` : ''}
+            <button data-action="cambiar-grupo" data-gid="${x.id}" class="${BTN_CHIP}">Ver ${ic('chevron-right')}</button>
+            ${abierto && x.t ? `<button data-action="agendar" data-gid="${x.id}" title="Agendar en mi calendario" aria-label="Agendar en mi calendario" class="${BTN_CHIP}">${ic('calendar-plus')}</button>` : ''}
           </div>
           ${ui.agendar === x.id && x.t ? `
             <div class="mt-2 flex flex-wrap gap-2 text-xs">
@@ -1747,13 +1756,22 @@ function tarjetaMisPartidos() {
         </div>
       </li>`;
   };
+  // Plegable: se recuerda si lo dejaste abierto.
+  const desplegado = guardado.get(LS + 'cal') === '1';
+  const prox = ps.find(x => x.t && !x.viejo && !x.p.suspendido);
   return card(`
-    <div class="flex items-baseline justify-between gap-2">
-      <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Mis partidos</h2>
-      ${semana ? `<span class="text-xs text-slate-400">Esta semana jugás <b class="text-slate-200">${semana}</b></span>` : ''}
-    </div>
-    ${tiraSemana(ps)}
-    <ul class="divide-y divide-slate-800">${ps.map(fila).join('')}</ul>`);
+    <button data-action="toggle-cal" aria-expanded="${desplegado}" class="w-full flex items-center gap-2 text-left">
+      <span class="flex-1 min-w-0">
+        <span class="block text-lg font-bold">${ic('calendar', 'text-sky-400')} Calendario</span>
+        <span class="block text-xs text-slate-400 truncate">${semana ? `Esta semana jugás <b class="text-slate-200">${semana}</b>` : 'Esta semana no estás anotado'}${!desplegado && prox ? ` · próximo: ${esc(cuantoFalta(prox.p.fecha) || fechaLinda(prox.p.fecha))} ${prox.t.hora}, ${esc(prox.nombre)}` : ''}</span>
+      </span>
+      <span class="${BTN_ICONO} !w-8 !h-8 transition ${desplegado ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
+    </button>
+    ${desplegado ? `
+      <div class="mt-3">
+        ${tiraSemana(ps)}
+        <ul class="divide-y divide-slate-800">${ps.map(fila).join('')}</ul>
+      </div>` : ''}`);
 }
 
 // Semana: los próximos 7 días con un puntito donde hay partido (verde si estás anotado).
@@ -1767,13 +1785,41 @@ function tiraSemana(ps) {
         const juego = del.some(x => ['titular', 'suplente'].includes(x.estado));
         const d = new Date(f + 'T12:00:00-03:00');
         return `
-          <div class="rounded-xl py-1.5 text-center ${f === hoy ? 'bg-emerald-500/15 text-emerald-200' : 'bg-slate-800/50 text-slate-300'}">
+          <div class="rounded-xl py-1.5 text-center ${f === hoy ? 'bg-sky-500/20 text-sky-100 ring-1 ring-sky-400/40' : 'bg-slate-800/50 text-slate-300'}">
             <p class="text-[10px] font-bold uppercase">${d.toLocaleDateString('es-AR', { weekday: 'short', timeZone: TZ }).replace('.', '').slice(0, 3)}</p>
             <p class="text-base font-black leading-tight">${d.getUTCDate()}</p>
             <p class="h-2 flex justify-center gap-0.5">${del.map(x => `<span class="w-1.5 h-1.5 rounded-full ${['titular', 'suplente'].includes(x.estado) ? 'bg-emerald-400' : 'bg-slate-500'}"></span>`).join('')}</p>
           </div>`;
       }).join('')}
     </div>`;
+}
+
+// Arriba de todo: los partidos de hoy (si hay), bien grandes.
+function tarjetaHoy() {
+  const hoy = misPartidos().filter(x => x.g && x.p.fecha === hoyArg() && !x.viejo);
+  return hoy.map(x => {
+    const anotado = ['titular', 'suplente'].includes(x.estado);
+    const juego = x.fase === 'enjuego';
+    const abierto = !x.p.suspendido && !['enjuego', 'terminado'].includes(x.fase);
+    const fondo = x.p.suspendido ? 'from-red-600 to-rose-700 text-white' : anotado ? 'from-emerald-400 to-teal-500 text-slate-950' : 'from-slate-700 to-slate-800 text-white';
+    const titulo = x.p.suspendido ? '🚫 Hoy: partido suspendido' : juego ? '⚽ Se está jugando ahora' : x.fase === 'terminado' ? '🏁 Ya terminó' : anotado ? (x.estado === 'titular' ? '⚽ Hoy jugás' : '⚽ Hoy sos suplente S' + x.sup) : '⚽ Hoy hay partido';
+    return `
+      <div class="rounded-2xl p-4 bg-gradient-to-br ${fondo} shadow-lg shadow-black/30">
+        <p class="text-xs font-black uppercase tracking-wider opacity-80">${titulo}</p>
+        <div class="flex items-center gap-3 mt-3">
+          ${fotoGrupo(x.g, 52)}
+          <div class="min-w-0 flex-1">
+            <p class="text-3xl font-black leading-none">${esc(x.t?.hora || x.p.cuando || '')}</p>
+            <p class="font-bold truncate mt-1">${esc(x.nombre)}</p>
+            ${x.p.lugar ? `<p class="text-sm opacity-80 truncate">${ic('map-pin')} ${esc(x.p.lugar)}</p>` : ''}
+          </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <button data-action="cambiar-grupo" data-gid="${x.id}" class="${BTN} flex-1 text-sm py-2 bg-slate-950/85 hover:bg-slate-950 text-white">${juego ? 'Ver en vivo' : 'Ver partido'}</button>
+          ${abierto && !anotado ? `<button data-action="anotarme-en" data-gid="${x.id}" class="${BTN} flex-1 text-sm py-2 bg-white hover:bg-slate-100 text-slate-950">⚽ Me anoto</button>` : ''}
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // Tarjetas de mis grupos: si soy admin, también "Administrar".
@@ -1783,34 +1829,28 @@ function tarjetaMisGrupos() {
     <h2 class="text-lg font-bold">${ic('users', 'text-emerald-400')} Mis grupos</h2>
     <p class="text-sm text-slate-400 mt-1">Todavía no estás en ningún grupo. Pedile el link de invitación a quien organiza, o creá uno vos.</p>`);
   return card(`
-    <h2 class="text-lg font-bold mb-3">${ic('users', 'text-emerald-400')} Mis grupos</h2>
-    <div class="grid sm:grid-cols-2 gap-2">
+    <h2 class="text-lg font-bold mb-2">${ic('users', 'text-emerald-400')} Mis grupos</h2>
+    <ul class="divide-y divide-slate-800/80 -mx-1">
       ${grupos.map(g => {
         const x = D.misGrupos[g.id];
         const admin = !!x?.admins.includes(miUid());
         const p = x?.partido;
-        const prox = !x ? 'Cargando…' : p?.fecha ? [cuantoFalta(p.fecha) || fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ') : 'Sin fecha cargada';
-        const nombre = x?.nombre || g.nombre;
+        const prox = !x ? 'Cargando…' : p?.suspendido ? '🚫 Suspendido' : p?.fecha ? [cuantoFalta(p.fecha) || fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ') : 'Sin fecha cargada';
         return `
-          <div class="rounded-xl border border-slate-800 bg-slate-950/40 p-3 flex flex-col gap-3">
-            <div class="flex items-start gap-3">
-              <span class="w-10 h-10 rounded-xl grid place-items-center text-lg font-black bg-emerald-500/15 text-emerald-300 shrink-0">${esc((nombre[0] || '?').toUpperCase())}</span>
-              <div class="min-w-0 flex-1">
-                <p class="font-bold truncate">${esc(nombre)}</p>
-                <p class="text-xs text-slate-400 truncate">${esc(prox)}${agendaActiva(x) ? ' · ' + esc(textoAgenda(x.agenda).replace('Todos los ', '')) : ''}</p>
-              </div>
-              <span class="text-[10px] font-bold uppercase rounded-md px-1.5 py-0.5 ${admin ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${admin ? 'Admin' : 'Jugador'}</span>
-            </div>
-            <div class="flex gap-2">
-              <button data-action="cambiar-grupo" data-gid="${g.id}" class="${BTN_OK} flex-1 text-sm py-2">Entrar</button>
-              ${admin ? `<button data-action="administrar" data-gid="${g.id}" class="${BTN_SEC} flex-1 text-sm py-2 inline-flex items-center justify-center gap-1.5">${ic('settings')} Administrar</button>` : ''}
-              <button data-action="salir-grupo" data-gid="${g.id}" title="Salir del grupo" aria-label="Salir del grupo" class="${BTN_ICONO} !w-9 !h-9 hover:!text-red-300">${ic('log-out')}</button>
-            </div>
-          </div>`;
+          <li class="flex items-center gap-3 py-2.5 px-1">
+            <button data-action="cambiar-grupo" data-gid="${g.id}" class="flex items-center gap-3 flex-1 min-w-0 text-left group">
+              ${fotoGrupo(x || g, 48)}
+              <span class="min-w-0 flex-1">
+                <b class="block truncate group-hover:text-emerald-300">${esc(x?.nombre || g.nombre)}</b>
+                <span class="block text-xs text-slate-400 truncate">${admin ? '<span class="text-[9px] font-black uppercase rounded px-1 py-0.5 mr-1 bg-emerald-500/15 text-emerald-300">Admin</span>' : ''}${esc(prox)}${agendaActiva(x) ? ' · ' + esc(textoAgenda(x.agenda).replace('Todos los ', '')) : ''}</span>
+              </span>
+            </button>
+            ${admin ? `<button data-action="administrar" data-gid="${g.id}" title="Administrar" aria-label="Administrar ${esc(x?.nombre || g.nombre)}" class="${BTN_ICONO} !w-9 !h-9">${ic('settings', '!w-5 !h-5')}</button>` : ''}
+            <button data-action="cambiar-grupo" data-gid="${g.id}" aria-label="Entrar" class="${BTN_ICONO} !w-9 !h-9 !bg-emerald-500 !text-slate-950 hover:!bg-emerald-400">${ic('chevron-right', '!w-5 !h-5')}</button>
+          </li>`;
       }).join('')}
-    </div>`);
+    </ul>`);
 }
-
 // Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
 function vistaInicio() {
   const perfil = location.hash === '#/perfil';
@@ -1838,7 +1878,8 @@ function vistaInicio() {
 function panelInicio() {
   const pendientes = D.perfil.pendientes || [];
   return `
-    ${tarjetaMisPartidos()}
+    ${tarjetaHoy()}
+    ${tarjetaMisGrupos()}
     ${pendientes.length ? card(`
       <h2 class="text-base font-bold mb-2">${ic('hourglass', 'text-amber-300')} Esperando que te acepten</h2>
       <ul class="divide-y divide-slate-800">
@@ -1849,25 +1890,23 @@ function panelInicio() {
           </li>`).join('')}
       </ul>
       <p class="text-xs text-slate-500 mt-2">Le avisamos al admin. Cuando te acepte, el grupo aparece acá solo.</p>`) : ''}
-    ${tarjetaMisGrupos()}
-    <div class="grid sm:grid-cols-2 gap-5">
-      ${card(`
-        <h2 class="text-base font-bold">${ic('ticket', 'text-emerald-400')} Unirme a un grupo</h2>
-        <p class="text-xs text-slate-400 mt-1 mb-3">Pegá el link de invitación que te pasaron.</p>
-        <form data-form="unirse" class="flex gap-2">
-          <input id="u-link" name="link" required placeholder="Link de invitación" class="${INPUT}">
+    ${tarjetaMisPartidos()}
+    ${card(`
+      <div class="grid grid-cols-2 gap-2">
+        <button data-action="sumarse" data-que="unirse" class="${BTN} text-sm inline-flex items-center justify-center gap-1.5 ${ui.sumarse === 'unirse' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('ticket')} Unirme</button>
+        <button data-action="sumarse" data-que="crear" class="${BTN} text-sm inline-flex items-center justify-center gap-1.5 ${ui.sumarse === 'crear' ? 'bg-emerald-500/20 text-emerald-200' : 'bg-slate-800 hover:bg-slate-700'}">${ic('plus')} Crear grupo</button>
+      </div>
+      ${ui.sumarse === 'unirse' ? `
+        <form data-form="unirse" class="flex gap-2 mt-3">
+          <input id="u-link" name="link" required placeholder="Pegá el link de invitación" class="${INPUT}">
           <button class="${BTN_OK} shrink-0">Unirme</button>
-        </form>`)}
-      ${card(`
-        <h2 class="text-base font-bold">${ic('plus', 'text-emerald-400')} Crear un grupo</h2>
-        <p class="text-xs text-slate-400 mt-1 mb-3">Vas a ser el admin: armás los partidos e invitás a los demás.</p>
-        <form data-form="crear-grupo" class="flex gap-2">
-          <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Ej: Fulbo de los jueves" class="${INPUT}">
+        </form>` : ui.sumarse === 'crear' ? `
+        <form data-form="crear-grupo" class="flex gap-2 mt-3">
+          <input id="g-nombre" name="nombre" required maxlength="40" placeholder="Nombre del grupo" class="${INPUT}">
           <button class="${BTN_OK} shrink-0">Crear</button>
-        </form>`)}
-    </div>`;
+        </form>
+        <p class="text-xs text-slate-500 mt-2">Vas a ser el admin: armás los partidos e invitás a los demás.</p>` : ''}`)}`;
 }
-
 function panelPerfil() {
   const p = D.perfil;
   return `
@@ -1882,6 +1921,16 @@ function panelPerfil() {
         <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale a tus grupos.'}</p>
         <button data-action="lesion" class="${BTN} text-sm shrink-0 ${p.lesionado ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-200'}">${p.lesionado ? '💪 Ya me recuperé' : '🤕 Estoy lesionado'}</button>
       </div>`)}
+    ${(D.perfil.grupos || []).length ? card(`
+      <h2 class="text-base font-bold mb-2">${ic('log-out', 'text-slate-400')} Salir de un grupo</h2>
+      <ul class="divide-y divide-slate-800">
+        ${D.perfil.grupos.map(g => `
+          <li class="flex items-center gap-3 py-2 text-sm">
+            ${fotoGrupo(D.misGrupos[g.id] || g, 32)}
+            <span class="flex-1 font-medium truncate">${esc(D.misGrupos[g.id]?.nombre || g.nombre)}</span>
+            <button data-action="salir-grupo" data-gid="${g.id}" class="${BTN_CHIP} hover:!text-red-300">Salir</button>
+          </li>`).join('')}
+      </ul>`) : ''}
     ${tarjetaCuenta()}`;
 }
 
@@ -1895,6 +1944,7 @@ function topBar() {
   return `
     <div class="flex items-center gap-2">
       <a href="#/inicio" class="${BTN_ICONO}" title="Inicio" aria-label="Volver al inicio">${ic('house', '!w-5 !h-5')}</a>
+      ${fotoGrupo(D.grupo, 40)}
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
@@ -2630,6 +2680,18 @@ function vistaAdmin() {
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
       </div>
     </div>
+    ${card(`
+      <div class="flex items-center gap-4">
+        ${fotoGrupo(D.grupo, 64)}
+        <div class="flex-1 min-w-0">
+          <p class="font-bold">Foto del grupo</p>
+          <p class="text-xs text-slate-400">Se ve en el inicio de todos los jugadores.</p>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <label class="${BTN_CHIP} cursor-pointer">${ic('pencil')} ${D.grupo.foto ? 'Cambiar' : 'Subir foto'}<input type="file" accept="image/*" data-change="foto-grupo" class="hidden"></label>
+            ${D.grupo.foto ? `<button data-action="quitar-foto-grupo" class="${BTN_CHIP} hover:!text-red-300">Quitar</button>` : ''}
+          </div>
+        </div>
+      </div>`)}
     ${tarjetaPendientes()}
     ${panelAdmin(derivar())}
     ${pie()}`;
@@ -3556,6 +3618,9 @@ const acciones = {
     return act(() => api('decidir', { gid: D.gid, id, aceptar: !!si }, urlGrupo()), si ? `✅ ${p?.usuario || ''} ya está en el grupo` : 'Pedido rechazado');
   },
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
+  'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
+  'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
+  sumarse: ({ que }) => { ui.sumarse = ui.sumarse === que ? null : que; render(); },
   'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),
   'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
   'borrar-cuenta-abrir': () => { ui.borrarCuenta = !ui.borrarCuenta; render(); },
@@ -3640,6 +3705,18 @@ const acciones = {
 const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n }, { merge: true }));
 
 const cambios = {
+  // Foto del grupo: la cambia un admin desde Administrar.
+  'foto-grupo': async el => {
+    const file = el.files?.[0];
+    if (!file) return;
+    try {
+      const foto = await procesarFoto(file);
+      await actualizarGrupo(s => { s.foto = foto; }, '📷 Foto del grupo actualizada');
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo leer esa imagen, probá con otra (JPG o PNG)');
+    }
+  },
   foto: async el => {
     const file = el.files?.[0];
     if (!file) return;
