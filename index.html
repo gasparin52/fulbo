@@ -19,7 +19,8 @@
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
-  <div id="app" class="max-w-2xl mx-auto px-4 py-6 space-y-5"><p class="text-slate-400">Cargando…</p></div>
+  <div id="app" class="max-w-2xl mx-auto px-4 pt-6 pb-28 space-y-5"><p class="text-slate-400">Cargando…</p></div>
+  <nav id="nav" aria-label="Navegación"></nav>
   <div id="modal"></div>
   <div id="toast" class="fixed z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
 
@@ -1864,7 +1865,6 @@ function tarjetaMisGrupos() {
 // Inicio: el panel principal de cada jugador (partidos, grupos y su perfil).
 function vistaInicio() {
   const perfil = location.hash === '#/perfil';
-  const tab = (h, txt, activa) => `<a href="${h}" class="rounded-lg py-2 text-center text-sm font-semibold transition ${activa ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}">${txt}</a>`;
   const yo = { ...D.perfil, id: miUid() };
   return `
     <div class="flex items-center gap-3">
@@ -1874,12 +1874,8 @@ function vistaInicio() {
         <p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>
       </div>
       <a href="#/ayuda" class="${BTN_ICONO}" title="Ayuda" aria-label="Ayuda">${ic('circle-help', '!w-5 !h-5')}</a>
-      <button data-action="logout" class="${BTN_ICONO}" title="Salir" aria-label="Salir">${ic('log-out', '!w-5 !h-5')}</button>
     </div>
-    <nav class="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-900/70 border border-slate-800">
-      ${tab('#/inicio', ic('calendar') + ' Partidos y grupos', !perfil)}
-      ${tab('#/perfil', ic('user') + ' Mi perfil', perfil)}
-    </nav>
+    ${perfil ? '<h1 class="text-2xl font-black">Mi perfil</h1>' : ''}
     ${tarjetaMail()}
     ${perfil ? panelPerfil() : panelInicio()}
     ${pie()}`;
@@ -1941,27 +1937,74 @@ function panelPerfil() {
             <button data-action="salir-grupo" data-gid="${g.id}" class="${BTN_CHIP} hover:!text-red-300">Salir</button>
           </li>`).join('')}
       </ul>`) : ''}
-    ${tarjetaCuenta()}`;
+    ${tarjetaCuenta()}
+    <button data-action="logout" class="${BTN} w-full inline-flex items-center justify-center gap-2 bg-slate-800 hover:bg-red-950 text-red-300">${ic('log-out')} Cerrar sesión</button>`;
+}
+
+const tabGrupo = () => location.hash === '#/equipos' ? 'equipos' : location.hash === '#/jugadores' ? 'jugadores' : 'partido';
+function tabsGrupo() {
+  const t = tabGrupo();
+  const item = (h, k, icono, txt) => `<a href="${h}" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${t === k ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}">${ic(icono)} ${txt}</a>`;
+  return `
+    <div class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-slate-950/90 backdrop-blur">
+      <div class="flex gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800">
+        ${item('#/', 'partido', 'calendar', 'Partido')}
+        ${item('#/equipos', 'equipos', 'swords', 'Equipos')}
+        ${item('#/jugadores', 'jugadores', 'users', 'Jugadores')}
+      </div>
+    </div>`;
 }
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), pie()].join('');
+  const t = tabGrupo();
+  const sinEquipos = card(`
+    <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
+    <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
+  const contenido = t === 'equipos' ? [equipos(d) || sinEquipos, tarjetaPublico()]
+    : t === 'jugadores' ? [jugadoresGrid()]
+    // Partido: lo de la fecha y, al final, el botón para anotarse o bajarse (queda fijo abajo).
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), lista(d),
+      `<div class="sticky bottom-[76px] z-10 shadow-2xl shadow-black/70 rounded-2xl bg-slate-900 ring-1 ring-slate-700">${miEstado(d)}</div>`];
+  return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
+}
+
+// Barra fija abajo, como en las apps del celu.
+const RUTAS_FUERA_DEL_GRUPO = ['#/inicio', '#/grupos', '#/perfil', '#/ayuda', '#/reglas', '#/terminos', '#/privacidad'];
+function navInferior() {
+  if (!D.user || !D.perfil || pendienteActualizar()) return '';
+  const h = location.hash;
+  if (/^#\/(clave|verificar)\//.test(h)) return '';
+  const enGrupo = !!D.gid && !RUTAS_FUERA_DEL_GRUPO.includes(h);
+  const inicio = !enGrupo && h !== '#/perfil' && !['#/ayuda', '#/reglas', '#/terminos', '#/privacidad'].includes(h);
+  const n = D.grupo ? avisosNuevos() : 0;
+  const clase = activo => `relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold transition ${activo ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200'}`;
+  const marca = activo => activo ? '<span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full bg-emerald-400"></span>' : '';
+  const nombre = D.grupo?.nombre || D.perfil.grupos?.find(g => g.id === D.gid)?.nombre || 'Grupo';
+  return `
+    <div class="fixed bottom-0 inset-x-0 z-30 border-t border-slate-800 bg-slate-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      <div class="max-w-2xl mx-auto grid grid-cols-4">
+        <a href="#/inicio" class="${clase(inicio)}">${marca(inicio)}${ic('house', '!w-6 !h-6')}Inicio</a>
+        ${D.gid ? `<a href="#/" class="${clase(enGrupo)}">${marca(enGrupo)}${ic('users', '!w-6 !h-6')}<span class="max-w-full truncate px-1">${esc(nombre)}</span></a>`
+          : `<span class="${clase(false)} opacity-40">${ic('users', '!w-6 !h-6')}Grupo</span>`}
+        ${D.grupo ? `<button data-action="abrir-avisos" class="${clase(false)}">${ic(pushActivo() || n ? 'bell' : 'bell-off', '!w-6 !h-6')}Avisos${n ? `<span class="absolute top-1 left-1/2 ml-1.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] font-bold text-white grid place-items-center">${n}</span>` : ''}</button>`
+          : `<span class="${clase(false)} opacity-40">${ic('bell', '!w-6 !h-6')}Avisos</span>`}
+        <a href="#/perfil" class="${clase(h === '#/perfil')}">${marca(h === '#/perfil')}${ic('user', '!w-6 !h-6')}Perfil</a>
+      </div>
+    </div>`;
 }
 
 function topBar() {
   const yo = D.miembros[miUid()];
   return `
     <div class="flex items-center gap-2">
-      <a href="#/inicio" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm" aria-label="Volver al inicio">${ic('arrow-left')} Inicio</a>
       ${fotoGrupo(D.grupo, 40)}
       <div class="min-w-0 flex-1">
         <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">${esAdmin() ? 'Sos admin' : 'Grupo'}</p>
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
       </div>
-      ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span class="hidden sm:inline">Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
-      ${campanita()}
-      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0 hidden sm:block">${avatar(yo, 40)}</a>
+      ${esAdmin() ? `<a href="#/admin" title="Administrar el grupo" aria-label="Administrar el grupo" class="${BTN_CHIP} !h-10 !px-3 !bg-emerald-500/15 !text-emerald-300 hover:!bg-emerald-500/25">${ic('settings', '!w-4 !h-4')}<span>Administrar</span>${D.pendientes.length ? `<span class="ml-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-[10px] text-white grid place-items-center">${D.pendientes.length}</span>` : ''}</a>` : ''}
+      <a href="#/jugador/${miUid()}" title="Mi ficha" class="shrink-0">${avatar(yo, 40)}</a>
     </div>`;
 }
 
@@ -3423,6 +3466,7 @@ function pintar(el, html) {
 
 function render() {
   renderVistas();
+  pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
   pintar($('#modal'), listo ? renderModal() : '');
   if (listo) {
