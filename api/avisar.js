@@ -7,13 +7,22 @@
 // Usa la misma variable FIREBASE_SERVICE_ACCOUNT que api/admin.js.
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getAppCheck } from 'firebase-admin/app-check';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 
-const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'http://localhost:8791'];
+const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'https://fulbo-one.vercel.app', 'http://localhost:8791'];
 const LINK = 'https://gasparin52.github.io/fulbo/';
 const MAX_AVISOS = 8;
 const DIA = 864e5;
+
+// Con EXIGIR_APPCHECK=1 en Vercel, solo responde a la página de verdad (no a programas).
+async function chequearAppCheck(req) {
+  if (process.env.EXIGIR_APPCHECK !== '1') return;
+  const t = req.headers['x-firebase-appcheck'];
+  if (!t) throw new ErrorApi(401, 'Falta la verificación anti-bots. Recargá la página.');
+  await getAppCheck().verifyToken(t).catch(() => { throw new ErrorApi(401, 'Verificación anti-bots inválida. Recargá la página.'); });
+}
 
 class ErrorApi extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -188,12 +197,13 @@ async function notificar(gid, uids, aviso) {
 export default async function handler(req, res) {
   const origen = req.headers.origin;
   if (ORIGENES.includes(origen)) { res.setHeader('Access-Control-Allow-Origin', origen); res.setHeader('Vary', 'Origin'); }
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Firebase-AppCheck');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
   try {
     iniciar();
+    await chequearAppCheck(req);
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     const token = (req.headers.authorization || '').replace(/^Bearer /, '');
     const { uid } = await auth.verifyIdToken(token).catch(() => { throw new ErrorApi(401, 'Sesión inválida'); });

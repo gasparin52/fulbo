@@ -47,19 +47,15 @@ service cloud.firestore {
         && d.get('cuadro', '') is string && d.get('cuadro', '').size() <= 24;
     }
     function nota(s, k) { return s[k] is int && s[k] >= 1 && s[k] <= 10; }
-    function statsValidas(s) {
-      return s.keys().hasOnly(['velocidad', 'tecnica', 'pase', 'remate', 'defensa', 'fisico', 'arquero'])
-        && nota(s, 'velocidad') && nota(s, 'tecnica') && nota(s, 'pase') && nota(s, 'remate')
-        && nota(s, 'defensa') && nota(s, 'fisico') && nota(s, 'arquero');
-    }
 
     // Datos privados de cada usuario (su ficha y la lista de sus grupos).
     match /usuarios/{u} {
       allow read: if logueado() && uid() == u;
       allow create, update: if logueado() && uid() == u
-        && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'cuadro', 'grupos', 'creado'])
+        && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'cuadro', 'grupos', 'creado', 'pendientes'])
         && perfilValido(request.resource.data)
-        && request.resource.data.grupos is list && request.resource.data.grupos.size() <= 20;
+        && request.resource.data.grupos is list && request.resource.data.grupos.size() <= 20
+        && request.resource.data.get('pendientes', []) is list && request.resource.data.get('pendientes', []).size() <= 20;
     }
 
     // Mail de recuperación: lo ve solo su dueño y lo escribe solo el servidor (api/cuenta.js).
@@ -90,7 +86,8 @@ service cloud.firestore {
         || (esMiembro(g) && cambia().hasOnly(['rehacer']) && cuentaMiPedido(g));
       allow delete: if esAdmin(g);
 
-      // Para entrar hay que tener el código del link de invitación y no estar expulsado.
+      // Al grupo se entra con el link por api/grupo.js (que pide la aprobación de un admin);
+      // desde la página solo se agrega el que creó el grupo.
       // "lesionado" lo pone solo el propio jugador (ningún admin puede tocar esta ficha).
       match /miembros/{m} {
         allow read: if esMiembro(g);
@@ -98,7 +95,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'cuadro', 'codigo', 'unido'])
           && perfilValido(request.resource.data)
           && request.resource.data.codigo == grupo(g).codigo
-          && !(m in grupo(g).get('baneados', []));
+          && grupo(g).creador == uid();
         allow update: if logueado() && uid() == m
           && request.resource.data.keys().hasOnly(['usuario', 'edad', 'posicion', 'foto', 'lesionado', 'cuadro', 'codigo', 'unido'])
           && perfilValido(request.resource.data)
@@ -108,19 +105,18 @@ service cloud.firestore {
 
       // Un voto por persona y por compañero: el id del documento es "quienVota_aQuien".
       // Se puede calificar a miembros y a invitados (gente sin cuenta que anotó el admin).
+      // Votos: cada uno lee solo los suyos (así nadie sabe qué le puso otro). Los guarda
+      // api/grupo.js, que arma los promedios en calc/notas.
       match /votos/{v} {
+        allow read: if logueado() && resource.data.voter == uid();
+      }
+      match /calc/{c} {
         allow read: if esMiembro(g);
-        allow create, update: if esMiembro(g)
-          && request.resource.data.keys().hasOnly(['voter', 'target', 'stats', 'ts'])
-          && request.resource.data.voter == uid()
-          && request.resource.data.target is string
-          && request.resource.data.target != uid()
-          && v == uid() + '_' + request.resource.data.target
-          && (exists(/databases/$(database)/documents/grupos/$(g)/miembros/$(request.resource.data.target))
-            || (request.resource.data.target.matches('inv_.+')
-              && grupo(g).get('invitados', {}).keys().hasAny([request.resource.data.target])))
-          && statsValidas(request.resource.data.stats);
-        allow delete: if logueado() && (resource.data.voter == uid() || esAdmin(g));
+      }
+      // Pedidos para entrar: los ven los admins y el que pidió (que lo puede cancelar).
+      match /pendientes/{u} {
+        allow read: if esAdmin(g) || (logueado() && uid() == u);
+        allow delete: if logueado() && uid() == u;
       }
 
       // Jugador del partido: una votación por fecha ("AAAA-MM-DD"). Abre una hora

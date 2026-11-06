@@ -4,7 +4,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 
 - **Página**: `index.html`, publicada con GitHub Pages en <https://gasparin52.github.io/fulbo/>. Cada `git push` a `main` la actualiza.
 - **Datos y login**: Firebase (Authentication + Firestore), proyecto `fulbo-5d6f5`.
-- **Servidor del superadmin**: `api/admin.js`, una función de Vercel (resetear contraseñas y administrar usuarios).
+- **Servidores** (funciones de Vercel en `api/`): `grupo.js` (votos secretos y entrar a grupos), `cuenta.js` (mail de recuperación, contraseña olvidada, borrar cuenta) y `avisar.js` (avisos, asistencia y fecha fija).
 
 ## Cómo funciona
 
@@ -33,7 +33,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 - **🏆 Jugador del partido**: si el partido tiene **fecha** cargada (panel admin), se vota al mejor desde **una hora después de la hora del partido** hasta las 23:59 del día siguiente (hora argentina). La hora tiene que estar como `HH:MM` (la app convierte "20hs" o "20" a "20:00"); si no se entiende, abre a las 00:00 del día siguiente. Los candidatos son los titulares; un admin puede agregar o sacar a alguien. Votan todos los del grupo, uno por persona (se puede cambiar mientras esté abierta), nadie a sí mismo. Al entrar aparece un cartel para votar; si lo cerrás, queda la tarjeta "Todavía no votaste". Los votos se ven recién al cierre; con menos de 3 votos queda desierta. "Nueva fecha" guarda la votación con los titulares antes de vaciar la lista. Cada vez que alguien gana (o empata primero) suma una ⭐, que se ve en su ficha y en la lista.
 - **🟥 Faltó sin avisar**: los que jugaron (los candidatos del jugador del partido) pueden reportar, durante 3 días desde el día siguiente al partido, a alguien de la lista que no fue y no avisó. **Solo cuenta si un admin lo aprueba** (los admins ven quién reportó; el reportado no). Un admin también puede marcarlo desde la ficha, y sacar una tarjeta. La 🟥 se ve en la lista, la grilla y la ficha, y **vence cuando el jugador se anotó en 2 fechas** posteriores. **Castigo**: en la primera fecha en que se anota después de la falta, si se llena la lista, los que se anotan después le pasan adelante y él queda de suplente. Para que una fecha cuente, el partido tiene que tener **fecha** cargada (se guarda quiénes se anotaron al armar la votación del jugador del partido).
 - **🔐 Versión pública** (`CONFIG.publico`, activa fuera de GitHub Pages, o sea en fulbo5.com): al registrarse se pide **mail de recuperación**, contraseña de 8+ caracteres con letras y números, y aceptar los **términos** (`#/terminos`) y la **privacidad** (`#/privacidad`); edad mínima 13. Los que ya tienen cuenta siguen con su sesión; **cuando vuelven a entrar**, si su contraseña no cumple se les pide una nueva, y si no tienen mail, que lo carguen. El mail se confirma con un link y queda en `privado/{uid}` (solo lo lee su dueño; lo escribe `api/cuenta.js`). "¿Te olvidaste la contraseña?" manda un link de 1 hora al mail confirmado. Desde "🔐 Tu cuenta" (en la ficha propia o en la pantalla de grupos) se cambia el mail, la contraseña o se **borra la cuenta**. Los mails salen por [Resend](https://resend.com) (ver Configuración).
-- **Superadmin** (`gasparin`): tiene el panel **Usuarios** para ver a todos, crearlos, editarlos, borrarlos y ponerles una contraseña nueva.
+- **🔒 Seguridad**: entrar con el link de invitación crea un **pedido** que un admin acepta o rechaza (`api/grupo.js`; opción "Un admin tiene que aceptar…" en el panel, activa por defecto). Los **votos son secretos**: los guarda el servidor, cada uno lee solo los suyos y todos ven los promedios en `calc/notas` (también el 😈 y el 🧐). Contraseñas de 8+ con letras y números (a los que tenían una débil se les pide cambiarla al volver a entrar). **Anti-bots**: Firebase App Check con reCAPTCHA v3 (`CONFIG.appCheck`; con `EXIGIR_APPCHECK=1` en Vercel los servidores rechazan lo que no venga de la página) y un límite de 20 pedidos por hora por conexión en lo que manda mails.
 
 ## Configuración (una sola vez)
 
@@ -42,7 +42,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 1. **Authentication → Comenzar → Método de acceso → Correo electrónico/contraseña → Habilitar** (solo la primera opción) → Guardar.
 2. **Firestore Database → Reglas**: borrá todo, pegá el contenido de [`firestore.rules`](firestore.rules) y tocá **Publicar**.
 
-### 2. Vercel (servidor del superadmin)
+### 2. Vercel (servidores)
 
 1. En Firebase: **⚙️ Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada**. Se descarga un archivo `.json`. **Es secreto**: no lo subas a GitHub ni lo mandes por chat.
 2. Entrá a <https://vercel.com/signup> con **Continue with GitHub**.
@@ -50,14 +50,11 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 4. Antes de tocar Deploy, abrí **Environment Variables** y agregá:
    - `FIREBASE_SERVICE_ACCOUNT`: abrí el `.json` con el Bloc de notas, copiá **todo** y pegalo como valor.
 5. **Deploy**. Cuando termine, copiá el dominio (el nuestro es `fulbo-one.vercel.app`).
-6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/admin`.
-7. (Recomendado) Agregá también `RECOVERY_CODE`, una frase secreta de 16 caracteres o más que solo sepas vos, y hacé **Redeploy**. Sirve para recuperar la contraseña del superadmin desde el login ("¿Sos el admin y olvidaste la contraseña?").
+6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/` para GitHub Pages (en Vercel es `/api/`).
 
 ### 3. Notificaciones al celu
 
 Firebase → ⚙️ **Configuración del proyecto** → **Cloud Messaging** → **Certificados push web** → **Generar par de claves**. Copiá la clave (es pública) en `CONFIG.vapid` de `index.html`. El envío lo hace `api/avisar.js` con la misma `FIREBASE_SERVICE_ACCOUNT`.
-
-Ojo: la red del trabajo bloquea `vercel.app`. Usá el panel de usuarios desde el celular con datos móviles.
 
 Después borrá el `.json` descargado o guardalo en un lugar seguro.
 
@@ -70,9 +67,7 @@ Después borrá el `.json` descargado o guardalo en un lugar seguro.
 
 ## Si alguien se olvida la contraseña
 
-El superadmin entra a **Usuarios** (link arriba a la derecha), toca 🔑 en esa persona y le pone una contraseña nueva. Los datos de acceso quedan copiados para mandárselos por WhatsApp.
-
-Si el que se olvidó es el superadmin: en el login, **¿Sos el admin y olvidaste la contraseña?** → ingresá el `RECOVERY_CODE` de Vercel y una contraseña nueva.
+En la pantalla de entrar, **¿Te olvidaste la contraseña?** manda un link al mail de recuperación confirmado (se carga en "🔐 Tu cuenta"). Sin mail cargado no hay forma de recuperarla: ya no hay superadmin.
 
 ## Desarrollo local
 
@@ -84,9 +79,8 @@ Abrí <http://localhost:8791>. Usa la misma base de Firebase que la versión onl
 
 ## Limitaciones
 
-- Con varias cuentas, una persona podría votar más de una vez al mismo compañero. El admin puede expulsar esas cuentas y el superadmin, borrarlas.
-- Los votos individuales no son secretos para alguien que sepa leer la base de datos con las herramientas del navegador. La página solo muestra promedios.
-- Los miembros pueden ver el código de invitación. Si alguien lo pasa afuera, el admin genera uno nuevo.
+- Con varias cuentas, una persona podría votar más de una vez al mismo compañero, pero solo si un admin acepta esas cuentas en el grupo.
+- Los miembros pueden ver el código de invitación. Si alguien lo pasa afuera, igual tiene que aceptarlo un admin; y el admin puede generar uno nuevo.
 
 ## Ideas para más adelante
 

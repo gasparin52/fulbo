@@ -37,19 +37,19 @@ const CONFIG = {
   // Los usuarios entran con nombre de usuario; por dentro Firebase usa
   // "usuario@dominio". Tiene que coincidir con firestore.rules.
   dominio: 'fulbo.app',
-  // Usuario con acceso al panel de usuarios (el servidor lo vuelve a verificar).
-  superadmin: 'gasparin',
-  // URL de la función de Vercel (api/admin.js).
-  // En GitHub Pages va a Vercel; en fulbo5.com (que ya es Vercel) es la misma página.
-  api: location.hostname.endsWith('github.io') ? 'https://fulbo-one.vercel.app/api/admin' : '/api/admin',
+  // Base de las funciones de Vercel (api/*.js). En GitHub Pages van a Vercel; en Vercel, mismo dominio.
+  api: location.hostname.endsWith('github.io') ? 'https://fulbo-one.vercel.app/api/' : '/api/',
   // Clave pública para notificaciones (Firebase → Configuración → Cloud Messaging →
   // Certificados push web). Vacía = no se ofrece activar notificaciones.
   vapid: 'BOuQtxpJuEOwCY9HNPwBglCpc5U2jBmXhHbScpfwjSh230p5VyCC2TAg7lnc1rmV2n0i_xRPyKAAKNzjThpHDMI',
   // Días que dura la sesión antes de pedir la contraseña de nuevo.
   diasSesion: 30,
   // Versión pública (fulbo5.com): mail de recuperación, contraseñas seguras,
-  // términos y privacidad. En GitHub Pages sigue todo como antes.
-  publico: !location.hostname.endsWith('github.io'),
+  // términos y privacidad. En GitHub Pages y fulbo-one.vercel.app (UADE) sigue como antes.
+  publico: !location.hostname.endsWith('github.io') && location.hostname !== 'fulbo-one.vercel.app',
+  // Clave pública de reCAPTCHA v3 para Firebase App Check (anti-bots). Vacía = sin App Check.
+  // Se saca de Firebase → App Check → Apps → registrar la app web con reCAPTCHA v3.
+  appCheck: '',
   // Mail de contacto que aparece en los términos y la privacidad.
   contacto: 'contacto@fulbo5.com',
 };
@@ -77,7 +77,7 @@ const LS = 'f5_';
 
 // ---------------- Firebase ----------------
 const V = '10.12.2';
-let A, F, auth, db;
+let A, F, auth, db, tokenAppCheck = async () => '';
 try {
   const [{ initializeApp }, authMod, fsMod] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
@@ -87,15 +87,21 @@ try {
   A = authMod;
   F = fsMod;
   const app = initializeApp(CONFIG.firebase);
+  // Anti-bots: cada pedido lleva una prueba de que viene de esta página y no de un programa.
+  if (CONFIG.appCheck && !location.search.includes('emulador')) {
+    const ac = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app-check.js`);
+    const appCheck = ac.initializeAppCheck(app, { provider: new ac.ReCaptchaV3Provider(CONFIG.appCheck), isTokenAutoRefreshEnabled: true });
+    tokenAppCheck = () => ac.getToken(appCheck).then(t => t.token).catch(() => '');
+  }
   auth = A.getAuth(app);
   db = F.getFirestore(app);
   // Desarrollo: http://localhost:8791/?emulador usa los emuladores locales de Firebase.
   if (location.hostname === 'localhost' && new URLSearchParams(location.search).has('emulador')) {
     A.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     F.connectFirestoreEmulator(db, '127.0.0.1', 8085);
-    CONFIG.api = 'http://localhost:3001/api/admin';
     CONFIG.apiAvisar = 'http://localhost:3002/api/avisar';
     CONFIG.apiCuenta = 'http://localhost:3003/api/cuenta';
+    CONFIG.apiGrupo = 'http://localhost:3004/api/grupo';
   }
 } catch (e) {
   console.error(e);
@@ -302,6 +308,7 @@ const ICONOS = {
   'trash-2': '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   'user-round-cog': '<path d="M2 21a8 8 0 0 1 10.434-7.62"/><circle cx="10" cy="8" r="5"/><circle cx="18" cy="18" r="3"/><path d="m19.5 14.3-.4.9"/><path d="m16.9 20.8-.4.9"/><path d="m21.7 19.5-.9-.4"/><path d="m15.2 16.9-.9-.4"/><path d="m21.7 16.5-.9.4"/><path d="m15.2 19.1-.9.4"/><path d="m19.5 21.7-.4-.9"/><path d="m16.9 15.2-.4-.9"/>',
+  'user-plus': '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>',
   user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   wind: '<path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/>',
@@ -379,7 +386,6 @@ function chipNota(id) {
 
 // Suplentes vigentes de un equipo, en el orden de la lista (S1, S2…).
 const suplentesDe = (e, d) => d.suplentes.filter(p => (D.grupo.equipos?.['S' + e] || []).includes(p.id));
-const esSuper = () => !!D.user && D.user.email === emailDe(CONFIG.superadmin);
 const cortar = arr => { arr.forEach(f => f()); arr.length = 0; };
 const urlBase = () => location.origin + location.pathname;
 const linkInvitacion = () => `${urlBase()}#/unirse/${D.gid}/${D.grupo.codigo}`;
@@ -451,8 +457,8 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsMvp);
   Object.values(subsMisGrupos).forEach(f => f());
   subsMisGrupos = {};
-  nivelesDe = mvpDe = null;
-  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  nivelesDe = mvpDe = pendientesDe = null;
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -498,14 +504,15 @@ function elegirGrupo() {
   if (gid === D.gid) return;
   cortar(subsGrupo);
   cortar(subsMvp);
-  nivelesDe = mvpDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  nivelesDe = mvpDe = pendientesDe = null;
+  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
     if (!s.exists()) return olvidarGrupo(gid, 'Ese grupo ya no existe');
     D.grupo = normGrupo(s.data());
     suscribirNiveles();
+    suscribirPendientes();
     suscribirReportes();
     suscribirRehacer();
     render();
@@ -517,13 +524,25 @@ function elegirGrupo() {
     D.miembros = Object.fromEntries(qs.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
     render();
   }, e => console.warn(e.code)));
-  subsGrupo.push(F.onSnapshot(colVotos(gid), qs => {
+  // Votos: cada uno lee solo los suyos; los promedios, el 😈 y el 🧐 los arma el servidor
+  // en calc/notas. Con las reglas viejas (sin calc) se leen todos los votos como antes.
+  const leerVotos = (q, si = () => true) => F.onSnapshot(q, qs => {
+    if (!si()) return;
     const v = {};
     qs.docs.forEach(d => { const x = d.data(); (v[x.target] ||= {})[x.voter] = x.stats; });
     D.votos = v;
     D.cargado.votos = true;
     render();
-  }, e => console.warn(e.code)));
+  }, e => console.warn(e.code));
+  subsGrupo.push(leerVotos(F.query(colVotos(gid), F.where('voter', '==', miUid())), () => D.notas !== false));
+  subsGrupo.push(F.onSnapshot(F.doc(db, 'grupos', gid, 'calc', 'notas'), s => {
+    D.notas = s.exists() ? s.data() : null;
+    if (!s.exists()) pedirRecalculo(gid);
+    render();
+  }, () => {
+    D.notas = false;
+    subsGrupo.push(leerVotos(colVotos(gid)));
+  }));
   subsGrupo.push(F.onSnapshot(F.query(colMvp(gid), F.orderBy('fecha', 'desc')), qs => {
     D.mvps = qs.docs.map(d => ({ id: d.id, ...d.data() }));
     D.cargado.mvps = true;
@@ -665,14 +684,15 @@ function cieloDe(codigo, dia) {
 // Los avisos importantes (alguien se bajó, faltan jugadores, partido suspendido) los
 // arma y guarda api/avisar.js en el grupo, y de paso manda la notificación al celu.
 // El servidor decide si corresponde y no repite avisos, así que acá se lo llama sin miedo.
-const urlCuenta = () => CONFIG.apiCuenta || (CONFIG.api ? CONFIG.api.replace(/admin$/, 'cuenta') : '');
-const urlAvisar = () => CONFIG.apiAvisar || (CONFIG.api ? CONFIG.api.replace(/admin$/, 'avisar') : '');
+const urlCuenta = () => CONFIG.apiCuenta || CONFIG.api + 'cuenta';
+const urlGrupo = () => CONFIG.apiGrupo || CONFIG.api + 'grupo';
+const urlAvisar = () => CONFIG.apiAvisar || CONFIG.api + 'avisar';
 async function avisar(tipo, datos = {}) {
   if (!urlAvisar() || !D.user || !D.gid) return;
   try {
     await fetch(urlAvisar(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await D.user.getIdToken() },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await D.user.getIdToken(), 'X-Firebase-AppCheck': await tokenAppCheck() },
       body: JSON.stringify({ gid: D.gid, tipo, ...datos }),
     });
   } catch (e) { console.warn(e); }  // Sin aviso no pasa nada: la app anda igual.
@@ -941,6 +961,16 @@ function resultadoMvp(m) {
 const nombreCandidato = (m, id) => jugador(id)?.usuario || m.nombres?.[id] || '?';
 const fichaCandidato = (m, id) => jugador(id) || { id, usuario: m.nombres?.[id] || '?', posicion: 'comodin' };
 
+let pendientesDe = null;
+function suscribirPendientes() {
+  if (!esAdmin() || pendientesDe === D.gid) return;
+  pendientesDe = D.gid;
+  subsGrupo.push(F.onSnapshot(F.collection(db, 'grupos', D.gid, 'pendientes'), qs => {
+    D.pendientes = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+    render();
+  }, e => console.warn(e.code)));
+}
+
 function suscribirNiveles() {
   if (!puedeEditarEquipos() || nivelesDe === D.gid) return;
   nivelesDe = D.gid;
@@ -979,18 +1009,21 @@ async function procesarInvitacion() {
   uniendo = false;
 }
 
-function unirse(gid, codigo) {
+// Con el link se le pide al servidor entrar: si el grupo pide aprobación, queda pendiente
+// hasta que un admin lo acepte (api/grupo.js). El servidor agrega el grupo a mi ficha.
+async function unirse(gid, codigo) {
+  let r;
+  if (!(await act(async () => { r = await api('unirse', { gid, codigo }, urlGrupo()); }))) return false;
+  if (r.estado === 'miembro') { guardado.set(LS + 'gid', gid); toast('🎉 ¡Te uniste al grupo!'); }
+  else toast(`🙋 Le avisamos al admin de ${r.nombre}: cuando te acepte, vas a ver el grupo`);
+  return true;
+}
+function cancelarPedido(gid) {
+  const quedan = (D.perfil.pendientes || []).filter(x => x.id !== gid);
   return act(async () => {
-    try {
-      await F.setDoc(F.doc(colMiembros(gid), miUid()), { ...datosPerfil(D.perfil), codigo, unido: Date.now() });
-    } catch (e) {
-      if (e.code === 'permission-denied') e.mensaje = 'El link de invitación no es válido o ya lo cambiaron. Pedile uno nuevo al admin.';
-      throw e;
-    }
-    const g = await F.getDoc(refGrupo(gid));
-    guardado.set(LS + 'gid', gid);
-    await F.updateDoc(refUsuario(miUid()), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre: g.data().nombre }] });
-  }, '🎉 ¡Te uniste al grupo!');
+    await F.deleteDoc(F.doc(db, 'grupos', gid, 'pendientes', miUid())).catch(() => {});
+    await F.updateDoc(refUsuario(miUid()), { pendientes: quedan });
+  }, 'Pedido cancelado');
 }
 
 function crearGrupo(nombre) {
@@ -1015,14 +1048,23 @@ function jugador(id) {
 
 function resumen(id) {
   const p = jugador(id);
-  // Solo cuentan los votos de gente que sigue en el grupo.
-  const vs = Object.entries(D.votos[id] || {}).filter(([voter]) => D.miembros?.[voter]).map(([, s]) => s);
-  if (!vs.length) return { n: 0 };
-  const prom = {};
-  STATS.forEach(s => (prom[s.k] = vs.reduce((t, v) => t + (v[s.k] || 0), 0) / vs.length));
+  let n, prom = {};
+  if (D.notas) {
+    // Promedios que calcula el servidor (api/grupo.js).
+    const x = D.notas.notas?.[id];
+    if (!x) return { n: 0 };
+    n = x.n;
+    prom = x.prom;
+  } else {
+    // Reglas viejas: se calcula acá. Solo cuentan los votos de gente que sigue en el grupo.
+    const vs = Object.entries(D.votos[id] || {}).filter(([voter]) => D.miembros?.[voter]).map(([, s]) => s);
+    if (!vs.length) return { n: 0 };
+    n = vs.length;
+    STATS.forEach(s => (prom[s.k] = vs.reduce((t, v) => t + (v[s.k] || 0), 0) / vs.length));
+  }
   const campo = CAMPO.reduce((t, k) => t + prom[k], 0) / CAMPO.length;
   const general = p?.posicion === 'arquero' ? (campo + prom.arquero) / 2 : campo;
-  return { n: vs.length, prom, general };
+  return { n, prom, general };
 }
 
 // Para equilibrar: promedio de votos si tiene; si no, el nivel que puso el admin.
@@ -1397,26 +1439,8 @@ function actualizarAvisoUsuario() {
 }
 
 // ---------------- Vistas ----------------
-function vistaRecuperar() {
-  return `
-    <div class="text-center pt-6">
-      <div class="text-5xl text-emerald-400">${ic('key-round')}</div>
-      <h1 class="text-2xl font-black mt-2">Recuperar acceso de admin</h1>
-      <p class="text-slate-400 text-sm mt-1">Para la cuenta <b>${esc(CONFIG.superadmin)}</b>. Necesitás el código de recuperación que está guardado en Vercel (RECOVERY_CODE).</p>
-    </div>
-    ${card(`
-      <form data-form="recuperar" class="space-y-3">
-        <input id="r-codigo" name="codigo" required type="password" autocomplete="off" placeholder="Código de recuperación" class="${INPUT}">
-        <input id="r-pass" name="pass" required minlength="6" type="text" autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Contraseña nueva (mínimo 6)" class="${INPUT}">
-        <button class="${BTN_OK} w-full">Cambiar contraseña</button>
-      </form>
-      <p class="text-xs text-slate-500 mt-3">¿Sos jugador y te olvidaste la contraseña? Pedile al admin que te la resetee.</p>`)}
-    <div class="text-center"><button data-action="tab" data-tab="entrar" class="text-sm text-slate-400 underline">← Volver a entrar</button></div>`;
-}
-
 function vistaLogin() {
-  if (ui.tab === 'recuperar') return vistaRecuperar();
-  if (ui.tab === 'olvide' && CONFIG.publico) return vistaOlvide();
+  if (ui.tab === 'olvide') return vistaOlvide();
   const reg = ui.tab === 'registro';
   const tab = (k, txt) => `<button type="button" data-action="tab" data-tab="${k}" class="rounded-lg py-2 text-sm font-semibold ${ui.tab === k ? 'bg-slate-950 text-white' : 'text-slate-400'}">${txt}</button>`;
   const invitado = guardado.get(LS + 'inv');
@@ -1432,16 +1456,16 @@ function vistaLogin() {
       <form data-form="${reg ? 'registro' : 'entrar'}" class="space-y-3">
         <p id="aviso-usuario" class="hidden text-sm text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2"></p>
         <input id="l-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" title="Letras, números, punto o guion bajo" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Nombre de usuario" class="${INPUT}">
-        ${reg && CONFIG.publico ? `
+        ${reg ? `
           <div>
-            <input id="l-mail" name="mail" type="email" required maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail" class="${INPUT}">
+            <input id="l-mail" name="mail" type="email" ${CONFIG.publico ? 'required' : ''} maxlength="120" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Tu mail${CONFIG.publico ? '' : ' (opcional)'}" class="${INPUT}">
             <p class="text-xs text-slate-500 mt-1">Solo para recuperar la cuenta si te olvidás la contraseña. No lo ve nadie.</p>
           </div>` : ''}
         <div class="relative">
-          <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="${reg && CONFIG.publico ? 8 : 6}" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? (CONFIG.publico ? ' (8+, letras y números)' : ' (mínimo 6 caracteres)') : ''}" class="${INPUT} pr-12">
+          <input id="l-pass" name="pass" type="${ui.verPass ? 'text' : 'password'}" required minlength="${reg ? 8 : 6}" autocomplete="${reg ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false" placeholder="Contraseña${reg ? ' (8+, letras y números)' : ''}" class="${INPUT} pr-12">
           <button type="button" data-action="ver-pass" title="${ui.verPass ? 'Ocultar' : 'Mostrar'} contraseña" class="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg text-lg text-slate-400 hover:text-white">${ic(ui.verPass ? 'eye-off' : 'eye')}</button>
         </div>
-        ${reg && CONFIG.publico ? `<input id="l-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetí la contraseña" class="${INPUT}">` : ''}
+        ${reg ? `<input id="l-pass2" name="pass2" type="${ui.verPass ? 'text' : 'password'}" required autocomplete="new-password" autocapitalize="none" spellcheck="false" placeholder="Repetí la contraseña" class="${INPUT}">` : ''}
         ${reg ? camposPerfil() : ''}
         ${reg && CONFIG.publico ? `
           <label class="flex items-start gap-2 text-sm text-slate-300">
@@ -1450,11 +1474,9 @@ function vistaLogin() {
           </label>` : ''}
         <button class="${BTN_OK} w-full">${reg ? 'Crear cuenta' : 'Entrar'}</button>
       </form>
-      ${reg && !CONFIG.publico ? '<p class="text-xs text-slate-500 mt-3">Anotá bien la contraseña: como no usamos mail, no se puede recuperar sola (el admin te puede ayudar).</p>' : ''}
-      ${!reg && CONFIG.publico ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="text-sm text-slate-400 hover:text-slate-200 underline">¿Te olvidaste la contraseña?</button></div>' : ''}
+      ${!reg ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="text-sm text-slate-400 hover:text-slate-200 underline">¿Te olvidaste la contraseña?</button></div>' : ''}
     `)}
     <a href="#/ayuda" class="block text-center text-sm text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} ¿Primera vez? Mirá cómo se usa</a>
-    ${reg ? '' : `<div class="text-center"><button data-action="tab" data-tab="recuperar" class="text-xs text-slate-600 hover:text-slate-400">¿Sos el admin y olvidaste la contraseña?</button></div>`}
     ${pie()}`;
 }
 
@@ -1528,7 +1550,9 @@ function vistaVerificar(token) {
 // Al volver a entrar: contraseña nueva si la vieja es débil, y mail de recuperación.
 function pendienteActualizar() {
   const f = guardado.get(CLAVE_ACTUALIZAR);
-  if (!f || !CONFIG.publico) return false;
+  if (!f) return false;
+  // Sin la versión pública (UADE) solo se pide la contraseña; el mail es opcional.
+  if (!CONFIG.publico) { if (f !== 'clave') guardado.set(CLAVE_ACTUALIZAR, null); return f === 'clave'; }
   if (D.privado === undefined) return 'cargando';
   if (D.privado?.error) return f === 'clave';  // sin poder leer el mail, no se lo pide
   if (f === 'clave' || !D.privado?.mail) return true;
@@ -1559,7 +1583,7 @@ function vistaActualizar() {
 // Aviso para confirmar el mail.
 function tarjetaMail() {
   const p = D.privado;
-  if (!CONFIG.publico || !p?.mail || p.verificado) return '';
+  if (!p?.mail || p.verificado) return '';
   return `
     <div class="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm flex items-center gap-3">
       <p class="flex-1">${ic('mail')} <b>Confirmá tu mail:</b> te mandamos un link a <b>${esc(p.mail)}</b>. <b>Si no lo ves, buscalo en Correo no deseado o Spam.</b></p>
@@ -1569,7 +1593,6 @@ function tarjetaMail() {
 
 // En la ficha propia: mail, contraseña y borrar la cuenta.
 function tarjetaCuenta() {
-  if (!CONFIG.publico) return '';
   const p = D.privado;
   const estado = !p?.mail ? '<span class="text-amber-300">Sin mail: si te olvidás la contraseña no la vas a poder recuperar.</span>'
     : p.verificado ? `<span class="text-emerald-400">${ic('circle-check')} Confirmado</span>` : `<span class="text-amber-300">${ic('hourglass')} Falta confirmarlo (revisá tu mail)</span>`;
@@ -1732,12 +1755,21 @@ function vistaGrupos(conVolver) {
     <div class="flex items-center justify-between">
       ${conVolver ? `<a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>` : `<h1 class="text-2xl font-black">Hola, ${esc(D.perfil.usuario)} 👋</h1>`}
       <div class="flex gap-3">
-        ${esSuper() ? `<a href="#/usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
         <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
       </div>
     </div>
     ${tarjetaMail()}
     ${tarjetaMisPartidos()}
+    ${(D.perfil.pendientes || []).length ? card(`
+      <h2 class="text-base font-bold mb-2">${ic('hourglass', 'text-amber-300')} Esperando que te acepten</h2>
+      <ul class="divide-y divide-slate-800">
+        ${D.perfil.pendientes.map(g => `
+          <li class="flex items-center gap-2 py-2 text-sm">
+            <span class="flex-1 font-medium">${esc(g.nombre)}</span>
+            <button data-action="cancelar-pedido" data-gid="${g.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Cancelar</button>
+          </li>`).join('')}
+      </ul>
+      <p class="text-xs text-slate-500 mt-2">Le avisamos al admin. Cuando te acepte, el grupo aparece acá solo.</p>`) : ''}
     ${grupos.length ? card(`
       <h2 class="text-lg font-bold mb-2">${ic('users', 'text-emerald-400')} Tus grupos</h2>
       <ul class="divide-y divide-slate-800">
@@ -1767,7 +1799,7 @@ function vistaGrupos(conVolver) {
 
 function vistaPrincipal() {
   const d = derivar();
-  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), panelAdmin(d), pie()].join('');
+  return [topBar(), tarjetaMail(), header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), equipos(d), tarjetaPublico(), jugadoresGrid(), panelAdmin(d), pie()].join('');
 }
 
 function topBar() {
@@ -1780,7 +1812,6 @@ function topBar() {
         <span class="block font-bold truncate">${esc(D.grupo.nombre)}</span>
       </a>
       <a href="#/ayuda" class="text-xs text-amber-300 hover:text-amber-200 underline">${ic('circle-help')} Ayuda</a>
-      ${esSuper() ? `<a href="#/usuarios" title="Usuarios" class="text-xs text-sky-300 hover:text-sky-200 underline">Usuarios</a>` : ''}
       ${campanita()}
       <button data-action="logout" class="text-xs text-slate-500 hover:text-slate-300 underline">Salir</button>
     </div>`;
@@ -1870,7 +1901,7 @@ function guia() {
   const link = tira([
     [`${barraApp()}<div class="flex-1 p-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>${ic('settings')} Panel admin</b><p class="text-slate-400">${ic('ticket')} Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div></div></div>`, 'El <b>admin</b> baja hasta el <b>Panel admin</b> y toca <b>Copiar</b> en el link de invitación.', true],
     [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp (mantené apretado el cuadro de texto → <b>Pegar</b>) y lo manda.'],
-    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5 text-center"><div class="text-2xl mt-2">⚽</div><b class="text-[11px]">Fulbo</b><p class="rounded bg-emerald-500/15 text-emerald-300 p-1">🎟️ Te invitaron a un grupo</p><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5"><span class="py-1">Entrar</span>${toca('<span class="block rounded bg-slate-950 py-1 px-1">Crear cuenta</span>')}</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Nombre de usuario</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Contraseña</div></div>`, 'El que lo abre toca <b>Crear cuenta</b> (o <b>Entrar</b> si ya tiene) y queda adentro del grupo.'],
+    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5 text-center"><div class="text-2xl mt-2">⚽</div><b class="text-[11px]">Fulbo</b><p class="rounded bg-emerald-500/15 text-emerald-300 p-1">🎟️ Te invitaron a un grupo</p><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5"><span class="py-1">Entrar</span>${toca('<span class="block rounded bg-slate-950 py-1 px-1">Crear cuenta</span>')}</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Nombre de usuario</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Contraseña</div></div>`, 'El que lo abre toca <b>Crear cuenta</b> (o <b>Entrar</b> si ya tiene) y le llega al admin el pedido para <b>aceptarlo</b>.'],
   ]);
   const cuenta = tira([
     [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••</div><p class="text-slate-500 text-[8px]">Anotá la contraseña en algún lado</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. <b>Anotala</b>: si te la olvidás, el admin te pone una nueva.'],
@@ -2044,7 +2075,7 @@ function vistaReglas() {
     ${seccion(ic('chart-column') + ' Calificaciones', [
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
       'Las ponen los compañeros (también a los invitados sin cuenta que anota el admin): <b>un voto por compañero</b>. Lo podés cambiar cuando quieras y reemplaza al anterior. No te podés calificar a vos mismo.',
-      'En la app no se muestra quién votó qué: solo los promedios.',
+      '<b>Nadie puede ver qué le pusiste a quién</b>, ni los admins: los votos los guarda el servidor y todos ven solo los promedios.',
       'Al que califica a todos muy bajo le aparece la etiqueta <b>😈 hater</b>: si con 3 o más compañeros calificados pone en promedio 3 o menos, o pone 2,5 puntos o más por debajo de lo que les ponen los demás. Se va sola si ajusta sus votos.',
       'Con <b>' + ic('zap') + ' Calificar rápido</b> (en Jugadores) pasás por todos los que te faltan, de a uno. Después del partido también aparece para calificar a los que jugaron.',
       'Una vez que calificaste a alguien, tu calificación queda <b>oculta</b> en su ficha hasta que tocás <b>Actualizar voto</b>, así nadie la ve si le mostrás el celu.',
@@ -2073,8 +2104,8 @@ function vistaReglas() {
       'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición, foto y de qué cuadro sos.',
       'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
-      CONFIG.publico ? '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Si no tenías mail cargado, pedile al admin que te ponga una nueva.' : '¿Te olvidaste la contraseña? Pedile al admin que te ponga una nueva.',
-      'El grupo es privado: solo entra quien tiene el link de invitación. No lo compartas fuera del grupo.',
+      '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Para eso tenés que tener el mail cargado y confirmado en <b>Tu cuenta</b>: sin mail no se puede recuperar.',
+      'El grupo es privado: para entrar hace falta el link de invitación y que <b>un admin te acepte</b>. No lo compartas fuera del grupo.',
       'Si estás en varios grupos, en <b>Mis partidos</b> (arriba a la izquierda) ves el próximo partido de cada uno ordenado por fecha, si estás anotado, si se te pisan dos horarios, y lo podés <b>agendar</b> en tu calendario.',
     ])}
     ${pie()}`;
@@ -2489,6 +2520,22 @@ function tarjetaMvp() {
 }
 
 // 🟥 Admins: reportes pendientes. Los que jugaron: botón para reportar (3 días después del partido).
+function tarjetaPendientes() {
+  if (!esAdmin() || !D.pendientes.length) return '';
+  return card(`
+    <h2 class="text-lg font-bold mb-1">${ic('user-plus', 'text-emerald-400')} Quieren entrar (${D.pendientes.length})</h2>
+    <p class="text-xs text-slate-500 mb-3">Abrieron el link de invitación. Aceptá solo a los que conocés.</p>
+    <ul class="divide-y divide-slate-800">
+      ${D.pendientes.map(p => `
+        <li class="flex items-center gap-3 py-2">
+          ${avatar(p, 36)}
+          <span class="flex-1 min-w-0"><b class="block truncate">${esc(p.usuario)}</b><span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</span></span>
+          <button data-action="decidir" data-id="${p.id}" data-si="1" class="${BTN_OK} text-xs px-3 py-1.5">Aceptar</button>
+          <button data-action="decidir" data-id="${p.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Rechazar</button>
+        </li>`).join('')}
+    </ul>`);
+}
+
 function tarjetaFaltas() {
   let html = '';
   if (esAdmin() && D.reportes.length) {
@@ -2673,7 +2720,14 @@ setInterval(() => {
 }, 1000);
 
 // ---------------- ⭐ Calificar ----------------
-const guardarVoto = (id, stats) => act(() => F.setDoc(F.doc(colVotos(D.gid), `${miUid()}_${id}`), { voter: miUid(), target: id, stats, ts: Date.now() }), '⭐ Voto guardado');
+// El voto lo guarda el servidor, que recalcula los promedios (así nadie ve los votos de otros).
+const guardarVoto = (id, stats) => act(() => api('votar', { gid: D.gid, target: id, stats }, urlGrupo()), '⭐ Voto guardado');
+const recalculados = new Set();
+function pedirRecalculo(gid, forzar = false) {
+  if (!forzar && recalculados.has(gid)) return;
+  recalculados.add(gid);
+  api('recalcular', { gid }, urlGrupo()).catch(e => console.warn(e));
+}
 // A quiénes me falta calificar (de una lista, o de todo el grupo).
 function sinMiVoto(ids) {
   const uid = miUid();
@@ -2725,7 +2779,7 @@ function modalCalificar() {
 function marcaScout(id) {
   if (!D.miembros?.[id]) return '';
   const otros = [...Object.keys(D.miembros), ...Object.keys(D.grupo.invitados)].filter(x => x !== id);
-  const votados = otros.filter(t => D.votos[t]?.[id]).length;
+  const votados = D.notas ? D.notas.votados?.[id] || 0 : otros.filter(t => D.votos[t]?.[id]).length;
   return otros.length >= 3 && votados / otros.length >= 0.8 ? ' <span class="text-xs" title="Scout: calificó a casi todo el grupo">🧐</span>' : '';
 }
 
@@ -2790,6 +2844,7 @@ function marcaRoja(id) {
 const HATER = { minVotos: 3, maxPromedio: 3, maxDiferencia: -2.5 };
 let haterCache = { votos: null, ids: new Set() };
 function esHater(id) {
+  if (D.notas) return !!D.notas.haters?.includes(id);
   if (haterCache.votos !== D.votos) {
     const prom = s => CAMPO.reduce((t, k) => t + (s[k] || 0), 0) / CAMPO.length;
     const por = {};
@@ -2882,7 +2937,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|usuarios|reglas|ayuda|terminos|privacidad|clave|verificar)/.test(location.hash);
+  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -3059,6 +3114,10 @@ function panelAdmin(d) {
 
     <div class="mt-4">
       <h3 class="font-semibold text-sm text-slate-300">${ic('ticket')} Link de invitación</h3>
+      <label class="flex items-start gap-2 text-sm mt-2 cursor-pointer">
+        <input type="checkbox" data-action="toggle-aprobacion" ${D.grupo.aprobacion !== false ? 'checked' : ''} class="mt-1 accent-emerald-500">
+        <span>Un admin tiene que aceptar a los que entran con el link <span class="block text-xs text-slate-500">Recomendado: si el link se reenvía, no entra cualquiera.</span></span>
+      </label>
       <p class="text-xs text-slate-500 mb-2">Solo entra al grupo quien tenga este link. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
       <div class="flex gap-2">
         <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
@@ -3129,13 +3188,11 @@ function panelAdmin(d) {
   `);
 }
 
-// ---------------- Superadmin: usuarios ----------------
-const SA = { usuarios: null, cargando: false, error: null, editando: null, foto: null, passSugerida: genId(8) };
-
+// ---------------- Servidor (Vercel) ----------------
 // renovar: pide un token nuevo (por ejemplo, después de cambiar la contraseña).
-async function api(accion, datos = {}, url = CONFIG.api, renovar = false) {
+async function api(accion, datos = {}, url, renovar = false) {
   if (!url) throw Object.assign(new Error('sin api'), { mensaje: 'Falta configurar el servidor de Vercel (ver README)' });
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', 'X-Firebase-AppCheck': await tokenAppCheck() };
   if (D.user) headers.Authorization = 'Bearer ' + await D.user.getIdToken(renovar);
   const r = await fetch(url, {
     method: 'POST',
@@ -3148,87 +3205,6 @@ async function api(accion, datos = {}, url = CONFIG.api, renovar = false) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(j.error), { mensaje: j.error || `Error del servidor (${r.status})` });
   return j;
-}
-
-async function cargarUsuarios() {
-  if (SA.cargando) return;
-  SA.cargando = true;
-  SA.error = null;
-  try {
-    SA.usuarios = (await api('listar')).usuarios.sort((a, b) => a.usuario.localeCompare(b.usuario));
-  } catch (e) {
-    console.error(e);
-    // "Failed to fetch": no llegó al servidor (red que lo bloquea) o el servidor se cayó.
-    SA.error = e.mensaje || 'No se pudo conectar con el servidor. Si estás en la red del trabajo, probá desde el celular con datos.';
-    SA.usuarios ??= [];  // sin reintentos automáticos: está el botón Recargar
-  }
-  SA.cargando = false;
-  render();
-}
-
-const genPass = () => genId(8);
-const fecha = s => s ? new Date(s).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' }) : '–';
-
-function vistaUsuarios() {
-  if (SA.usuarios === null) setTimeout(cargarUsuarios);
-  const us = SA.usuarios || [];
-  return `
-    <a href="#/" class="text-sm text-slate-400 hover:text-slate-200">← Volver</a>
-    <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-black">${ic('users')} Usuarios</h1>
-      <button data-action="sa-recargar" class="text-xs text-slate-500 hover:text-slate-300 underline">Recargar</button>
-    </div>
-    ${CONFIG.api ? '' : `<p class="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">${ic('triangle-alert')} Falta configurar el servidor de Vercel (ver README). Hasta entonces este panel no funciona.</p>`}
-    ${SA.error ? `<p class="text-sm text-red-200 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">${ic('circle-x')} ${esc(SA.error)}</p>` : ''}
-    ${card(`
-      <h2 class="text-lg font-bold mb-3">${ic('plus')} Crear usuario</h2>
-      <form data-form="sa-crear" class="space-y-2">
-        <div class="grid grid-cols-2 gap-2">
-          <input id="sa-usuario" name="usuario" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]+" autocapitalize="none" placeholder="Usuario" class="${INPUT}">
-          <input id="sa-pass" name="pass" required minlength="6" value="${SA.passSugerida}" class="${INPUT} font-mono" title="Contraseña">
-        </div>
-        <input id="sa-edad" name="edad" type="number" min="10" max="99" required placeholder="Edad" class="${INPUT} !w-28">
-        ${selectorPos('sa-pos')}
-        <button class="${BTN_OK} w-full">Crear y copiar datos de acceso</button>
-      </form>`)}
-    ${card(`
-      <h2 class="text-lg font-bold mb-2">Todos <span class="text-slate-500 font-normal text-sm">(${us.length})</span></h2>
-      ${SA.usuarios === null ? cargando() : `
-      <ul class="divide-y divide-slate-800">
-        ${us.map(u => SA.editando === u.uid ? filaUsuarioEditando(u) : `
-          <li class="py-3 flex items-center gap-3">
-            ${avatar(u, 40)}
-            <div class="flex-1 min-w-0">
-              <div class="font-semibold truncate">${esc(u.usuario)}${u.sinFicha ? ' <span class="text-xs text-amber-300">(sin ficha)</span>' : ''}</div>
-              <div class="text-xs text-slate-400">${pos(u).emoji} ${u.edad ? u.edad + ' años · ' : ''}${(u.grupos || []).length} ${(u.grupos || []).length === 1 ? 'grupo' : 'grupos'} · último ingreso ${fecha(u.ultimoIngreso)}</div>
-            </div>
-            <div class="flex gap-1 shrink-0">
-              <button data-action="sa-editar" data-uid="${u.uid}" title="Editar" class="w-9 h-9 rounded-lg hover:bg-slate-800">${ic('pencil')}</button>
-              <button data-action="sa-pass" data-uid="${u.uid}" title="Nueva contraseña" class="w-9 h-9 rounded-lg hover:bg-slate-800">${ic('key-round')}</button>
-              ${u.uid === miUid() ? '' : `<button data-action="sa-borrar" data-uid="${u.uid}" title="Borrar usuario" class="w-9 h-9 rounded-lg hover:bg-red-950">${ic('trash-2')}</button>`}
-            </div>
-          </li>`).join('')}
-      </ul>`}`)}`;
-}
-
-function filaUsuarioEditando(u) {
-  const foto = SA.foto ?? u.foto ?? '';
-  return `
-    <li class="py-3">
-      <form data-form="sa-editar" data-uid="${u.uid}" class="space-y-3">
-        <div class="flex items-center gap-3">
-          ${avatar({ ...u, foto }, 48)}
-          <span class="font-semibold flex-1">${esc(u.usuario)}</span>
-          ${foto ? `<button type="button" data-action="sa-quitar-foto" class="text-xs text-slate-500 hover:text-red-300">Quitar foto</button>` : ''}
-        </div>
-        <input id="sae-edad-${u.uid}" name="edad" type="number" min="10" max="99" required value="${esc(u.edad ?? '')}" class="${INPUT} !w-28">
-        ${selectorPos(`sae-pos-${u.uid}`, u.posicion || 'comodin')}
-        <div class="flex gap-2">
-          <button class="${BTN_OK} flex-1 text-sm">Guardar</button>
-          <button type="button" data-action="sa-cancelar" class="${BTN_SEC} text-sm">Cancelar</button>
-        </div>
-      </form>
-    </li>`;
 }
 
 // ---------------- Render ----------------
@@ -3273,7 +3249,6 @@ function renderVistas() {
   if (!D.perfil) return pintar(el, vistaCompletar());
   const actualizar = pendienteActualizar();
   if (actualizar) return pintar(el, actualizar === 'cargando' ? cargando() : vistaActualizar());
-  if (location.hash === '#/usuarios' && esSuper()) return pintar(el, vistaUsuarios());
   if (location.hash === '#/grupos' || !D.gid) return pintar(el, vistaGrupos(!!D.gid));
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
@@ -3304,7 +3279,7 @@ async function guardarPerfil(f) {
     cuadro: cuadroDe(f),
   };
   const ok = await act(async () => {
-    await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now() });
+    await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now(), ...(actual.pendientes?.length ? { pendientes: actual.pendientes } : {}) });
     // La ficha se copia en cada grupo para que solo la vean sus miembros.
     await Promise.allSettled((actual.grupos || []).map(g => F.updateDoc(F.doc(colMiembros(g.id), uid), datos)));
   }, '💾 Ficha guardada');
@@ -3461,6 +3436,13 @@ const acciones = {
   },
   agendar: ({ gid }) => { ui.agendar = ui.agendar === gid ? null : gid; render(); },
   'bajar-ics': ({ gid }) => { const x = misPartidos().find(p => p.id === gid); if (x?.t) bajarIcs(x); },
+  decidir: ({ id, si }) => {
+    const p = D.pendientes.find(x => x.id === id);
+    if (!si && !confirm(`¿Rechazar a ${p?.usuario || 'esta persona'}?`)) return;
+    return act(() => api('decidir', { gid: D.gid, id, aceptar: !!si }, urlGrupo()), si ? `✅ ${p?.usuario || ''} ya está en el grupo` : 'Pedido rechazado');
+  },
+  'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
+  'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),
   'reenviar-mail': () => act(() => api('reenviar', {}, urlCuenta()), '📧 Te lo mandamos de nuevo'),
   'borrar-cuenta-abrir': () => { ui.borrarCuenta = !ui.borrarCuenta; render(); },
   'desactivar-push': () => desactivarNotificaciones(),
@@ -3505,7 +3487,10 @@ const acciones = {
       delete s.solicitudes[id];
       if (!s.baneados.includes(id)) s.baneados.push(id);
     });
-    if (ok && await act(() => F.deleteDoc(F.doc(colMiembros(D.gid), id)), `${p.usuario} fue expulsado`)) location.hash = '';
+    if (ok && await act(() => F.deleteDoc(F.doc(colMiembros(D.gid), id)), `${p.usuario} fue expulsado`)) {
+      pedirRecalculo(D.gid, true);  // sus votos dejan de contar
+      location.hash = '';
+    }
   },
   'cambiar-grupo': ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = ''; render(); },
   'salir-grupo': async ({ gid }) => {
@@ -3535,26 +3520,6 @@ const acciones = {
     document.getElementById(i.dataset.out).textContent = i.value;
   },
 
-  'sa-recargar': () => { SA.usuarios = null; render(); },
-  'sa-editar': ({ uid }) => { SA.editando = uid; SA.foto = null; render(); },
-  'sa-cancelar': () => { SA.editando = null; SA.foto = null; render(); },
-  'sa-quitar-foto': () => { SA.foto = ''; render(); },
-  'sa-pass': async ({ uid }) => {
-    const u = SA.usuarios.find(x => x.uid === uid);
-    const pass = prompt(`Nueva contraseña para ${u.usuario} (mínimo 6 caracteres):`, genPass());
-    if (pass == null) return;
-    if (await act(() => api('password', { uid, password: pass }))) {
-      copiar(`⚽ Tus datos para entrar a ${urlBase()}\nUsuario: ${u.usuario}\nContraseña: ${pass}`, '🔑 Contraseña cambiada. Datos copiados para mandarle');
-    }
-  },
-  'sa-borrar': async ({ uid }) => {
-    const u = SA.usuarios.find(x => x.uid === uid);
-    if (!confirm(`¿Borrar a ${u.usuario} para siempre? Se borra su cuenta, su ficha, sus votos y sale de todos sus grupos.`)) return;
-    if (await act(() => api('borrar', { uid }), `${u.usuario} fue borrado`)) {
-      SA.usuarios = SA.usuarios.filter(x => x.uid !== uid);
-      render();
-    }
-  },
 };
 
 const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n }, { merge: true }));
@@ -3577,7 +3542,7 @@ const formularios = {
   entrar: async f => {
     if (avisoMail(f.get('usuario'))) return toast(avisoMail(f.get('usuario')));
     // Versión pública: si la contraseña es vieja (débil), al entrar se pide cambiarla.
-    if (CONFIG.publico) guardado.set(CLAVE_ACTUALIZAR, claveSegura(f.get('pass'), f.get('usuario')) ? 'clave' : 'mail');
+    guardado.set(CLAVE_ACTUALIZAR, claveSegura(f.get('pass'), f.get('usuario')) ? 'clave' : CONFIG.publico ? 'mail' : null);
     const ok = await act(() => A.signInWithEmailAndPassword(auth, emailDe(f.get('usuario')), f.get('pass')));
     if (!ok) guardado.set(CLAVE_ACTUALIZAR, null);
     return ok;
@@ -3590,9 +3555,9 @@ const formularios = {
     const minima = CONFIG.publico ? 13 : 10;
     if (!(edad >= minima && edad <= 99)) return toast(`Poné una edad entre ${minima} y 99`);
     const mail = (f.get('mail') || '').trim();
+    const error = revisarClave(f, usuario);
+    if (error) return toast(error);
     if (CONFIG.publico) {
-      const error = revisarClave(f, usuario);
-      if (error) return toast(error);
       if (!f.get('acepto')) return toast('Tenés que aceptar los términos y la privacidad');
       guardado.set(CLAVE_ACTUALIZAR, 'mail');
     }
@@ -3603,7 +3568,7 @@ const formularios = {
       const cred = await A.createUserWithEmailAndPassword(auth, emailDe(usuario), f.get('pass'));
       await F.setDoc(refUsuario(cred.user.uid), datos);
       // Si falla el mail, se vuelve a pedir en "Actualizá tu cuenta".
-      if (CONFIG.publico) await api('mail', { mail }, urlCuenta()).catch(e => console.error(e));
+      if (mail) await api('mail', { mail }, urlCuenta()).catch(e => console.error(e));
     }, `¡Bienvenido, ${usuario}! ⚽`);
     D.registrando = false;
     if (ok) ui.foto = null;
@@ -3652,7 +3617,7 @@ const formularios = {
     const error = revisarClave(f, D.perfil?.usuario);
     if (error) return toast(error);
     const ok = await act(() => A.updatePassword(D.user, f.get('pass')), '🔐 Contraseña actualizada');
-    if (ok) guardado.set(CLAVE_ACTUALIZAR, 'mail');
+    if (ok) guardado.set(CLAVE_ACTUALIZAR, CONFIG.publico ? 'mail' : null);
     return ok;
   },
   'cambiar-clave': async f => {
@@ -3675,18 +3640,6 @@ const formularios = {
     if (ok) { ui.borrarCuenta = false; location.hash = '#/'; }
     return ok;
   },
-  recuperar: async f => {
-    let usuario;
-    const ok = await act(async () => { usuario = (await api('recuperar', { codigo: f.get('codigo'), password: f.get('pass') })).usuario; });
-    if (ok) {
-      toast(`✅ Listo. Entrá como ${usuario} con la contraseña nueva`);
-      ui.tab = 'entrar';
-      render();
-      const u = $('#l-usuario');
-      if (u) { u.value = usuario; u.dataset.dirty = '1'; }
-    }
-    return ok;
-  },
   'crear-grupo': f => crearGrupo(f.get('nombre').trim()),
   unirse: f => {
     const m = f.get('link').match(/unirse\/([^/\s]+)\/([^/\s#?]+)/);
@@ -3703,28 +3656,6 @@ const formularios = {
     const stats = Object.fromEntries(STATS.map(s => [s.k, parseInt(f.get(s.k))]));
     const ok = await guardarVoto(id, stats);
     if (ok) ui.colaPos++;
-    return ok;
-  },
-  'sa-crear': async f => {
-    const usuario = f.get('usuario').trim(), pass = f.get('pass');
-    const datos = { usuario, password: pass, edad: parseInt(f.get('edad')), posicion: f.get('posicion') };
-    const ok = await act(() => api('crear', datos));
-    if (ok) {
-      copiar(`⚽ Tus datos para entrar a ${urlBase()}\nUsuario: ${usuario}\nContraseña: ${pass}`, `✅ ${usuario} creado. Datos copiados para mandarle`);
-      SA.usuarios = null;
-      SA.passSugerida = genPass();
-    }
-    return ok;
-  },
-  'sa-editar': async (f, { uid }) => {
-    const datos = { uid, edad: parseInt(f.get('edad')), posicion: f.get('posicion') };
-    if (SA.foto !== null) datos.foto = SA.foto;
-    const ok = await act(() => api('editar', datos), '💾 Usuario actualizado');
-    if (ok) {
-      Object.assign(SA.usuarios.find(x => x.uid === uid), datos);
-      SA.editando = null;
-      SA.foto = null;
-    }
     return ok;
   },
   'mvp-votar': async f => {
@@ -3845,7 +3776,7 @@ document.addEventListener('submit', async e => {
   try {
     if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
       form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-      if (['crear-grupo', 'unirse', 'invitado', 'sa-crear', 'cambiar-clave'].includes(form.dataset.form)) {
+      if (['crear-grupo', 'unirse', 'invitado', 'cambiar-clave'].includes(form.dataset.form)) {
         form.reset();
         form.querySelectorAll('[data-out]').forEach(i => (document.getElementById(i.dataset.out).textContent = i.value));
       }

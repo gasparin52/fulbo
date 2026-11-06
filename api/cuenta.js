@@ -11,13 +11,22 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getAppCheck } from 'firebase-admin/app-check';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const DOMINIO = 'fulbo.app';
-const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'http://localhost:8791'];
+const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'https://fulbo-one.vercel.app', 'http://localhost:8791'];
 const SITIO = 'https://fulbo5.com/';
 const HORA = 3600e3;
 const MAX_MAILS_DIA = 5;
+
+// Con EXIGIR_APPCHECK=1 en Vercel, solo responde a la página de verdad (no a programas).
+async function chequearAppCheck(req) {
+  if (process.env.EXIGIR_APPCHECK !== '1') return;
+  const t = req.headers['x-firebase-appcheck'];
+  if (!t) throw new ErrorApi(401, 'Falta la verificación anti-bots. Recargá la página.');
+  await getAppCheck().verifyToken(t).catch(() => { throw new ErrorApi(401, 'Verificación anti-bots inválida. Recargá la página.'); });
+}
 
 class ErrorApi extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -130,6 +139,22 @@ async function sacarDeGrupo(gid, uid) {
   await batch.commit();
 }
 
+// Límite por conexión (IP) para lo que manda mails o no pide sesión: frena a los bots.
+const POR_HORA = 20;
+async function limitarIp(req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  if (!ip) return;
+  const ref = db.doc(`limites/${hash('ip:' + ip)}`);
+  const ahora = Date.now();
+  await db.runTransaction(async tx => {
+    const d = (await tx.get(ref)).data();
+    const vigente = d && ahora - d.desde < HORA;
+    if (vigente && d.n >= POR_HORA) throw new ErrorApi(429, 'Demasiados pedidos desde esta conexión. Probá en un rato.');
+    tx.set(ref, vigente ? { n: d.n + 1, desde: d.desde } : { n: 1, desde: ahora });
+  });
+}
+const CON_LIMITE = ['olvide', 'nueva-clave', 'verificar', 'mail', 'reenviar'];
+
 // Las que no piden sesión: el que se olvidó la contraseña no puede entrar.
 const SIN_SESION = ['olvide', 'nueva-clave', 'verificar'];
 
@@ -214,17 +239,19 @@ const ACCIONES = {
 export default async function handler(req, res) {
   const origen = req.headers.origin;
   if (ORIGENES.includes(origen)) { res.setHeader('Access-Control-Allow-Origin', origen); res.setHeader('Vary', 'Origin'); }
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Firebase-AppCheck');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
   try {
     iniciar();
+    await chequearAppCheck(req);
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
     const accion = ACCIONES[body.accion];
     if (!accion) throw new ErrorApi(400, 'Acción desconocida');
     // Los links de los mails apuntan a la página desde donde se pidió.
     const base = !ORIGENES.includes(origen) ? SITIO : origen.endsWith('github.io') ? `${origen}/fulbo/` : `${origen}/`;
+    if (CON_LIMITE.includes(body.accion)) await limitarIp(req);
     let quien = null;
     if (!SIN_SESION.includes(body.accion)) {
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
