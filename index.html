@@ -134,7 +134,11 @@ const DIA = 864e5;
 const MIN_VOTOS_MVP = 3;
 const inicioDia = fecha => Date.parse(`${fecha}T00:00:00-03:00`);
 const horaValida = c => /^([01]\d|2[0-3]):[0-5]\d$/.test(c || '');
-const abreVotacion = (fecha, hora) => horaValida(hora) ? Date.parse(`${fecha}T${hora}:00-03:00`) + 3600e3 : inicioDia(fecha) + DIA;
+// Una hora después del partido. Entiende la hora aunque esté como "Viernes 20hs".
+const abreVotacion = (fecha, hora) => {
+  const h = horaDelPartido({ cuando: hora || '' });
+  return h ? Date.parse(`${fecha}T${h}:00-03:00`) + 3600e3 : inicioDia(fecha) + DIA;
+};
 const cierraVotacion = fecha => inicioDia(fecha) + 2 * DIA;
 // "20", "20hs", "8:30", "20.30 hs" → "20:00", "08:30", "20:30". Si no se entiende, queda como está.
 function normalizarHora(t) {
@@ -3497,7 +3501,7 @@ function panelAdmin(d) {
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Fecha del partido<input id="p-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
-      ${p.fecha && !horaValida(p.cuando) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
+      ${p.fecha && !horaDelPartido(p) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Modalidad
         <select id="p-modalidad" data-change="modalidad" class="${INPUT} mt-1">
@@ -4149,7 +4153,7 @@ const formularios = {
     }
     const ok = await actualizarGrupo(s => {
       const antes = s.partido;
-      s.partido = { ...s.partido, titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: normalizarHora(f.get('cuando').trim()), lugar: f.get('lugar').trim(), cupo, duracion: duracionDe({ duracion: parseInt(f.get('duracion')) }) };
+      s.partido = { ...s.partido, titulo: f.get('titulo').trim(), fecha: f.get('fecha') || '', cuando: (c => horaDelPartido({ cuando: c }) || c)(normalizarHora(f.get('cuando').trim())), lugar: f.get('lugar').trim(), cupo, duracion: duracionDe({ duracion: parseInt(f.get('duracion')) }) };
       s.ciudad = ciudad;
       // "Esta y todas las siguientes": se cambia la fecha fija que generó esta fecha.
       if (f.get('alcance') === 'todas' && agendaActiva(s)) {

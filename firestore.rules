@@ -148,7 +148,10 @@ service cloud.firestore {
           && request.resource.data.candidatos is list
           && request.resource.data.candidatos.size() > 0 && request.resource.data.candidatos.size() <= 30
           && (esAdmin(g) || (
-            request.resource.data.abre == abreDe(fecha, grupo(g).partido.get('cuando', ''))
+            // Con la hora como 20:00 tiene que coincidir; si está escrita suelta ("Viernes 20hs"),
+            // alcanza con que esté entre 1 y 24 h después (lo de arriba).
+            (!grupo(g).partido.get('cuando', '').matches('([01][0-9]|2[0-3]):[0-5][0-9]')
+              || request.resource.data.abre == abreDe(fecha, grupo(g).partido.get('cuando', '')))
             && grupo(g).partido.get('fecha', '') == fecha
             && grupo(g).anotados.hasAll(request.resource.data.candidatos)
             && request.resource.data.get('anotados', grupo(g).anotados) == grupo(g).anotados
