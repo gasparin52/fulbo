@@ -722,6 +722,11 @@ async function avisar(tipo, datos = {}) {
 }
 
 const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+// Chrome avisa cuando se puede instalar: se guarda y el botón Instalar abre su cartel
+// (lo más rápido). Si no llega (iPhone, otro navegador, ya instalada), se muestran los pasos.
+let pedidoInstalar = null;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalar = e; render(); });
+addEventListener('appinstalled', () => { pedidoInstalar = null; toast('📲 ¡Listo! Abrí Fulbo desde el ícono'); render(); });
 const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const pushPosible = () => !!CONFIG.vapid && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator;
 // El token de este celu queda en todos mis grupos (antes se guardaba por grupo).
@@ -2126,6 +2131,7 @@ function vistaInicio() {
         ${titulo ? `<p class="text-xs text-slate-500">${esc(D.perfil.usuario)}</p><h1 class="text-2xl font-black truncate leading-tight">${titulo}</h1>`
           : `<p class="text-xs text-slate-500">Hola,</p><p class="text-xl font-black truncate leading-tight">${esc(D.perfil.usuario)}</p>`}
       </div>
+      ${instalada() ? '' : `<button data-action="instalar" class="inline-flex items-center gap-1 rounded-xl px-2 sm:px-2.5 h-9 sm:h-10 text-xs sm:text-sm font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 shrink-0">${ic('smartphone', 'hidden sm:inline-block')} Instalar</button>`}
       <a href="#/ayuda" class="${BTN_ICONO}" title="Ayuda" aria-label="Ayuda">${ic('circle-help', '!w-5 !h-5')}</a>
       ${campanita()}
     </div>
@@ -2326,9 +2332,8 @@ const barraSafari = (marcar = false) => `
     <div class="flex justify-between items-center text-blue-600 text-sm px-1"><span>‹</span><span>›</span>${marcar ? toca(compartirIOS) : compartirIOS}<span>📖</span><span>⧉</span></div>
   </div>`;
 
-function guia() {
-  const ios = esIOS();
-  const android = tira([
+// Cómo instalar, con pantallitas (en la guía y en el botón Instalar).
+const pasosAndroid = () => tira([
     [`${barraChrome(true)}${fondoApp()}`, `Abrí <b>${SITIO}</b> en <b>Chrome</b> y tocá los <b>3 puntitos ⋮</b> de arriba a la derecha.`],
     [`${barraChrome()}<div class="relative flex-1">${fondoApp('h-full')}
       <div class="absolute right-1 top-1 w-[112px] rounded-lg bg-white shadow-xl border border-slate-200 py-1 text-[8.5px] space-y-0.5">
@@ -2345,7 +2350,7 @@ function guia() {
         </div></div></div>`, 'Confirmá con <b>Instalar</b>. Si solo te ofrece <b>Crear acceso directo</b>, también sirve.'],
     [inicio(), 'Listo: aparece el ícono ⚽ en tu pantalla. Abrí Fulbo desde ahí, como cualquier app.'],
   ]);
-  const iphone = tira([
+const pasosIphone = () => tira([
     [`${fondoApp()}${barraSafari(true)}`, `Abrí <b>${SITIO}</b> en <b>Safari</b> (tiene que ser Safari) y tocá <b>Compartir</b> (el cuadrado con la flecha).`],
     [`<div class="relative flex-1 flex flex-col">${fondoApp('h-16')}
       <div class="flex-1 bg-slate-100 rounded-t-xl -mt-2 p-2 space-y-1 text-[8.5px]">
@@ -2360,6 +2365,10 @@ function guia() {
     </div>`, 'Tocá <b>Agregar</b>, arriba a la derecha.'],
     [inicio(), 'Listo: abrí Fulbo desde el ícono ⚽. En iPhone las <b>notificaciones solo andan</b> si la abrís desde acá.'],
   ]);
+
+function guia() {
+  const ios = esIOS();
+  const android = pasosAndroid(), iphone = pasosIphone();
   const barraApp = (bell = false) => `<div class="flex items-center gap-1.5 px-2 py-2 bg-slate-950/60"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">G</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span><span class="text-amber-300 underline text-[8px]">Ayuda</span>${bell ? toca('<span class="px-0.5">' + ic('bell') + '</span>') : ic('bell')}<span class="text-slate-500 text-[8px]">Salir</span></div>`;
   const notis = tira([
     [`${barraApp(true)}${fondoApp()}`, 'Tocá la <b>campanita</b> ' + ic('bell') + ' de arriba.', true],
@@ -3621,6 +3630,31 @@ function miFicha() {
       ${c.pj > lim ? `<button data-action="mas-partidos" class="${BTN_SEC} w-full text-sm mt-2">Ver más (${c.pj - lim})</button>` : ''}`) : ''}`;
 }
 
+// Instalar: los pasos del celu que tenés y, por las dudas, qué hacer si tarda.
+function modalInstalar() {
+  const ios = esIOS();
+  return modal(`
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <div>
+        <h2 class="text-lg font-bold">${ic('smartphone', 'text-emerald-400')} Instalar Fulbo</h2>
+        <p class="text-xs text-slate-400 mt-0.5">No hace falta ninguna tienda y ocupa casi nada. Deslizá las pantallas para el costado.</p>
+      </div>
+      <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-9 !h-9">${ic('x')}</button>
+    </div>
+    ${ios ? pasosIphone() : pasosAndroid()}
+    <div class="mt-3 rounded-xl border border-slate-800 bg-slate-800/40 p-3 text-xs text-slate-300 space-y-1.5">
+      <p class="font-bold text-slate-200">¿Tarda o no aparece el ícono?</p>
+      ${ios ? `
+        <p>• Tiene que ser <b>Safari</b>: desde Chrome u otro navegador en iPhone no se puede.</p>
+        <p>• Si no ves <b>Agregar a inicio</b>, bajá hasta el final del menú de Compartir.</p>`
+      : `
+        <p>• Usá <b>Chrome</b>. El navegador que viene en algunos celus (Xiaomi, Samsung) a veces no instala bien.</p>
+        <p>• Chrome arma la app con los servidores de Google y <b>a veces tarda unos minutos</b> en aparecer. No hace falta volver a tocar Instalar: esperá un ratito.</p>
+        <p>• <b>Xiaomi / Redmi / Poco:</b> Ajustes → Apps → Chrome → Otros permisos → activá <b>Accesos directos en la pantalla de inicio</b>. Sin ese permiso tarda mucho o no aparece.</p>
+        <p>• Si igual no aparece, en el menú ⋮ elegí <b>Agregar a la pantalla principal</b> → <b>Crear acceso directo</b>: abre al toque y anda igual.</p>`}
+    </div>`);
+}
+
 // La ficha técnica completa, en pantalla entera (desde Mi ficha).
 function modalFicha() {
   const c = statsCarrera(), p = D.perfil;
@@ -3893,7 +3927,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : '';
 }
 
 const avisoCalificaciones = `
@@ -4198,7 +4232,7 @@ function render() {
   renderVistas();
   pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
-  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : D.perfil && ui.modal === 'ficha' ? modalFicha() : '');
+  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : D.perfil && ui.modal === 'ficha' ? modalFicha() : D.perfil && ui.modal === 'instalar' ? modalInstalar() : '');
   activarCargaPerezosa();
   sumarGoles();
   if (listo) {
@@ -4287,6 +4321,16 @@ const acciones = {
   'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
+  instalar: async () => {
+    // Con el cartel de Chrome, de un toque; si no, los pasos.
+    if (!pedidoInstalar) { ui.modal = 'instalar'; return render(); }
+    const pedido = pedidoInstalar;
+    pedidoInstalar = null;
+    pedido.prompt();
+    const { outcome } = await pedido.userChoice;
+    if (outcome === 'accepted') toast('📲 Instalando… puede tardar un ratito en aparecer el ícono');
+    render();
+  },
   'ver-ficha': () => { ui.modal = 'ficha'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
   // Sin id: lista de anotados para elegir a quién; con id: a quién poner en su lugar.
