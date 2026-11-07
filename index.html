@@ -1518,7 +1518,8 @@ function avatar(p, size = 40) {
   return `<span style="${s};background:hsl(${hue} 40% 32%);font-size:${Math.round(size * 0.42)}px" class="rounded-full grid place-items-center font-bold shrink-0 text-white">${esc(n[0].toUpperCase())}</span>`;
 }
 
-function radar(prom) {
+// Sin etiquetas (ficha chica): solo el dibujo, recortado.
+function radar(prom, etiquetas = true) {
   const size = 300, c = size / 2, R = 96, n = STATS.length;
   const pt = (i, r) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / n; return [c + r * Math.cos(a), c + r * Math.sin(a)]; };
   const poly = r => STATS.map((_, i) => pt(i, r).map(x => x.toFixed(1)).join(',')).join(' ');
@@ -1527,11 +1528,12 @@ function radar(prom) {
   const datos = prom
     ? `<polygon points="${STATS.map((s, i) => pt(i, (R * prom[s.k]) / 10).map(x => x.toFixed(1)).join(',')).join(' ')}" fill="rgba(16,185,129,.35)" stroke="#10b981" stroke-width="2" stroke-linejoin="round"/>`
     : '';
-  const etiquetas = STATS.map((s, i) => {
+  const textos = STATS.map((s, i) => {
     const [x, y] = pt(i, R + 26);
     return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="12" font-weight="700" fill="#94a3b8">${s.corto}${prom ? `<tspan fill="#e2e8f0"> ${prom[s.k].toFixed(1)}</tspan>` : ''}</text>`;
   }).join('');
-  return `<svg viewBox="0 0 ${size} ${size}" class="w-full max-w-[320px] mx-auto">${anillos}${ejes}${datos}${etiquetas}</svg>`;
+  if (!etiquetas) return `<svg viewBox="${c - R - 4} ${c - R - 4} ${2 * R + 8} ${2 * R + 8}" class="w-full">${anillos}${ejes}${datos}</svg>`;
+  return `<svg viewBox="0 0 ${size} ${size}" class="w-full max-w-[320px] mx-auto">${anillos}${ejes}${datos}${textos}</svg>`;
 }
 
 // Campos de la ficha: se usan al registrarse, al completar y al editar.
@@ -3585,22 +3587,33 @@ function miFicha() {
   const caja = (v, txt, color) => `<div class="rounded-xl bg-slate-800/60 py-2"><p class="text-2xl font-black ${color}">${v}</p><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">${txt}</p></div>`;
   const lim = ui.partidosLim || 10;
   return `
-    <button data-action="ver-ficha" aria-label="Ver la ficha completa" class="${CARD} w-full text-left bg-gradient-to-br from-slate-900 to-slate-950 hover:border-slate-700 transition">
+    <button data-action="ver-ficha" aria-label="Ampliar la ficha" class="${CARD} w-full text-left bg-gradient-to-br from-slate-900 to-slate-950 hover:border-slate-700 transition active:scale-[.99]">
       <div class="flex items-center gap-3">
-        ${avatar(p, 56)}
+        ${avatar(p, 48)}
         <div class="min-w-0 flex-1">
-          <p class="text-xl font-black truncate">${esc(p.usuario)}${c.estrellas ? ` <span class="text-sm text-amber-300">⭐${c.estrellas > 1 ? c.estrellas : ''}</span>` : ''}</p>
-          <p class="text-slate-400 text-xs">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+          <p class="text-lg font-black truncate leading-tight">${esc(p.usuario)}</p>
+          <p class="text-slate-400 text-xs">${pos(p).emoji} ${pos(p).label}${c.estrellas ? ` · <span class="text-amber-300">⭐${c.estrellas > 1 ? ' ' + c.estrellas : ''}</span>` : ''}</p>
         </div>
         <div class="text-center shrink-0">
-          <div class="text-4xl font-black leading-none ${c.n ? colorNota(c.general) : 'text-slate-600'}">${c.n ? c.general.toFixed(1) : '–'}</div>
+          <div class="text-3xl font-black leading-none ${c.n ? colorNota(c.general) : 'text-slate-600'}">${c.n ? c.general.toFixed(1) : '–'}</div>
           <div class="text-[9px] tracking-widest text-slate-500 mt-1">GENERAL</div>
         </div>
       </div>
-      <div class="grid grid-cols-7 gap-1 mt-3 text-center">
-        ${STATS.map(s => `<div class="rounded-lg bg-slate-800/60 py-1"><p class="text-[9px] font-bold text-slate-400">${s.corto}</p><p class="text-sm font-black ${c.n ? colorNota(c.prom[s.k]) : 'text-slate-600'}">${c.n ? c.prom[s.k].toFixed(1) : '–'}</p></div>`).join('')}
+      <div class="grid grid-cols-[96px_1fr] gap-3 items-center mt-3">
+        <div class="pointer-events-none">${radar(c.prom, false)}</div>
+        <div class="space-y-1">
+          ${STATS.map(s => {
+            const v = c.n ? c.prom[s.k] : 0;
+            return `
+              <div class="flex items-center gap-1.5 text-[11px]">
+                <span class="w-7 shrink-0 font-bold text-slate-400">${s.corto}</span>
+                <span class="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden"><span class="block h-full ${bgNota(v)}" style="width:${v * 10}%"></span></span>
+                <span class="w-6 text-right font-mono ${c.n ? colorNota(v) : 'text-slate-600'}">${c.n ? v.toFixed(1) : '–'}</span>
+              </div>`;
+          }).join('')}
+        </div>
       </div>
-      <p class="text-[11px] text-slate-500 mt-2 flex items-center justify-between gap-2"><span>${c.n ? `${c.n} ${c.n === 1 ? 'voto' : 'votos'}${c.grupos > 1 ? ` de ${c.grupos} grupos` : ''}` : 'Todavía nadie te calificó'}</span><span class="text-sky-300 font-semibold">Ver ficha completa ›</span></p>
+      <p class="text-[11px] text-slate-500 mt-2 flex items-center justify-between gap-2"><span>${c.n ? `${c.n} ${c.n === 1 ? 'voto' : 'votos'}${c.grupos > 1 ? ` de ${c.grupos} grupos` : ''}` : 'Todavía nadie te calificó'}</span><span class="text-sky-300 font-semibold">⤢ Tocá para ampliar</span></p>
     </button>
     ${card(`
       <h2 class="font-bold">${ic('chart-column', 'text-emerald-400')} Tu carrera</h2>
@@ -4228,7 +4241,26 @@ function pintar(el, html) {
   if (foco) document.getElementById(foco)?.focus();
 }
 
+let modalEnHistorial = false;
+function historialModal() {
+  const abierto = !!ui.modal;
+  if (abierto && !modalEnHistorial) {
+    modalEnHistorial = true;
+    history.pushState({ modal: true }, '');
+  } else if (!abierto && modalEnHistorial) {
+    modalEnHistorial = false;
+    if (history.state?.modal) history.back();
+  }
+}
+addEventListener('popstate', () => {
+  if (!modalEnHistorial) return;
+  modalEnHistorial = false;
+  ui.modal = null;
+  render();
+});
+
 function render() {
+  historialModal();
   renderVistas();
   pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
