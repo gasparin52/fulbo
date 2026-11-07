@@ -3078,6 +3078,21 @@ function sinMiVoto(ids) {
   return todos.filter(id => id !== uid && jugador(id) && !D.votos[id]?.[uid]);
 }
 // Modo rápido: los compañeros de a uno, con las barras en 5. "Saltar" lo deja para después.
+function modalRecalificar() {
+  const n = (ui.recalificar || []).length;
+  return modal(`
+    <div class="text-center py-2">
+      <div class="text-5xl">🏆</div>
+      <h2 class="text-xl font-black mt-2">¡Gracias por votar!</h2>
+      <p class="text-sm text-slate-300 mt-2">¿Querés volver a calificar a los que jugaron?</p>
+      <p class="text-xs text-slate-500 mt-1">Son ${n} ${n === 1 ? 'jugador' : 'jugadores'}. Arrancás con lo que ya les habías puesto, así solo cambiás lo que viste hoy.</p>
+      <div class="grid grid-cols-2 gap-2 mt-5">
+        <button data-action="cerrar-modal" class="${BTN_SEC}">No, gracias</button>
+        <button data-action="recalificar-si" class="${BTN_OK} inline-flex items-center justify-center gap-1.5">${ic('zap')} Sí, calificar</button>
+      </div>
+    </div>`);
+}
+
 function modalCalificar() {
   const cola = ui.cola || [], id = cola[ui.colaPos];
   const progreso = Math.round(100 * Math.min(ui.colaPos, cola.length) / (cola.length || 1));
@@ -3089,7 +3104,7 @@ function modalCalificar() {
       <p class="text-sm text-slate-400 mt-1">Gracias: con tus votos los equipos salen más parejos.</p>
       <button data-action="cerrar-modal" class="${BTN_OK} w-full mt-4">Cerrar</button>
     </div>`);
-  const p = jugador(id);
+  const p = jugador(id), previo = D.votos[id]?.[miUid()] || {};
   return modal(`
     <div class="flex items-center justify-between gap-2 mb-2">
       <span class="text-xs text-slate-400">${ic('zap')} Calificar rápido · ${ui.colaPos + 1} de ${cola.length}</span>
@@ -3107,8 +3122,8 @@ function modalCalificar() {
       ${STATS.map(s => `
         <label class="flex items-center gap-3 text-sm">
           <span class="w-28 shrink-0 text-slate-300">${s.emoji} ${s.label}</span>
-          <input id="q-${id}-${s.k}" name="${s.k}" type="range" min="1" max="10" step="1" value="5" data-out="qo-${id}-${s.k}" class="flex-1">
-          <span id="qo-${id}-${s.k}" class="w-6 text-right font-mono font-bold">5</span>
+          <input id="q-${id}-${s.k}" name="${s.k}" type="range" min="1" max="10" step="1" value="${previo[s.k] || 5}" data-out="qo-${id}-${s.k}" class="flex-1">
+          <span id="qo-${id}-${s.k}" class="w-6 text-right font-mono font-bold">${previo[s.k] || 5}</span>
         </label>`).join('')}
       <div class="flex gap-2 pt-2">
         <button type="button" data-action="rapido-saltar" class="${BTN_SEC} text-sm">Saltar</button>
@@ -3303,7 +3318,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : '';
 }
 
 const avisoCalificaciones = `
@@ -3774,6 +3789,8 @@ const acciones = {
     ui.modal = 'calificar';
     render();
   },
+  // Volver a calificar a todos los que jugaron (aunque ya los hayas calificado).
+  'recalificar-si': () => { ui.cola = ui.recalificar || []; ui.colaPos = 0; ui.modal = 'calificar'; render(); },
   'rapido-saltar': () => { ui.colaPos++; render(); },
   'perdonar-baja': ({ k }) => {
     if (!confirm('¿Perdonar esta baja? Deja de contar para la asistencia.')) return;
@@ -4064,7 +4081,11 @@ const formularios = {
     if (!voto) return toast('Elegí a alguien');
     const m = D.mvp;
     const ok = await act(() => F.setDoc(F.doc(colVotosMvp(D.gid, m.id), miUid()), { voto, ts: Date.now() }), `🏆 Votaste a ${nombreCandidato(m, voto)}`);
-    if (ok) { ui.modal = null; render(); }
+    if (ok) {
+      ui.recalificar = (m.candidatos || []).filter(id => id !== miUid() && jugador(id));
+      ui.modal = ui.recalificar.length ? 'recalificar' : null;
+      render();
+    }
     return ok;
   },
   reemplazar: async f => {
