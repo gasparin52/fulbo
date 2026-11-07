@@ -2,7 +2,10 @@
 
 App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grupos privados, fichas de jugador con estadísticas votadas por los compañeros, titulares y suplentes, equipos equilibrados y un botón para copiar la lista a WhatsApp.
 
-- **Página**: `index.html`, publicada con GitHub Pages en <https://gasparin52.github.io/fulbo/>. Cada `git push` a `main` la actualiza.
+- **Página**: `index.html`. Cada `git push` a `main` la publica en los tres lados:
+  - <https://fulbo5.com>: la versión pública, en Firebase Hosting (con publicidad).
+  - <https://gasparin52.github.io/fulbo/>: GitHub Pages.
+  - <https://fulbo-one.vercel.app>: Vercel (la que se usa desde el laburo).
 - **Datos y login**: Firebase (Authentication + Firestore), proyecto `fulbo-5d6f5`.
 - **Servidores** (funciones de Vercel en `api/`): `grupo.js` (votos secretos y entrar a grupos), `cuenta.js` (mail de recuperación, contraseña olvidada, borrar cuenta) y `avisar.js` (avisos, asistencia y fecha fija).
 
@@ -52,7 +55,7 @@ App para que un grupo se anote al fulbo: cuentas con usuario y contraseña, grup
 4. Antes de tocar Deploy, abrí **Environment Variables** y agregá:
    - `FIREBASE_SERVICE_ACCOUNT`: abrí el `.json` con el Bloc de notas, copiá **todo** y pegalo como valor.
 5. **Deploy**. Cuando termine, copiá el dominio (el nuestro es `fulbo-one.vercel.app`).
-6. En `index.html`, `CONFIG.api` tiene que ser `https://ESE-DOMINIO/api/` para GitHub Pages (en Vercel es `/api/`).
+6. En `index.html`, `CONFIG.api` apunta a `https://fulbo-one.vercel.app/api/` desde cualquier lado que no sea Vercel. Si el dominio cambia, cambialo ahí.
 
 ### 3. Notificaciones al celu
 
@@ -70,6 +73,57 @@ Después borrá el `.json` descargado o guardalo en un lugar seguro.
 ## Si alguien se olvida la contraseña
 
 En la pantalla de entrar, **¿Te olvidaste la contraseña?** manda un link al mail de recuperación confirmado (se carga en "🔐 Tu cuenta"). Sin mail cargado no hay forma de recuperarla: ya no hay superadmin.
+
+### 4. Firebase Hosting (fulbo5.com)
+
+`firebase.json` dice qué archivos se publican y `.github/workflows/firebase-hosting-merge.yml` los publica en cada push a `main`. Los servidores (`api/`) siguen en Vercel.
+
+1. En la terminal, dentro de la carpeta del proyecto:
+   ```bash
+   npx firebase-tools login
+   ```
+   ```bash
+   npx firebase-tools init hosting:github
+   ```
+   Repositorio `gasparin52/fulbo`. A *build script* respondé **No**; a *automatic deployment … when a PR is merged* respondé **No** (el workflow ya está hecho). Esto crea en GitHub el secreto `FIREBASE_SERVICE_ACCOUNT_FULBO_5D6F5`. Si creó `firebase-hosting-pull-request.yml`, se puede borrar.
+2. Hacé un push (o en GitHub → Actions → *Publicar en Firebase Hosting* → Re-run) y probá <https://fulbo-5d6f5.web.app>.
+3. Firebase → **Hosting → Agregar dominio personalizado** → `fulbo5.com` (y `www.fulbo5.com` redirigiendo a `fulbo5.com`). Firebase da los registros: cargalos en **Cloudflare → DNS** reemplazando los dos registros `A` de Vercel, con la nube **gris** (*DNS only*). Los registros de Resend (mails) no se tocan.
+4. El certificado tarda de minutos a unas horas. Para volver atrás, se ponen otra vez los `A` de Vercel (`216.198.79.65` y `64.29.17.65`).
+5. En Vercel → el proyecto → **Domains**, quitá `fulbo5.com` cuando ya ande en Firebase. `fulbo-one.vercel.app` queda.
+
+Límite del plan gratis: 360 MB por día de descarga (unas 3.500 entradas por día que bajan la página entera; las que ya la tienen gastan casi nada).
+
+### 5. Publicidad (AdSense)
+
+Un banner abajo de cada pantalla, solo en fulbo5.com y con la sesión iniciada. En GitHub Pages y Vercel nunca hay anuncios.
+
+1. <https://adsense.google.com> → agregá el sitio `fulbo5.com`.
+2. Completá `CONFIG.adsense` en `index.html`: `cliente` (`ca-pub-…`) y `bloque` (AdSense → Anuncios → Por bloque de anuncios → Anuncio gráfico → el número de `data-ad-slot`).
+3. Creá `ads.txt` en la raíz con la línea que da AdSense (`google.com, pub-…, DIRECT, f08c47fec0942fa0`).
+4. AdSense → **Privacidad y mensajes** → activá el mensaje de consentimiento de Google (lo piden para visitantes de Europa).
+
+### 6. Backup de la base
+
+`.github/workflows/backup.yml` copia toda la base de Firestore cada noche (4 a. m.) con `scripts/backup.js`, la cifra y la guarda 90 días en GitHub → **Actions → Backup de Firestore** → la corrida → **Artifacts**. Si falla, GitHub manda un mail.
+
+1. GitHub → el repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   - `FIREBASE_SERVICE_ACCOUNT`: el mismo `.json` que tiene Vercel (si no lo tenés, generá otra clave como en el paso 2).
+   - `BACKUP_CLAVE`: una contraseña larga inventada. **Guardala**: sin ella los backups no se pueden abrir.
+2. **Actions → Backup de Firestore → Run workflow** para probarlo.
+
+Para restaurar: bajá el artifact, descomprimí el zip y:
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -in fulbo-backup.json.gz.enc -out backup.json.gz -pass pass:LA_CLAVE
+```
+```bash
+gzip -d backup.json.gz
+```
+```bash
+node scripts/restaurar.js backup.json grupos/ID_DEL_GRUPO
+```
+
+Sin `--si` solo muestra qué escribiría; con `--si` restaura. Sin ruta, restaura todo. Necesita `FIREBASE_SERVICE_ACCOUNT` en el entorno.
 
 ## Desarrollo local
 

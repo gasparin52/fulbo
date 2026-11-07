@@ -1,0 +1,38 @@
+# Backup de Firestore todas las noches (4 de la mañana en Argentina).
+# Queda en GitHub → Actions → "Backup de Firestore" → la corrida → Artifacts, cifrado
+# con BACKUP_CLAVE (el repo es público), y se guarda 90 días. Si falla, GitHub manda un mail.
+# Necesita los secretos FIREBASE_SERVICE_ACCOUNT y BACKUP_CLAVE; sin ellos no hace nada.
+name: Backup de Firestore
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      HAY_CLAVES: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' && secrets.BACKUP_CLAVE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.HAY_CLAVES == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAY_CLAVES == 'true'
+        with:
+          node-version: 20
+      - name: Copiar la base
+        if: env.HAY_CLAVES == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          BACKUP_CLAVE: ${{ secrets.BACKUP_CLAVE }}
+        run: |
+          npm install --no-audit --no-fund
+          node scripts/backup.js backup.json
+          gzip backup.json
+          openssl enc -aes-256-cbc -pbkdf2 -salt -in backup.json.gz -out fulbo-backup.json.gz.enc -pass env:BACKUP_CLAVE
+          rm backup.json.gz
+      - uses: actions/upload-artifact@v4
+        if: env.HAY_CLAVES == 'true'
+        with:
+          name: fulbo-backup-${{ github.run_number }}
+          path: fulbo-backup.json.gz.enc
+          retention-days: 90

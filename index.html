@@ -20,6 +20,7 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
   <div id="app" class="max-w-2xl mx-auto px-4 pt-6 pb-32 space-y-5"><p class="text-slate-400">Cargando…</p></div>
+  <div id="anuncio" class="hidden max-w-2xl mx-auto px-4 -mt-28 pb-28"></div>
   <nav id="nav" aria-label="Navegación"></nav>
   <div id="modal"></div>
   <div id="toast" class="fixed z-50 bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-slate-100 text-slate-900 font-medium shadow-xl opacity-0 pointer-events-none transition-opacity max-w-[90vw] text-center"></div>
@@ -38,8 +39,9 @@ const CONFIG = {
   // Los usuarios entran con nombre de usuario; por dentro Firebase usa
   // "usuario@dominio". Tiene que coincidir con firestore.rules.
   dominio: 'fulbo.app',
-  // Base de las funciones de Vercel (api/*.js). En GitHub Pages van a Vercel; en Vercel, mismo dominio.
-  api: location.hostname.endsWith('github.io') ? 'https://fulbo-one.vercel.app/api/' : '/api/',
+  // Base de las funciones de Vercel (api/*.js). En fulbo-one.vercel.app y en la compu, mismo dominio;
+  // desde cualquier otro lado (GitHub Pages, fulbo5.com en Firebase Hosting) van a Vercel.
+  api: ['fulbo-one.vercel.app', 'localhost', '127.0.0.1'].includes(location.hostname) ? '/api/' : 'https://fulbo-one.vercel.app/api/',
   // Clave pública para notificaciones (Firebase → Configuración → Cloud Messaging →
   // Certificados push web). Vacía = no se ofrece activar notificaciones.
   vapid: 'BOuQtxpJuEOwCY9HNPwBglCpc5U2jBmXhHbScpfwjSh230p5VyCC2TAg7lnc1rmV2n0i_xRPyKAAKNzjThpHDMI',
@@ -53,6 +55,9 @@ const CONFIG = {
   appCheck: '',
   // Mail de contacto que aparece en los términos y la privacidad.
   contacto: 'contacto@fulbo5.com',
+  // AdSense: un banner abajo de todo, solo en fulbo5.com. Vacío = sin anuncios.
+  // cliente = "ca-pub-…" (AdSense → Cuenta); bloque = el número del bloque de anuncios.
+  adsense: { cliente: '', bloque: '' },
 };
 // =============================================================
 
@@ -4317,6 +4322,28 @@ addEventListener('popstate', () => {
   render();
 });
 
+// ---------------- Publicidad ----------------
+// Un banner abajo de todo, solo en fulbo5.com y con la sesión iniciada (en GitHub Pages y
+// en Vercel no hay anuncios). Va fuera de #app para que no se borre cada vez que se redibuja.
+const conAnuncios = () => !!(CONFIG.adsense.cliente && CONFIG.adsense.bloque) && /(^|\.)fulbo5\.com$/.test(location.hostname);
+let anuncioMontado = false;
+function anuncio() {
+  const el = $('#anuncio');
+  const ver = conAnuncios() && !!(D.user && D.perfil);
+  el.classList.toggle('hidden', !ver);
+  if (!ver || anuncioMontado) return;
+  anuncioMontado = true;
+  const s = document.createElement('script');
+  s.async = true;
+  s.crossOrigin = 'anonymous';
+  s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${CONFIG.adsense.cliente}`;
+  document.head.append(s);
+  el.innerHTML = `
+    <p class="text-[10px] uppercase tracking-wider text-slate-600 mb-1">Publicidad</p>
+    <ins class="adsbygoogle" style="display:block" data-ad-client="${CONFIG.adsense.cliente}" data-ad-slot="${CONFIG.adsense.bloque}" data-ad-format="auto" data-full-width-responsive="true"></ins>`;
+  (window.adsbygoogle = window.adsbygoogle || []).push({});
+}
+
 function render() {
   historialModal();
   renderVistas();
@@ -4326,6 +4353,7 @@ function render() {
   activarCargaPerezosa();
   sumarGoles();
   filtrarCuadros();
+  anuncio();
   if (listo) {
     asegurarRotacion();
     asegurarVotacion();

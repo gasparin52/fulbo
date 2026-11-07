@@ -11,7 +11,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 import { getAppCheck } from 'firebase-admin/app-check';
 
-const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'https://fulbo-one.vercel.app', 'http://localhost:8791'];
+const ORIGENES = ['https://fulbo5.com', 'https://www.fulbo5.com', 'https://gasparin52.github.io', 'https://fulbo-one.vercel.app', 'https://fulbo-5d6f5.web.app', 'https://fulbo-5d6f5.firebaseapp.com', 'http://localhost:8791'];
 const STATS = ['velocidad', 'tecnica', 'pase', 'remate', 'defensa', 'fisico', 'arquero'];
 const CAMPO = STATS.slice(0, 6);
 // Igual que HATER de index.html.

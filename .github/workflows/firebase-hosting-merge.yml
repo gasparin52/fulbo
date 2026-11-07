@@ -1,0 +1,22 @@
+# Cada push a main publica la página en Firebase Hosting (fulbo5.com).
+# GitHub Pages y Vercel se siguen actualizando solos como siempre.
+# Hasta que exista el secreto (firebase init hosting:github lo crea), no hace nada.
+name: Publicar en Firebase Hosting
+on:
+  push:
+    branches: [main]
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    env:
+      HAY_CLAVE: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FULBO_5D6F5 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.HAY_CLAVE == 'true'
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        if: env.HAY_CLAVE == 'true'
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FULBO_5D6F5 }}
+          channelId: live
+          projectId: fulbo-5d6f5
