@@ -227,6 +227,20 @@ service cloud.firestore {
 
       // Bajas tardías (asistencia): las registra solo el servidor (api/avisar.js).
       // Las ve todo el grupo y un admin las puede perdonar (borrar).
+      // Resultado de cada fecha: lo cargan los admins y armadores, lo ven todos.
+      match /resultados/{f} {
+        allow read: if esMiembro(g);
+        allow create, update: if (esAdmin(g) || esArmador(g))
+          && request.resource.data.keys().hasOnly(['fecha', 'ganador', 'golesA', 'golesB', 'A', 'B', 'por', 'ts'])
+          && request.resource.data.fecha == f
+          && request.resource.data.ganador in ['A', 'B', 'empate']
+          && request.resource.data.por == uid()
+          && request.resource.data.A is list && request.resource.data.A.size() <= 30
+          && request.resource.data.B is list && request.resource.data.B.size() <= 30
+          && (!('golesA' in request.resource.data) || (request.resource.data.golesA is int && request.resource.data.golesA >= 0 && request.resource.data.golesA <= 99
+            && request.resource.data.golesB is int && request.resource.data.golesB >= 0 && request.resource.data.golesB <= 99));
+        allow delete: if esAdmin(g);
+      }
       match /bajas/{b} {
         allow read: if esMiembro(g);
         allow delete: if esAdmin(g);

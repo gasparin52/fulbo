@@ -123,6 +123,7 @@ const colVotosMvp = (g, fecha) => F.collection(db, 'grupos', g, 'mvp', fecha, 'v
 const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
 const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
 const colBajas = g => F.collection(db, 'grupos', g, 'bajas');
+const colResultados = g => F.collection(db, 'grupos', g, 'resultados');
 const colRehacer = g => F.collection(db, 'grupos', g, 'rehacer');
 const refRehacer = (g, u) => F.doc(db, 'grupos', g, 'rehacer', u);
 
@@ -469,7 +470,7 @@ A.onAuthStateChanged(auth, user => {
   Object.values(subsMisGrupos).forEach(f => f());
   subsMisGrupos = {};
   nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -517,7 +518,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -563,6 +564,11 @@ function elegirGrupo() {
     D.mvp = d ? { ...d, miVoto: misma ? D.mvp.miVoto : undefined, votos: misma ? D.mvp.votos : null } : null;
     actualizarSubsMvp();
     cargarHistorialMvp();
+    render();
+  }, e => console.warn(e.code)));
+  // Resultados de los últimos partidos (quién ganó y, si se cargaron, los goles).
+  subsGrupo.push(F.onSnapshot(F.query(colResultados(gid), F.orderBy('fecha', 'desc'), F.limit(6)), qs => {
+    D.resultados = qs.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   }, e => console.warn(e.code)));
   subsGrupo.push(F.onSnapshot(colBajas(gid), qs => {
@@ -2084,7 +2090,7 @@ function vistaPrincipal() {
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico()];
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -3036,6 +3042,54 @@ function modalBajar() {
 
 // ---------------- ⚽ En juego ----------------
 // Desde la hora del partido hasta que termina: cronómetro y los equipos.
+// Resultado: el admin (o un armador) carga quién ganó al terminar; todos lo ven.
+const conGoles = () => D.grupo.modoResultado === 'goles';
+const textoResultado = x => x.ganador === 'empate'
+  ? `Empate${x.golesA != null ? ` ${x.golesA} – ${x.golesB}` : ''}`
+  : `Ganó el ${NOMBRE_EQUIPO[x.ganador]}${x.golesA != null ? ` · ${x.ganador === 'A' ? x.golesA : x.golesB} a ${x.ganador === 'A' ? x.golesB : x.golesA}` : ''}`;
+function tarjetaResultado() {
+  const p = D.grupo.partido, t = tiemposPartido();
+  const actual = D.resultados.find(x => x.fecha === p.fecha);
+  const termino = p.fecha && !p.suspendido && (t ? Date.now() >= t.fin : p.fecha < hoyArg());
+  const puede = puedeEditarEquipos() && D.grupo.equipos;
+  // Cargar el resultado de esta fecha.
+  if (termino && puede && (!actual || ui.corregirResultado)) {
+    const goles = conGoles() && !ui.sinGoles;
+    return card(`
+      <h2 class="text-lg font-bold">${ic('flag', 'text-emerald-400')} ¿Cómo salió?</h2>
+      <p class="text-xs text-slate-400 mt-0.5 mb-3">Lo ven todos los del grupo.${goles ? '' : ' Si saben los goles, el admin lo puede activar en Administrar.'}</p>
+      ${goles ? `
+        <form data-form="resultado" class="space-y-3">
+          <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
+            <label class="text-sm font-bold text-red-300">🔴 Equipo A<input id="r-a" name="golesA" type="number" inputmode="numeric" min="0" max="99" required value="${actual?.golesA ?? ''}" class="${INPUT} mt-1 text-center text-2xl font-black"></label>
+            <span class="text-slate-500 font-black pt-6">–</span>
+            <label class="text-sm font-bold text-sky-300">🔵 Equipo B<input id="r-b" name="golesB" type="number" inputmode="numeric" min="0" max="99" required value="${actual?.golesB ?? ''}" class="${INPUT} mt-1 text-center text-2xl font-black"></label>
+          </div>
+          <button class="${BTN_OK} w-full">Guardar resultado</button>
+        </form>
+        <button data-action="sin-goles" class="${BTN_CHIP} w-full mt-2 !py-2">No sé los goles, solo quién ganó</button>`
+      : `
+        <div class="grid grid-cols-3 gap-2">
+          <button data-action="resultado" data-ganador="A" class="${BTN} text-sm bg-red-500/15 hover:bg-red-500/25 text-red-200">Ganó<br>🔴 A</button>
+          <button data-action="resultado" data-ganador="empate" class="${BTN} text-sm bg-slate-800 hover:bg-slate-700">Empate</button>
+          <button data-action="resultado" data-ganador="B" class="${BTN} text-sm bg-sky-500/15 hover:bg-sky-500/25 text-sky-200">Ganó<br>🔵 B</button>
+        </div>`}
+      ${actual ? '<button data-action="corregir-resultado" class="text-xs text-slate-500 hover:text-slate-300 w-full mt-2">Cancelar</button>' : ''}`);
+  }
+  // Mostrar el de esta fecha o el del último partido.
+  const x = actual || (!termino || !puede ? D.resultados.find(r => r.fecha < (p.fecha || '9999')) : null);
+  if (!x) return '';
+  const color = x.ganador === 'A' ? 'from-red-500/20 border-red-500/30' : x.ganador === 'B' ? 'from-sky-500/20 border-sky-500/30' : 'from-slate-700/40 border-slate-600';
+  return `
+    <div class="rounded-2xl border bg-gradient-to-br ${color} to-slate-900 p-4">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">${x === actual ? '🏁 Resultado' : `Último partido · ${esc(fechaLinda(x.fecha))}`}</p>
+        ${x === actual && puede ? '<button data-action="corregir-resultado" class="text-xs text-slate-400 hover:text-slate-200 underline-offset-2">Corregir</button>' : ''}
+      </div>
+      <p class="text-2xl font-black mt-1">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
+    </div>`;
+}
+
 function tarjetaPartido() {
   const f = fasePartido(), t = tiemposPartido(), eq = D.grupo.equipos;
   if (f === 'normal') return '';
@@ -3550,6 +3604,15 @@ function panelAdmin(d) {
 
     ${formAgenda()}
 
+    <div class="mt-6 rounded-xl border border-slate-800 p-3">
+      <h3 class="font-semibold text-sm text-slate-300">${ic('flag')} Resultado del partido</h3>
+      <p class="text-xs text-slate-500 mt-0.5 mb-2">Al terminar, un admin o armador carga cómo salió y lo ven todos.</p>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-action="modo-resultado" data-modo="ganador" class="${BTN} text-sm ${D.grupo.modoResultado !== 'goles' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">Solo quién ganó</button>
+        <button data-action="modo-resultado" data-modo="goles" class="${BTN} text-sm ${D.grupo.modoResultado === 'goles' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">Con goles</button>
+      </div>
+    </div>
+
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
     <p class="text-xs text-slate-500 mb-2">Para equilibrar se usa el promedio de votos (★). Si alguien no tiene votos, se usa el nivel que elijas acá (por defecto ${NIVEL_DEFAULT}). Los niveles solo los ven los admins.</p>
     <ul class="divide-y divide-slate-800">
@@ -3673,6 +3736,17 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------------- Acciones ----------------
+// Guarda el resultado de la fecha, con los equipos con los que se jugó.
+async function guardarResultado(ganador, goles = null) {
+  const p = D.grupo.partido, eq = D.grupo.equipos;
+  const ok = await act(() => F.setDoc(F.doc(colResultados(D.gid), p.fecha), {
+    fecha: p.fecha, ganador, A: eq?.A || [], B: eq?.B || [], por: miUid(), ts: Date.now(),
+    ...(goles ? { golesA: goles[0], golesB: goles[1] } : {}),
+  }), '🏁 Resultado guardado');
+  if (ok) { ui.corregirResultado = false; ui.sinGoles = false; render(); }
+  return ok;
+}
+
 async function guardarPerfil(f) {
   const edad = parseInt(f.get('edad'));
   if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
@@ -3852,6 +3926,10 @@ const acciones = {
     return act(() => api('decidir', { gid: D.gid, id, aceptar: !!si }, urlGrupo()), si ? `✅ ${p?.usuario || ''} ya está en el grupo` : 'Pedido rechazado');
   },
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
+  resultado: ({ ganador }) => guardarResultado(ganador),
+  'sin-goles': () => { ui.sinGoles = true; render(); },
+  'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
+  'modo-resultado': ({ modo }) => actualizarGrupo(s => { s.modoResultado = modo; }, modo === 'goles' ? 'Se van a cargar los goles' : 'Se va a cargar solo quién ganó'),
   'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
   'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
   'toggle-avisos': () => { ui.avisosAbiertos = !ui.avisosAbiertos; render(); },
@@ -4016,6 +4094,11 @@ const formularios = {
     return ok;
   },
   perfil: guardarPerfil,
+  resultado: f => {
+    const a = parseInt(f.get('golesA')), b = parseInt(f.get('golesB'));
+    if (!(a >= 0 && b >= 0 && a <= 99 && b <= 99)) return toast('Poné los goles de los dos equipos');
+    return guardarResultado(a > b ? 'A' : b > a ? 'B' : 'empate', [a, b]);
+  },
   agenda: f => {
     const dias = f.getAll('dia'), horas = f.getAll('hora'), lugares = f.getAll('lugarFijo');
     const slots = [];
