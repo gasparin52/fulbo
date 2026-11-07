@@ -890,28 +890,31 @@ const hoyAR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)
 // Una votación cerrada ya no cambia, así que su resultado se guarda en el celular.
 const historialMvp = {};
 let cargandoHistorial = false;
+// Ganadores de una votación cerrada (null si no se pudo leer).
+async function ganadoresMvp(gid, m) {
+  const k = `${gid}/${m.id}`;
+  if (historialMvp[k]) return historialMvp[k];
+  if (estadoMvp(m) !== 'cerrada') return null;
+  const clave = `${LS}mvp_res_${gid}_${m.id}`;
+  let ganadores = null;
+  try { ganadores = JSON.parse(guardado.get(clave)); } catch {}
+  if (!Array.isArray(ganadores)) {
+    try {
+      const qs = await F.getDocs(colVotosMvp(gid, m.id));
+      ganadores = resultadoMvp({ votos: Object.fromEntries(qs.docs.map(d => [d.id, d.data().voto])) }).ganadores;
+      guardado.set(clave, JSON.stringify(ganadores));
+    } catch (e) {
+      console.warn(e.code);
+      return null;
+    }
+  }
+  return (historialMvp[k] = ganadores);
+}
 async function cargarHistorialMvp() {
   const gid = D.gid, docs = D.mvps || [];
   if (cargandoHistorial || !gid) return;
   cargandoHistorial = true;
-  for (const m of docs) {
-    const k = `${gid}/${m.id}`;
-    if (estadoMvp(m) !== 'cerrada' || historialMvp[k]) continue;
-    const clave = `${LS}mvp_res_${gid}_${m.id}`;
-    let ganadores = null;
-    try { ganadores = JSON.parse(guardado.get(clave)); } catch {}
-    if (!Array.isArray(ganadores)) {
-      try {
-        const qs = await F.getDocs(colVotosMvp(gid, m.id));
-        ganadores = resultadoMvp({ votos: Object.fromEntries(qs.docs.map(d => [d.id, d.data().voto])) }).ganadores;
-        guardado.set(clave, JSON.stringify(ganadores));
-      } catch (e) {
-        console.warn(e.code);
-        continue;
-      }
-    }
-    historialMvp[k] = ganadores;
-  }
+  for (const m of docs) await ganadoresMvp(gid, m);
   cargandoHistorial = false;
   if (D.gid !== gid) return;
   const estrellas = {};
@@ -2135,6 +2138,7 @@ function vistaInicio() {
 function panelInicio() {
   return `
     ${tarjetaHoy() || tarjetaProximo()}
+    ${tarjetaTemporada()}
     ${tarjetaMisGrupos()}
     ${tarjetaPedidos()}
     ${tarjetaNovedades()}`;
@@ -2170,11 +2174,20 @@ function tarjetaProximo() {
     </div>`;
 }
 
+// Mi perfil: "Mi ficha" (números de todos mis grupos) y "Configuración".
 function panelPerfil() {
+  const tab = guardado.get(LS + 'perfilTab') === 'config' ? 'config' : 'ficha';
+  const boton = (t, html) => `<button data-action="perfil-tab" data-tab="${t}" class="flex-1 rounded-lg py-2 text-sm font-semibold ${tab === t ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}">${html}</button>`;
+  return `
+    <div class="flex rounded-xl bg-slate-900/70 border border-slate-800 p-1">${boton('ficha', '⚽ Mi ficha')}${boton('config', ic('settings') + ' Configuración')}</div>
+    ${tab === 'ficha' ? miFicha() : configPerfil()}`;
+}
+
+function configPerfil() {
   const p = D.perfil;
   return `
     ${card(`
-      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mi ficha</h2>
+      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mis datos</h2>
       <form data-form="perfil" class="space-y-4">
         ${camposPerfil(p)}
         <button class="${BTN_OK} w-full">Guardar</button>
@@ -2238,7 +2251,7 @@ function vistaPrincipal() {
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico()];
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -3432,6 +3445,186 @@ function tarjetaHistorial(id) {
     <p class="text-xs text-slate-500 mt-2">${Math.round(h.pg / h.pj * 100)}% ganados. Cuentan los partidos con resultado cargado.</p>`);
 }
 
+// ---------------- 🏟️ Mi carrera (todos mis grupos) ----------------
+// Para "Mi ficha" y la tira de Inicio: de cada grupo, los resultados, mis promedios
+// (calc/notas) y los ganadores del jugador del partido. Se vuelve a leer cada 10 minutos
+// (mientras tanto se siguen viendo los números de antes).
+const carrera = { clave: null, grupos: null, ts: 0 };
+const claveCarrera = () => `${miUid()}:${(D.perfil?.grupos || []).map(g => g.id).join(',')}`;
+async function cargarCarrera() {
+  const uid = miUid(), gids = (D.perfil?.grupos || []).map(g => g.id);
+  const clave = claveCarrera();
+  if (!uid || (carrera.clave === clave && Date.now() - carrera.ts < 10 * 60e3)) return;
+  if (carrera.clave !== clave) carrera.grupos = null;
+  Object.assign(carrera, { clave, ts: Date.now() });
+  const out = {};
+  await Promise.all(gids.map(async gid => {
+    const g = out[gid] = { resultados: [], notas: null, mvps: {} };
+    try {
+      const qs = await F.getDocs(F.query(colResultados(gid), F.orderBy('fecha', 'desc'), F.limit(300)));
+      g.resultados = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) { console.warn(e.code); }
+    try { g.notas = (await F.getDoc(F.doc(db, 'grupos', gid, 'calc', 'notas'))).data()?.notas?.[uid] || null; } catch (e) { console.warn(e.code); }
+    try {
+      const qs = await F.getDocs(colMvp(gid));
+      for (const d of qs.docs) {
+        const gan = await ganadoresMvp(gid, { id: d.id, ...d.data() });
+        if (gan) g.mvps[d.id] = gan;
+      }
+    } catch (e) { console.warn(e.code); }
+  }));
+  if (carrera.clave !== clave) return;
+  carrera.grupos = out;
+  render();
+}
+// null mientras carga.
+function statsCarrera() {
+  cargarCarrera();
+  if (!carrera.grupos || carrera.clave !== claveCarrera()) return null;
+  const uid = miUid(), partidos = [];
+  let estrellas = 0, n = 0, grupos = 0;
+  const suma = {};
+  for (const [gid, g] of Object.entries(carrera.grupos)) {
+    const nombre = D.misGrupos[gid]?.nombre || D.perfil.grupos.find(x => x.id === gid)?.nombre || 'Grupo';
+    for (const x of g.resultados) {
+      const e = ['A', 'B'].find(k => (x[k] || []).includes(uid) || (x['S' + k] || []).includes(uid));
+      if (!e) continue;
+      partidos.push({ gid, nombre, x, e, r: x.ganador === 'empate' ? 'E' : x.ganador === e ? 'G' : 'P', mvp: (g.mvps[x.fecha] || []).includes(uid) });
+    }
+    estrellas += Object.values(g.mvps).filter(gan => gan.includes(uid)).length;
+    // Mis calificaciones de todos los grupos, pesando más donde tengo más votos.
+    if (g.notas?.n) {
+      n += g.notas.n; grupos++;
+      STATS.forEach(s => (suma[s.k] = (suma[s.k] || 0) + (g.notas.prom[s.k] || 0) * g.notas.n));
+    }
+  }
+  partidos.sort((a, b) => b.x.fecha.localeCompare(a.x.fecha));
+  const cuenta = r => partidos.filter(p => p.r === r).length;
+  const pj = partidos.length, pg = cuenta('G');
+  let racha = 0;
+  while (racha < pj && partidos[racha].r === 'G') racha++;
+  const prom = n ? Object.fromEntries(STATS.map(s => [s.k, suma[s.k] / n])) : null;
+  const campo = prom && CAMPO.reduce((t, k) => t + prom[k], 0) / CAMPO.length;
+  const general = prom && (D.perfil.posicion === 'arquero' ? (campo + prom.arquero) / 2 : campo);
+  return { partidos, pj, pg, pe: cuenta('E'), pp: cuenta('P'), racha, estrellas, n, grupos, prom, general };
+}
+const COLOR_FORMA = { G: 'bg-emerald-500 text-slate-950', E: 'bg-slate-500 text-white', P: 'bg-red-500 text-white' };
+const formaChips = (ps, cls = 'w-6 h-6 text-xs') => ps.map(p => `<span title="${esc(fechaLinda(p.x.fecha))} · ${esc(p.nombre)}" class="${cls} rounded-md grid place-items-center font-black ${COLOR_FORMA[p.r]}">${p.r}</span>`).join('');
+
+// Pestaña "Mi ficha" del perfil: ficha técnica combinada, números y partidos jugados.
+function miFicha() {
+  const c = statsCarrera(), p = D.perfil;
+  if (!c) return card('<p class="text-sm text-slate-400">Juntando tus números de todos los grupos…</p>');
+  const caja = (v, txt, color) => `<div class="rounded-xl bg-slate-800/60 py-2"><p class="text-2xl font-black ${color}">${v}</p><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">${txt}</p></div>`;
+  const lim = ui.partidosLim || 10;
+  return `
+    <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
+      <div class="flex items-center gap-4">
+        ${avatar(p, 80)}
+        <div class="min-w-0 flex-1">
+          <h2 class="text-2xl font-black truncate">${esc(p.usuario)}</h2>
+          <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+          ${CLUBES[p.cuadro] ? `<p class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-800 border border-slate-700 pl-1.5 pr-2.5 py-0.5 text-xs font-semibold text-slate-200">${escudo(p.cuadro, 18)} ${esc(CLUBES[p.cuadro].n)}</p>` : ''}
+          ${c.estrellas ? `<p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">${'⭐'.repeat(Math.min(c.estrellas, 5))}${c.estrellas > 5 ? ` ×${c.estrellas}` : ''} Jugador del partido${c.estrellas > 1 ? ` · ${c.estrellas} veces` : ''}</p>` : ''}
+        </div>
+        <div class="text-center shrink-0">
+          <div class="text-5xl font-black leading-none ${c.n ? colorNota(c.general) : 'text-slate-600'}">${c.n ? c.general.toFixed(1) : '–'}</div>
+          <div class="text-[10px] tracking-widest text-slate-500 mt-1">GENERAL</div>
+        </div>
+      </div>
+      <div class="mt-4">${radar(c.prom)}</div>
+      <div class="space-y-2 mt-2">
+        ${STATS.map(s => {
+          const v = c.n ? c.prom[s.k] : 0;
+          return `
+            <div class="flex items-center gap-3 text-sm">
+              <span class="w-28 shrink-0 text-slate-300">${s.emoji} ${s.label}</span>
+              <span class="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden"><span class="block h-full ${bgNota(v)}" style="width:${v * 10}%"></span></span>
+              <span class="w-8 text-right font-mono ${c.n ? colorNota(v) : 'text-slate-600'}">${c.n ? v.toFixed(1) : '–'}</span>
+            </div>`;
+        }).join('')}
+      </div>
+      <p class="text-xs text-slate-500 mt-3">${c.n ? `Según ${c.n} ${c.n === 1 ? 'voto' : 'votos'}${c.grupos > 1 ? ` de tus ${c.grupos} grupos` : ''}. Esta ficha combinada la ves solo vos; en cada grupo ven la de ese grupo.` : 'Todavía nadie te calificó.'}</p>
+    </div>
+    ${card(`
+      <h2 class="font-bold">${ic('chart-column', 'text-emerald-400')} Tu carrera</h2>
+      ${c.pj ? `
+        <div class="grid grid-cols-4 gap-2 mt-3 text-center">
+          ${caja(c.pj, 'Jugados', 'text-slate-100')}${caja(c.pg, 'Ganados', 'text-emerald-300')}${caja(c.pe, 'Empates', 'text-slate-300')}${caja(c.pp, 'Perdidos', 'text-red-300')}
+        </div>
+        <div class="flex items-center justify-between gap-3 mt-3">
+          <p class="text-sm text-slate-300"><b>${Math.round(c.pg / c.pj * 100)}%</b> ganados${c.racha >= 2 ? ` · 🔥 <b>${c.racha}</b> seguidos` : ''}</p>
+          <div class="flex gap-1" aria-label="Últimos partidos">${formaChips(c.partidos.slice(0, 5).reverse())}</div>
+        </div>`
+      : '<p class="text-sm text-slate-400 mt-1">Todavía no jugaste partidos con resultado cargado. Cuando el admin cargue quién ganó, acá vas a ver tus números.</p>'}`)}
+    ${c.pj ? card(`
+      <h2 class="font-bold mb-1">${ic('clipboard-list', 'text-sky-400')} Partidos jugados</h2>
+      <ul class="divide-y divide-slate-800">
+        ${c.partidos.slice(0, lim).map(x => `
+          <li>
+            <button data-action="cambiar-grupo" data-gid="${x.gid}" class="w-full flex items-center gap-3 py-2 text-left hover:bg-slate-800/40 rounded-lg">
+              <span class="w-7 h-7 shrink-0 rounded-md grid place-items-center text-xs font-black ${COLOR_FORMA[x.r]}">${x.r}</span>
+              <span class="flex-1 min-w-0">
+                <span class="block text-sm font-semibold truncate">${esc(x.nombre)}${x.mvp ? ' <span title="Jugador del partido">⭐</span>' : ''}</span>
+                <span class="block text-xs text-slate-400">${esc(fechaLinda(x.x.fecha))} · ${NOMBRE_EQUIPO[x.e]}${x.x.golesA != null ? ` · ${x.e === 'A' ? x.x.golesA : x.x.golesB} a ${x.e === 'A' ? x.x.golesB : x.x.golesA}` : ''}</span>
+              </span>
+            </button>
+          </li>`).join('')}
+      </ul>
+      ${c.pj > lim ? `<button data-action="mas-partidos" class="${BTN_SEC} w-full text-sm mt-2">Ver más (${c.pj - lim})</button>` : ''}`) : ''}`;
+}
+
+// Inicio: tus números en una línea (tocando, vas a tu ficha).
+function tarjetaTemporada() {
+  const c = statsCarrera();
+  if (!c?.pj) return '';
+  return `
+    <a href="#/perfil" class="${CARD} !py-3 flex items-center gap-3 hover:border-slate-700">
+      <span class="flex-1 min-w-0 text-sm">
+        <span class="block text-xs font-bold uppercase tracking-wider text-slate-400">Tus números</span>
+        <span class="block truncate"><b>${c.pj}</b> jugados · <b>${Math.round(c.pg / c.pj * 100)}%</b> ganados${c.estrellas ? ` · ⭐ ${c.estrellas}` : ''}</span>
+      </span>
+      <span class="flex gap-1">${formaChips(c.partidos.slice(0, 5).reverse(), 'w-5 h-5 text-[10px]')}</span>
+      ${ic('chevron-right', 'text-slate-500')}
+    </a>`;
+}
+
+// Grupo: todas las fechas con resultado, quién ganó, el mejor de cada una y los equipos.
+function tarjetaHistorialGrupo() {
+  if (!D.resultados.length) return '';
+  const abierto = !!ui.histGrupo;
+  let cuerpo = '';
+  if (abierto) {
+    if (todosResultados.gid !== D.gid || !todosResultados.docs) { cargarTodosResultados(); cuerpo = '<p class="text-sm text-slate-400 mt-2">Cargando…</p>'; }
+    else {
+      const porFecha = Object.fromEntries([...todosResultados.docs, ...D.resultados].map(x => [x.fecha, x]));
+      const lista = Object.values(porFecha).sort((a, b) => b.fecha.localeCompare(a.fecha));
+      const lim = ui.histLim || 10;
+      const mejor = f => {
+        const m = D.mvps.find(v => v.id === f), gan = historialMvp[`${D.gid}/${f}`];
+        return m && gan?.length ? gan.map(id => m.nombres?.[id] || jugador(id)?.usuario || '¿?').join(' y ') : '';
+      };
+      cuerpo = `
+        <ul class="divide-y divide-slate-800 mt-1">
+          ${lista.slice(0, lim).map(x => `
+            <li class="py-2.5">
+              <p class="text-xs text-slate-400">${esc(fechaLinda(x.fecha))}</p>
+              <p class="font-bold">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
+              ${mejor(x.fecha) ? `<p class="text-xs text-amber-200 mt-0.5">⭐ Jugador del partido: <b>${esc(mejor(x.fecha))}</b></p>` : ''}
+              ${equiposDelResultado(x)}
+            </li>`).join('')}
+        </ul>
+        ${lista.length > lim ? `<button data-action="mas-hist" class="${BTN_SEC} w-full text-sm mt-2">Ver más (${lista.length - lim})</button>` : ''}`;
+    }
+  }
+  return card(`
+    <button data-action="toggle-hist" aria-expanded="${abierto}" class="w-full flex items-center gap-2 text-left">
+      <span class="flex-1 text-base font-bold">${ic('clipboard-list', 'text-sky-400')} Partidos jugados</span>
+      <span class="${BTN_ICONO} !w-8 !h-8 transition ${abierto ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
+    </button>
+    ${cuerpo}`);
+}
+
 // ---------------- 📋 Asistencia ----------------
 // Mira los últimos 90 días: partidos jugados contra faltas sin avisar (pesan 2), bajas
 // a último momento, menos de 6 h antes (pesan 1) y bajas tarde, menos de 24 h (pesan ½).
@@ -4165,6 +4358,10 @@ const acciones = {
   'cal-vista': ({ vista }) => { guardado.set(LS + 'calVista', vista); ui.calOffset = 0; ui.calDia = null; render(); },
   'cal-mover': ({ n }) => { ui.calOffset = (ui.calOffset || 0) + Number(n); ui.calDia = null; render(); },
   'cal-hoy': () => { ui.calOffset = 0; ui.calDia = null; render(); },
+  'perfil-tab': ({ tab }) => { guardado.set(LS + 'perfilTab', tab); render(); },
+  'toggle-hist': () => { ui.histGrupo = !ui.histGrupo; render(); },
+  'mas-hist': () => { ui.histLim = (ui.histLim || 10) + 10; render(); },
+  'mas-partidos': () => { ui.partidosLim = (ui.partidosLim || 10) + 10; render(); },
   'mas-cal': () => { ui.calLimite = (ui.calLimite || 10) + 10; render(); },
   sumarse: ({ que }) => { ui.sumarse = ui.sumarse === que ? null : que; render(); },
   'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),
