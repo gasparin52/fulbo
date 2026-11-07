@@ -978,6 +978,20 @@ async function asegurarRotacion() {
   avisar('rotar');
 }
 
+// Votaciones abiertas que se crearon solo con titulares: un admin les suma los suplentes
+// (los que estaban anotados esa fecha), que también pueden haber jugado.
+let suplentesSumados = null;
+function asegurarSuplentesMvp() {
+  const m = D.mvp;
+  if (!m || !esAdmin() || estadoMvp() !== 'abierta' || suplentesSumados === `${D.gid}/${m.id}`) return;
+  const faltan = (m.anotados || []).filter(id => !m.candidatos.includes(id) && jugador(id));
+  suplentesSumados = `${D.gid}/${m.id}`;
+  if (!faltan.length) return;
+  const candidatos = [...m.candidatos, ...faltan].slice(0, 30);
+  const nombres = { ...(m.nombres || {}), ...Object.fromEntries(faltan.map(id => [id, jugador(id).usuario])) };
+  F.updateDoc(refMvp(D.gid, m.id), { candidatos, nombres }).catch(e => console.warn(e));
+}
+
 function asegurarVotacion() {
   const f = D.grupo?.partido.fecha;
   // Espera a tener las votaciones y las 🟥, que deciden quiénes fueron titulares.
@@ -3624,6 +3638,7 @@ function render() {
   if (listo) {
     asegurarRotacion();
     asegurarVotacion();
+    asegurarSuplentesMvp();
     asegurarEquipos();
   }
 }
