@@ -938,7 +938,9 @@ function actualizarSubsMvp() {
 
 // Candidatos: los titulares del partido (con nombre guardado por si después se van del grupo).
 function datosVotacion(s, fecha) {
-  const candidatos = dividir(s).titulares.map(p => p.id);
+  // Titulares y suplentes: los suplentes también pueden haber jugado.
+  const { titulares, suplentes } = dividir(s);
+  const candidatos = [...titulares, ...suplentes].map(p => p.id);
   return {
     fecha,
     candidatos,
@@ -2381,6 +2383,7 @@ function vistaReglas() {
     ])}
     ${seccion('🏆 Jugador del partido', [
       'La votación al mejor se habilita <b>una hora después de que empieza el partido</b> y dura <b>hasta el final del día siguiente</b> (23:59). Al entrar te aparece un cartel para votar.',
+      'Se puede votar a cualquiera que estuvo anotado: <b>titulares y suplentes</b>, porque los suplentes también pueden haber entrado.',
       'Votan todos los del grupo, uno por persona (lo podés cambiar mientras esté abierta), y nadie se puede votar a sí mismo.',
       `Los votos se ven recién al cierre. Con menos de ${MIN_VOTOS_MVP} votos queda desierto.`,
       'El que gana (o los que empatan primero) suma una <b>⭐</b> que queda en su ficha.',
