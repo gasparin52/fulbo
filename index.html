@@ -1444,7 +1444,7 @@ function filtrarCuadros() {
   document.querySelector('[data-ninguno]').classList.toggle('hidden', !!f);
   document.querySelector('[data-sin-cuadros]').classList.toggle('hidden', hay);
 }
-const selectorCuadro = sel => {
+const selectorCuadro = (sel, soloLista = false) => {
   const k = CLUBES[sel];
   const lista = af => Object.entries(CLUBES).filter(([, c]) => !!c.afuera === af)
     .sort((x, y) => x[1].n.localeCompare(y[1].n))
@@ -1455,11 +1455,11 @@ const selectorCuadro = sel => {
   const arg = lista(false), afuera = lista(true);
   return `
     <input type="hidden" name="cuadro" value="${esc(sel)}">
-    <button type="button" data-action="abrir-cuadros" class="${INPUT} mt-1 flex items-center gap-2 text-left">
+    ${soloLista ? '' : `<button type="button" data-action="abrir-cuadros" class="${INPUT} mt-1 flex items-center gap-2 text-left">
       ${k ? escudo(sel, 18) : ic('shield-check', 'text-slate-500')}
       <span class="flex-1 truncate ${k ? 'text-slate-100' : 'text-slate-500'}">${k ? esc(k.n) : 'Elegí tu cuadro'}</span>
       <span class="text-slate-500 transition ${ui.cuadrosAbierto ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
-    </button>
+    </button>`}
     ${ui.cuadrosAbierto ? `
       <div class="mt-1 rounded-xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
         <div class="p-2 border-b border-slate-800">
@@ -2206,15 +2206,51 @@ function panelPerfil() {
     ${tab === 'ficha' ? miFicha() : configPerfil()}`;
 }
 
+// Mis datos como los ajustes del celu: una fila por dato; se toca, se edita ahí y se guarda solo.
+function misDatos() {
+  const p = D.perfil, ed = ui.editDato;
+  const fila = (campo, titulo, valor, editor) => `
+    <li>
+      <button data-action="editar-dato" data-campo="${campo}" aria-expanded="${ed === campo}" class="w-full flex items-center gap-3 py-3 text-left">
+        <span class="flex-1 text-sm text-slate-300">${titulo}</span>
+        <span class="text-sm font-semibold text-slate-100 inline-flex items-center gap-1.5 min-w-0 truncate">${valor}</span>
+        <span class="text-slate-500 transition ${ed === campo ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
+      </button>
+      ${ed === campo ? `<div class="pb-3">${editor}</div>` : ''}
+    </li>`;
+  return card(`
+    <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mis datos</h2>
+    <div class="flex items-center gap-4">
+      ${avatarAmpliable(p, 64)}
+      <div class="min-w-0 flex-1">
+        <p class="text-lg font-black truncate">${esc(p.usuario)}</p>
+        <div class="flex flex-wrap gap-2 mt-1">
+          <label class="${BTN_CHIP} cursor-pointer">${ic('pencil')} ${p.foto ? 'Cambiar foto' : 'Subir foto'}<input type="file" accept="image/*" data-change="foto-perfil" class="hidden"></label>
+          ${p.foto ? `<button data-action="quitar-foto-perfil" class="${BTN_CHIP} hover:!text-red-300">Quitar</button>` : ''}
+        </div>
+      </div>
+    </div>
+    <ul class="divide-y divide-slate-800 mt-3 border-t border-slate-800">
+      ${fila('edad', 'Edad', p.edad ? `${p.edad} años` : '<span class="text-slate-500">—</span>', `
+        <form data-form="dato-edad" class="flex gap-2">
+          <input id="pd-edad" name="edad" type="number" inputmode="numeric" min="10" max="99" required value="${esc(p.edad ?? '')}" class="${INPUT} !w-24">
+          <button class="${BTN_OK} text-sm">Guardar</button>
+        </form>`)}
+      ${fila('cuadro', 'Cuadro', CLUBES[p.cuadro] ? `${escudo(p.cuadro, 16)} <span class="truncate">${esc(CLUBES[p.cuadro].n)}</span>` : '<span class="text-slate-500">Ninguno</span>', selectorCuadro(p.cuadro || '', true))}
+      ${fila('posicion', 'Posición', `${pos(p).emoji} ${pos(p).label}`, `
+        <div class="grid grid-cols-5 gap-1.5">
+          ${Object.entries(POS).map(([k, v]) => `
+            <button data-action="elegir-pos" data-pos="${k}" class="flex flex-col items-center gap-1 rounded-xl border px-0.5 py-2 transition ${k === (p.posicion || 'comodin') ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700'}">
+              <span class="text-xl leading-none">${v.emoji}</span><span class="text-[10px] font-semibold truncate max-w-full">${v.corto}</span>
+            </button>`).join('')}
+        </div>`)}
+    </ul>`);
+}
+
 function configPerfil() {
   const p = D.perfil;
   return `
-    ${card(`
-      <h2 class="text-lg font-bold mb-3">${ic('user', 'text-emerald-400')} Mis datos</h2>
-      <form data-form="perfil" class="space-y-4">
-        ${camposPerfil(p)}
-        <button class="${BTN_OK} w-full">Guardar</button>
-      </form>`)}
+    ${misDatos()}
     ${card(`
       <div class="flex items-center justify-between gap-3">
         <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale a tus grupos.'}</p>
@@ -4352,23 +4388,29 @@ async function guardarResultado(ganador, goles = null, goleadores = null) {
 async function guardarPerfil(f) {
   const edad = parseInt(f.get('edad'));
   if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+  const ok = await escribirPerfil({ edad, posicion: f.get('posicion'), foto: ui.foto ?? D.perfil?.foto ?? '', cuadro: cuadroDe(f) }, '💾 Ficha guardada');
+  if (ok) { ui.foto = null; ui.cuadroElegido = undefined; }
+  return ok;
+}
+
+// Escribe la ficha con lo que cambió (el resto queda como estaba), en el usuario y en cada grupo.
+async function escribirPerfil(cambio, msg = '💾 Guardado') {
   const uid = miUid();
   const actual = D.perfil || {};
   const datos = {
     usuario: actual.usuario || usuarioDeAuth(),
-    edad,
-    posicion: f.get('posicion'),
-    foto: ui.foto ?? actual.foto ?? '',
+    edad: actual.edad,
+    posicion: actual.posicion || 'comodin',
+    foto: actual.foto || '',
     lesionado: !!actual.lesionado,
-    cuadro: cuadroDe(f),
+    cuadro: actual.cuadro || '',
+    ...cambio,
   };
-  const ok = await act(async () => {
+  return act(async () => {
     await F.setDoc(refUsuario(uid), { ...datos, grupos: actual.grupos || [], creado: actual.creado || Date.now(), ...(actual.pendientes?.length ? { pendientes: actual.pendientes } : {}) });
     // La ficha se copia en cada grupo para que solo la vean sus miembros.
     await Promise.allSettled((actual.grupos || []).map(g => F.updateDoc(F.doc(colMiembros(g.id), uid), datos)));
-  }, '💾 Ficha guardada');
-  if (ok) { ui.foto = null; ui.cuadroElegido = undefined; }
-  return ok;
+  }, msg);
 }
 
 const acciones = {
@@ -4630,7 +4672,22 @@ const acciones = {
     render();
     if (ui.cuadrosAbierto) $('#pf-cuadro-buscar')?.focus();
   },
-  'elegir-cuadro': ({ id }) => { ui.cuadroElegido = id; ui.cuadrosAbierto = false; ui.cuadroFiltro = ''; render(); },
+  'elegir-cuadro': ({ id }) => {
+    ui.cuadrosAbierto = false; ui.cuadroFiltro = '';
+    // Desde Mis datos se guarda al toque; en los formularios queda elegido hasta Guardar.
+    if (ui.editDato === 'cuadro') { ui.editDato = null; escribirPerfil({ cuadro: CLUBES[id] ? id : '' }); }
+    else ui.cuadroElegido = id;
+    render();
+  },
+  'editar-dato': ({ campo }) => {
+    ui.editDato = ui.editDato === campo ? null : campo;
+    ui.cuadrosAbierto = ui.editDato === 'cuadro'; ui.cuadroFiltro = '';
+    render();
+    if (ui.editDato === 'cuadro') $('#pf-cuadro-buscar')?.focus();
+    if (ui.editDato === 'edad') $('#pd-edad')?.focus();
+  },
+  'elegir-pos': ({ pos: k }) => { ui.editDato = null; render(); if (k !== (D.perfil.posicion || 'comodin')) escribirPerfil({ posicion: k }); },
+  'quitar-foto-perfil': () => { if (confirm('¿Quitar tu foto?')) escribirPerfil({ foto: '' }, 'Foto quitada'); },
   nivel: ({ id, delta }) => {
     const n = limitarNivel(nivelDe(id) + Number(delta));
     if (n !== nivelDe(id)) guardarNivel(id, n);
@@ -4665,6 +4722,18 @@ const cambios = {
       toast('No se pudo leer esa imagen, probá con otra (JPG o PNG)');
     }
   },
+  // Desde Mis datos: la foto se guarda al toque.
+  'foto-perfil': async el => {
+    const file = el.files?.[0];
+    if (!file) return;
+    try {
+      const foto = await procesarFoto(file);
+      await escribirPerfil({ foto }, '📷 Foto actualizada');
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo leer esa imagen, probá con otra (JPG o PNG)');
+    }
+  },
   foto: async el => {
     const file = el.files?.[0];
     if (!file) return;
@@ -4679,6 +4748,13 @@ const cambios = {
 };
 
 const formularios = {
+  'dato-edad': async f => {
+    const edad = parseInt(f.get('edad'));
+    if (!(edad >= 10 && edad <= 99)) return toast('Poné una edad entre 10 y 99');
+    const ok = await escribirPerfil({ edad });
+    if (ok) { ui.editDato = null; render(); }
+    return ok;
+  },
   entrar: async f => {
     if (avisoMail(f.get('usuario'))) return toast(avisoMail(f.get('usuario')));
     // Versión pública: si la contraseña es vieja (débil), al entrar se pide cambiarla.
