@@ -3204,10 +3204,63 @@ function modalBajar() {
 // ---------------- ⚽ En juego ----------------
 // Desde la hora del partido hasta que termina: cronómetro y los equipos.
 // Resultado: el admin (o un armador) carga quién ganó al terminar; todos lo ven.
-const conGoles = () => D.grupo.modoResultado === 'goles';
+// modoResultado: 'ganador' (por defecto), 'goles' (el marcador) o 'goleadores' (cuántos hizo cada uno).
+const conGoles = () => ['goles', 'goleadores'].includes(D.grupo.modoResultado);
+const conGoleadores = () => D.grupo.modoResultado === 'goleadores';
+// Goles de cada uno en un resultado, por equipo: "Franco 3, Beto 2".
+const textoGoleadores = (x, e) => {
+  const ids = [...(x[e] || []), ...(x['S' + e] || [])].filter(id => x.goles?.[id] > 0).sort((a, b) => x.goles[b] - x.goles[a]);
+  return ids.map(id => `${jugador(id)?.usuario || x.nombres?.[id] || 'Ex jugador'}${x.goles[id] > 1 ? ' ' + x.goles[id] : ''}`).join(', ');
+};
+function lineaGoleadores(x) {
+  if (!x.goles) return '';
+  const [a, b] = [textoGoleadores(x, 'A'), textoGoleadores(x, 'B')];
+  return a || b ? `<p class="text-xs text-slate-300 mt-1">⚽ ${a ? `🔴 ${esc(a)}` : ''}${a && b ? ' · ' : ''}${b ? `🔵 ${esc(b)}` : ''}</p>` : '';
+}
+// Con goleadores: el marcador es la suma de cada equipo (se actualiza mientras se escribe).
+function sumarGoles() {
+  ['A', 'B'].forEach(e => {
+    const out = document.getElementById('r-total-' + e);
+    if (out) out.textContent = [...document.querySelectorAll(`[data-gol="${e}"]`)].reduce((t, i) => t + (parseInt(i.value) || 0), 0);
+  });
+}
 const textoResultado = x => x.ganador === 'empate'
   ? `Empate${x.golesA != null ? ` ${x.golesA} – ${x.golesB}` : ''}`
   : `Ganó el ${NOMBRE_EQUIPO[x.ganador]}${x.golesA != null ? ` · ${x.ganador === 'A' ? x.golesA : x.golesB} a ${x.ganador === 'A' ? x.golesB : x.golesA}` : ''}`;
+// El admin o un armador anota cuántos hizo cada uno; el marcador sale de la suma.
+function formGoleadores(actual) {
+  const d = derivar(), eq = D.grupo.equipos;
+  const fila = (id, e, sup) => {
+    const j = jugador(id);
+    if (!j) return '';
+    return `
+      <li class="flex items-center gap-2 min-w-0">
+        ${avatar(j, 20)}<span class="truncate flex-1 text-sm ${sup ? 'text-slate-400' : ''}">${esc(j.usuario)}</span>
+        <input id="r-g-${id}" name="g_${id}" data-gol="${e}" type="number" inputmode="numeric" min="0" max="30" value="${actual?.goles?.[id] || ''}" placeholder="0" class="${INPUT} !w-12 !px-1 !py-1 text-center font-bold shrink-0">
+      </li>`;
+  };
+  const col = (e, color) => {
+    const sups = suplentesDe(e, d).map(j => j.id);
+    const asignados = [...(eq[e] || []), ...sups].reduce((t, id) => t + (actual?.goles?.[id] || 0), 0);
+    const otros = actual?.goles ? Math.max(0, (e === 'A' ? actual.golesA : actual.golesB) - asignados) : '';
+    return `
+      <div class="rounded-xl border ${color} p-2 space-y-1.5">
+        <p class="text-xs font-bold flex justify-between">${NOMBRE_EQUIPO[e]}<span id="r-total-${e}" class="text-lg leading-none font-black">0</span></p>
+        <ul class="space-y-1.5">${(eq[e] || []).map(id => fila(id, e)).join('')}${sups.map(id => fila(id, e, true)).join('')}
+          <li class="flex items-center gap-2"><span class="flex-1 text-xs text-slate-500">En contra / no sé quién</span>
+            <input id="r-x-${e}" name="x_${e}" data-gol="${e}" type="number" inputmode="numeric" min="0" max="30" value="${otros || ''}" placeholder="0" class="${INPUT} !w-12 !px-1 !py-1 text-center font-bold shrink-0"></li>
+        </ul>
+      </div>`;
+  };
+  return `
+    <form data-form="resultado" class="space-y-3">
+      <p class="text-xs text-slate-400 -mt-1">Anotá los goles de cada uno; el resultado es la suma.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${col('A', 'border-red-500/30 bg-red-500/5')}${col('B', 'border-sky-500/30 bg-sky-500/5')}</div>
+      <button class="${BTN_OK} w-full">Guardar resultado</button>
+    </form>
+    <button data-action="sin-goles" class="${BTN_CHIP} w-full mt-2 !py-2">No sé los goles, solo quién ganó</button>`;
+}
+
 function tarjetaResultado() {
   const p = D.grupo.partido, t = tiemposPartido();
   const actual = D.resultados.find(x => x.fecha === p.fecha);
@@ -3219,7 +3272,7 @@ function tarjetaResultado() {
     return card(`
       <h2 class="text-lg font-bold">${ic('flag', 'text-emerald-400')} ¿Cómo salió?</h2>
       <p class="text-xs text-slate-400 mt-0.5 mb-3">Lo ven todos los del grupo.${goles ? '' : ' Si saben los goles, el admin lo puede activar en Administrar.'}</p>
-      ${goles ? `
+      ${goles && conGoleadores() ? formGoleadores(actual) : goles ? `
         <form data-form="resultado" class="space-y-3">
           <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
             <label class="text-sm font-bold text-red-300">🔴 Equipo A<input id="r-a" name="golesA" type="number" inputmode="numeric" min="0" max="99" required value="${actual?.golesA ?? ''}" class="${INPUT} mt-1 text-center text-2xl font-black"></label>
@@ -3248,6 +3301,7 @@ function tarjetaResultado() {
         ${x === actual && puede ? '<button data-action="corregir-resultado" class="text-xs text-slate-400 hover:text-slate-200 underline-offset-2">Corregir</button>' : ''}
       </div>
       <p class="text-2xl font-black mt-1">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
+      ${lineaGoleadores(x)}
       ${equiposDelResultado(x)}
     </div>`;
 }
@@ -3263,10 +3317,10 @@ function equiposDelResultado(x) {
   const col = (e, color) => `
     <div class="rounded-xl border ${color} p-2.5 ${x.ganador === e ? 'ring-1 ring-amber-400/60' : ''}">
       <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}${x.ganador === e ? ' 🏆' : ''}</p>
-      <ul class="space-y-1 text-sm">${(x[e] || []).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span></li>`).join('')}</ul>
+      <ul class="space-y-1 text-sm">${(x[e] || []).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span>${x.goles?.[id] ? `<span class="text-xs shrink-0">⚽${x.goles[id] > 1 ? x.goles[id] : ''}</span>` : ''}</li>`).join('')}</ul>
       ${sup(e).length ? `
         <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
-        <ul class="space-y-1 text-sm text-slate-300">${sup(e).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span></li>`).join('')}</ul>` : ''}
+        <ul class="space-y-1 text-sm text-slate-300">${sup(e).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span>${x.goles?.[id] ? `<span class="text-xs shrink-0">⚽${x.goles[id] > 1 ? x.goles[id] : ''}</span>` : ''}</li>`).join('')}</ul>` : ''}
     </div>`;
   const abierto = ui.verResultado === x.fecha;
   return `
@@ -3423,11 +3477,12 @@ function historialDe(id) {
   if (todosResultados.gid !== D.gid || !todosResultados.docs) return null;
   // Los recién cargados (escuchados en vivo) pisan a los leídos al abrir.
   const porFecha = Object.fromEntries([...todosResultados.docs, ...D.resultados].map(x => [x.fecha, x]));
-  const h = { pj: 0, pg: 0, pe: 0, pp: 0 };
+  const h = { pj: 0, pg: 0, pe: 0, pp: 0, goles: 0, pjGoles: 0 };
   for (const x of Object.values(porFecha)) {
     const e = ['A', 'B'].find(k => (x[k] || []).includes(id) || (x['S' + k] || []).includes(id));
     if (!e) continue;
     h.pj++;
+    if (x.goles) { h.pjGoles++; h.goles += x.goles[id] || 0; }
     if (x.ganador === 'empate') h.pe++; else if (x.ganador === e) h.pg++; else h.pp++;
   }
   return h;
@@ -3442,7 +3497,7 @@ function tarjetaHistorial(id) {
     <div class="grid grid-cols-4 gap-2 mt-3 text-center">
       ${caja(h.pj, 'Jugados', 'text-slate-100')}${caja(h.pg, 'Ganados', 'text-emerald-300')}${caja(h.pe, 'Empates', 'text-slate-300')}${caja(h.pp, 'Perdidos', 'text-red-300')}
     </div>
-    <p class="text-xs text-slate-500 mt-2">${Math.round(h.pg / h.pj * 100)}% ganados. Cuentan los partidos con resultado cargado.</p>`);
+    <p class="text-xs text-slate-500 mt-2">${Math.round(h.pg / h.pj * 100)}% ganados${h.pjGoles ? ` · ⚽ ${h.goles} ${h.goles === 1 ? 'gol' : 'goles'}` : ''}. Cuentan los partidos con resultado cargado.</p>`);
 }
 
 // ---------------- 🏟️ Mi carrera (todos mis grupos) ----------------
@@ -3489,7 +3544,7 @@ function statsCarrera() {
     for (const x of g.resultados) {
       const e = ['A', 'B'].find(k => (x[k] || []).includes(uid) || (x['S' + k] || []).includes(uid));
       if (!e) continue;
-      partidos.push({ gid, nombre, x, e, r: x.ganador === 'empate' ? 'E' : x.ganador === e ? 'G' : 'P', mvp: (g.mvps[x.fecha] || []).includes(uid) });
+      partidos.push({ gid, nombre, x, e, r: x.ganador === 'empate' ? 'E' : x.ganador === e ? 'G' : 'P', mvp: (g.mvps[x.fecha] || []).includes(uid), goles: x.goles ? x.goles[uid] || 0 : null });
     }
     estrellas += Object.values(g.mvps).filter(gan => gan.includes(uid)).length;
     // Mis calificaciones de todos los grupos, pesando más donde tengo más votos.
@@ -3506,7 +3561,10 @@ function statsCarrera() {
   const prom = n ? Object.fromEntries(STATS.map(s => [s.k, suma[s.k] / n])) : null;
   const campo = prom && CAMPO.reduce((t, k) => t + prom[k], 0) / CAMPO.length;
   const general = prom && (D.perfil.posicion === 'arquero' ? (campo + prom.arquero) / 2 : campo);
-  return { partidos, pj, pg, pe: cuenta('E'), pp: cuenta('P'), racha, estrellas, n, grupos, prom, general };
+  // Goles: solo de los partidos donde se cargó quién los hizo.
+  const conGol = partidos.filter(p => p.goles !== null);
+  const goles = conGol.reduce((t, p) => t + p.goles, 0);
+  return { partidos, pj, pg, pe: cuenta('E'), pp: cuenta('P'), racha, estrellas, n, grupos, prom, general, goles, pjGoles: conGol.length };
 }
 const COLOR_FORMA = { G: 'bg-emerald-500 text-slate-950', E: 'bg-slate-500 text-white', P: 'bg-red-500 text-white' };
 const formaChips = (ps, cls = 'w-6 h-6 text-xs') => ps.map(p => `<span title="${esc(fechaLinda(p.x.fecha))} · ${esc(p.nombre)}" class="${cls} rounded-md grid place-items-center font-black ${COLOR_FORMA[p.r]}">${p.r}</span>`).join('');
@@ -3518,6 +3576,62 @@ function miFicha() {
   const caja = (v, txt, color) => `<div class="rounded-xl bg-slate-800/60 py-2"><p class="text-2xl font-black ${color}">${v}</p><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">${txt}</p></div>`;
   const lim = ui.partidosLim || 10;
   return `
+    <button data-action="ver-ficha" aria-label="Ver la ficha completa" class="${CARD} w-full text-left bg-gradient-to-br from-slate-900 to-slate-950 hover:border-slate-700 transition">
+      <div class="flex items-center gap-3">
+        ${avatar(p, 56)}
+        <div class="min-w-0 flex-1">
+          <p class="text-xl font-black truncate">${esc(p.usuario)}${c.estrellas ? ` <span class="text-sm text-amber-300">⭐${c.estrellas > 1 ? c.estrellas : ''}</span>` : ''}</p>
+          <p class="text-slate-400 text-xs">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
+        </div>
+        <div class="text-center shrink-0">
+          <div class="text-4xl font-black leading-none ${c.n ? colorNota(c.general) : 'text-slate-600'}">${c.n ? c.general.toFixed(1) : '–'}</div>
+          <div class="text-[9px] tracking-widest text-slate-500 mt-1">GENERAL</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-7 gap-1 mt-3 text-center">
+        ${STATS.map(s => `<div class="rounded-lg bg-slate-800/60 py-1"><p class="text-[9px] font-bold text-slate-400">${s.corto}</p><p class="text-sm font-black ${c.n ? colorNota(c.prom[s.k]) : 'text-slate-600'}">${c.n ? c.prom[s.k].toFixed(1) : '–'}</p></div>`).join('')}
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2 flex items-center justify-between gap-2"><span>${c.n ? `${c.n} ${c.n === 1 ? 'voto' : 'votos'}${c.grupos > 1 ? ` de ${c.grupos} grupos` : ''}` : 'Todavía nadie te calificó'}</span><span class="text-sky-300 font-semibold">Ver ficha completa ›</span></p>
+    </button>
+    ${card(`
+      <h2 class="font-bold">${ic('chart-column', 'text-emerald-400')} Tu carrera</h2>
+      ${c.pj ? `
+        <div class="grid grid-cols-4 gap-2 mt-3 text-center">
+          ${caja(c.pj, 'Jugados', 'text-slate-100')}${caja(c.pg, 'Ganados', 'text-emerald-300')}${caja(c.pe, 'Empates', 'text-slate-300')}${caja(c.pp, 'Perdidos', 'text-red-300')}
+        </div>
+        <div class="flex items-center justify-between gap-3 mt-3">
+          <p class="text-sm text-slate-300"><b>${Math.round(c.pg / c.pj * 100)}%</b> ganados${c.racha >= 2 ? ` · 🔥 <b>${c.racha}</b> seguidos` : ''}${c.pjGoles ? `<br>⚽ <b>${c.goles}</b> ${c.goles === 1 ? 'gol' : 'goles'} · ${(c.goles / c.pjGoles).toFixed(1)} por partido` : ''}</p>
+          <div class="flex gap-1" aria-label="Últimos partidos">${formaChips(c.partidos.slice(0, 5).reverse())}</div>
+        </div>`
+      : '<p class="text-sm text-slate-400 mt-1">Todavía no jugaste partidos con resultado cargado. Cuando el admin cargue quién ganó, acá vas a ver tus números.</p>'}`)}
+    ${c.pj ? card(`
+      <h2 class="font-bold mb-1">${ic('clipboard-list', 'text-sky-400')} Partidos jugados</h2>
+      <ul class="divide-y divide-slate-800">
+        ${c.partidos.slice(0, lim).map(x => `
+          <li>
+            <button data-action="cambiar-grupo" data-gid="${x.gid}" class="w-full flex items-center gap-3 py-2 text-left hover:bg-slate-800/40 rounded-lg">
+              <span class="w-7 h-7 shrink-0 rounded-md grid place-items-center text-xs font-black ${COLOR_FORMA[x.r]}">${x.r}</span>
+              <span class="flex-1 min-w-0">
+                <span class="block text-sm font-semibold truncate">${esc(x.nombre)}${x.mvp ? ' <span title="Jugador del partido">⭐</span>' : ''}${x.goles ? ` <span class="text-xs font-normal">⚽${x.goles > 1 ? x.goles : ''}</span>` : ''}</span>
+                <span class="block text-xs text-slate-400">${esc(fechaLinda(x.x.fecha))} · ${NOMBRE_EQUIPO[x.e]}${x.x.golesA != null ? ` · ${x.e === 'A' ? x.x.golesA : x.x.golesB} a ${x.e === 'A' ? x.x.golesB : x.x.golesA}` : ''}</span>
+              </span>
+            </button>
+          </li>`).join('')}
+      </ul>
+      ${c.pj > lim ? `<button data-action="mas-partidos" class="${BTN_SEC} w-full text-sm mt-2">Ver más (${c.pj - lim})</button>` : ''}`) : ''}`;
+}
+
+// La ficha técnica completa, en pantalla entera (desde Mi ficha).
+function modalFicha() {
+  const c = statsCarrera(), p = D.perfil;
+  if (!c || !p) return '';
+  return `
+    <div class="fixed inset-0 z-50 bg-slate-950 overflow-y-auto" role="dialog" aria-label="Mi ficha">
+      <div class="max-w-xl mx-auto p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <button data-action="cerrar-modal" class="${BTN_CHIP}">← Volver</button>
+          <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-9 !h-9">${ic('x')}</button>
+        </div>
     <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
       <div class="flex items-center gap-4">
         ${avatar(p, 80)}
@@ -3546,32 +3660,8 @@ function miFicha() {
       </div>
       <p class="text-xs text-slate-500 mt-3">${c.n ? `Según ${c.n} ${c.n === 1 ? 'voto' : 'votos'}${c.grupos > 1 ? ` de tus ${c.grupos} grupos` : ''}. Esta ficha combinada la ves solo vos; en cada grupo ven la de ese grupo.` : 'Todavía nadie te calificó.'}</p>
     </div>
-    ${card(`
-      <h2 class="font-bold">${ic('chart-column', 'text-emerald-400')} Tu carrera</h2>
-      ${c.pj ? `
-        <div class="grid grid-cols-4 gap-2 mt-3 text-center">
-          ${caja(c.pj, 'Jugados', 'text-slate-100')}${caja(c.pg, 'Ganados', 'text-emerald-300')}${caja(c.pe, 'Empates', 'text-slate-300')}${caja(c.pp, 'Perdidos', 'text-red-300')}
-        </div>
-        <div class="flex items-center justify-between gap-3 mt-3">
-          <p class="text-sm text-slate-300"><b>${Math.round(c.pg / c.pj * 100)}%</b> ganados${c.racha >= 2 ? ` · 🔥 <b>${c.racha}</b> seguidos` : ''}</p>
-          <div class="flex gap-1" aria-label="Últimos partidos">${formaChips(c.partidos.slice(0, 5).reverse())}</div>
-        </div>`
-      : '<p class="text-sm text-slate-400 mt-1">Todavía no jugaste partidos con resultado cargado. Cuando el admin cargue quién ganó, acá vas a ver tus números.</p>'}`)}
-    ${c.pj ? card(`
-      <h2 class="font-bold mb-1">${ic('clipboard-list', 'text-sky-400')} Partidos jugados</h2>
-      <ul class="divide-y divide-slate-800">
-        ${c.partidos.slice(0, lim).map(x => `
-          <li>
-            <button data-action="cambiar-grupo" data-gid="${x.gid}" class="w-full flex items-center gap-3 py-2 text-left hover:bg-slate-800/40 rounded-lg">
-              <span class="w-7 h-7 shrink-0 rounded-md grid place-items-center text-xs font-black ${COLOR_FORMA[x.r]}">${x.r}</span>
-              <span class="flex-1 min-w-0">
-                <span class="block text-sm font-semibold truncate">${esc(x.nombre)}${x.mvp ? ' <span title="Jugador del partido">⭐</span>' : ''}</span>
-                <span class="block text-xs text-slate-400">${esc(fechaLinda(x.x.fecha))} · ${NOMBRE_EQUIPO[x.e]}${x.x.golesA != null ? ` · ${x.e === 'A' ? x.x.golesA : x.x.golesB} a ${x.e === 'A' ? x.x.golesB : x.x.golesA}` : ''}</span>
-              </span>
-            </button>
-          </li>`).join('')}
-      </ul>
-      ${c.pj > lim ? `<button data-action="mas-partidos" class="${BTN_SEC} w-full text-sm mt-2">Ver más (${c.pj - lim})</button>` : ''}`) : ''}`;
+      </div>
+    </div>`;
 }
 
 // Inicio: tus números en una línea (tocando, vas a tu ficha).
@@ -3610,6 +3700,7 @@ function tarjetaHistorialGrupo() {
             <li class="py-2.5">
               <p class="text-xs text-slate-400">${esc(fechaLinda(x.fecha))}</p>
               <p class="font-bold">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
+              ${lineaGoleadores(x)}
               ${mejor(x.fecha) ? `<p class="text-xs text-amber-200 mt-0.5">⭐ Jugador del partido: <b>${esc(mejor(x.fecha))}</b></p>` : ''}
               ${equiposDelResultado(x)}
             </li>`).join('')}
@@ -3802,7 +3893,7 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : '';
 }
 
 const avisoCalificaciones = `
@@ -4017,10 +4108,11 @@ function panelAdmin(d) {
     <div class="mt-6 rounded-xl border border-slate-800 p-3">
       <h3 class="font-semibold text-sm text-slate-300">${ic('flag')} Resultado del partido</h3>
       <p class="text-xs text-slate-500 mt-0.5 mb-2">Al terminar, un admin o armador carga cómo salió y lo ven todos.</p>
-      <div class="grid grid-cols-2 gap-2">
-        <button data-action="modo-resultado" data-modo="ganador" class="${BTN} text-sm ${D.grupo.modoResultado !== 'goles' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">Solo quién ganó</button>
-        <button data-action="modo-resultado" data-modo="goles" class="${BTN} text-sm ${D.grupo.modoResultado === 'goles' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">Con goles</button>
+      <div class="grid grid-cols-3 gap-2">
+        ${[['ganador', 'Solo quién ganó'], ['goles', 'Con goles'], ['goleadores', 'Goles y quién los hizo']].map(([m, txt]) => `
+          <button data-action="modo-resultado" data-modo="${m}" class="${BTN} text-sm leading-tight ${(D.grupo.modoResultado || 'ganador') === m ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">${txt}</button>`).join('')}
       </div>
+      ${conGoleadores() ? '<p class="text-xs text-slate-500 mt-2">El admin o un armador anota cuántos hizo cada uno. Los goles salen en el historial y en la ficha de cada jugador.</p>' : ''}
     </div>
 
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
@@ -4106,8 +4198,9 @@ function render() {
   renderVistas();
   pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
-  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : '');
+  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : D.perfil && ui.modal === 'ficha' ? modalFicha() : '');
   activarCargaPerezosa();
+  sumarGoles();
   if (listo) {
     asegurarRotacion();
     asegurarVotacion();
@@ -4149,7 +4242,7 @@ window.addEventListener('hashchange', () => {
 // ---------------- Acciones ----------------
 // Guarda el resultado de la fecha, con los equipos con los que se jugó (suplentes
 // incluidos) y los nombres, así se sigue viendo aunque alguien se vaya del grupo.
-async function guardarResultado(ganador, goles = null) {
+async function guardarResultado(ganador, goles = null, goleadores = null) {
   const p = D.grupo.partido, eq = D.grupo.equipos, d = derivar();
   const base = {
     fecha: p.fecha, ganador, A: eq?.A || [], B: eq?.B || [], por: miUid(), ts: Date.now(),
@@ -4159,7 +4252,7 @@ async function guardarResultado(ganador, goles = null) {
   const nombres = Object.fromEntries([...base.A, ...base.B, ...SA, ...SB].map(id => [id, jugador(id)?.usuario]).filter(x => x[1]));
   const ref = F.doc(colResultados(D.gid), p.fecha);
   const ok = await act(async () => {
-    try { await F.setDoc(ref, { ...base, SA, SB, nombres }); }
+    try { await F.setDoc(ref, { ...base, SA, SB, nombres, ...(goleadores ? { goles: goleadores } : {}) }); }
     // Con las reglas viejas de Firestore no se pueden guardar los suplentes: va sin ellos.
     catch (e) { if (e.code !== 'permission-denied') throw e; await F.setDoc(ref, base); }
   }, '🏁 Resultado guardado');
@@ -4194,6 +4287,7 @@ const acciones = {
   'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
+  'ver-ficha': () => { ui.modal = 'ficha'; render(); },
   'cerrar-modal': () => { ui.modal = null; render(); },
   // Sin id: lista de anotados para elegir a quién; con id: a quién poner en su lugar.
   reemplazar: ({ id }) => { ui.modal = 'reemplazar'; ui.reemplazar = id || null; render(); },
@@ -4350,7 +4444,7 @@ const acciones = {
   'sin-goles': () => { ui.sinGoles = true; render(); },
   'ver-resultado': ({ fecha }) => { ui.verResultado = ui.verResultado === fecha ? null : fecha; render(); },
   'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
-  'modo-resultado': ({ modo }) => actualizarGrupo(s => { s.modoResultado = modo; }, modo === 'goles' ? 'Se van a cargar los goles' : 'Se va a cargar solo quién ganó'),
+  'modo-resultado': ({ modo }) => actualizarGrupo(s => { s.modoResultado = modo; }, { goles: 'Se van a cargar los goles', goleadores: 'Se van a cargar los goles de cada uno' }[modo] || 'Se va a cargar solo quién ganó'),
   'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
   'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
   'toggle-avisos': () => { ui.avisosAbiertos = !ui.avisosAbiertos; render(); },
@@ -4524,6 +4618,17 @@ const formularios = {
   },
   perfil: guardarPerfil,
   resultado: f => {
+    // Con goleadores: cada uno lo suyo; el marcador es la suma.
+    if (f.has('x_A')) {
+      const goles = {}, tot = { A: 0, B: 0 };
+      for (const [k, v] of f) {
+        const n = parseInt(v) || 0;
+        if (n < 0 || n > 30) return toast('Poné entre 0 y 30 goles');
+        if (k.startsWith('g_') && n) goles[k.slice(2)] = n;
+      }
+      for (const e of ['A', 'B']) tot[e] = [...document.querySelectorAll(`[data-gol="${e}"]`)].reduce((t, i) => t + (parseInt(i.value) || 0), 0);
+      return guardarResultado(tot.A > tot.B ? 'A' : tot.B > tot.A ? 'B' : 'empate', [tot.A, tot.B], goles);
+    }
     const a = parseInt(f.get('golesA')), b = parseInt(f.get('golesB'));
     if (!(a >= 0 && b >= 0 && a <= 99 && b <= 99)) return toast('Poné los goles de los dos equipos');
     return guardarResultado(a > b ? 'A' : b > a ? 'B' : 'empate', [a, b]);
@@ -4727,6 +4832,7 @@ document.addEventListener('input', e => {
   const t = e.target;
   if (t.id) t.dataset.dirty = '1';
   if (t.dataset.out) document.getElementById(t.dataset.out).textContent = t.value;
+  if (t.dataset.gol) sumarGoles();
   if (t.id === 'l-usuario') actualizarAvisoUsuario();
   if (t.id === 'pf-cuadro-buscar') { ui.cuadroFiltro = t.value; render(); }
 });

@@ -232,7 +232,7 @@ service cloud.firestore {
       match /resultados/{f} {
         allow read: if esMiembro(g);
         allow create, update: if (esAdmin(g) || esArmador(g))
-          && request.resource.data.keys().hasOnly(['fecha', 'ganador', 'golesA', 'golesB', 'A', 'B', 'SA', 'SB', 'nombres', 'por', 'ts'])
+          && request.resource.data.keys().hasOnly(['fecha', 'ganador', 'golesA', 'golesB', 'A', 'B', 'SA', 'SB', 'nombres', 'goles', 'por', 'ts'])
           && request.resource.data.fecha == f
           && request.resource.data.ganador in ['A', 'B', 'empate']
           && request.resource.data.por == uid()
@@ -241,6 +241,8 @@ service cloud.firestore {
           && (!('SA' in request.resource.data) || (request.resource.data.SA is list && request.resource.data.SA.size() <= 30))
           && (!('SB' in request.resource.data) || (request.resource.data.SB is list && request.resource.data.SB.size() <= 30))
           && (!('nombres' in request.resource.data) || (request.resource.data.nombres is map && request.resource.data.nombres.size() <= 120))
+          // Goles de cada uno (lo carga el admin o un armador): { uid: cantidad }.
+          && (!('goles' in request.resource.data) || (request.resource.data.goles is map && request.resource.data.goles.size() <= 60))
           && (!('golesA' in request.resource.data) || (request.resource.data.golesA is int && request.resource.data.golesA >= 0 && request.resource.data.golesA <= 99
             && request.resource.data.golesB is int && request.resource.data.golesB >= 0 && request.resource.data.golesB <= 99));
         allow delete: if esAdmin(g);
