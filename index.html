@@ -128,7 +128,7 @@ const colRehacer = g => F.collection(db, 'grupos', g, 'rehacer');
 const refRehacer = (g, u) => F.doc(db, 'grupos', g, 'rehacer', u);
 
 // Jugador del partido: se vota desde una hora después de que empieza el partido (si no
-// tiene hora, desde las 00:00 del día siguiente) hasta las 23:59 del día siguiente.
+// tiene hora, desde las 00:00 del día siguiente) hasta las 15:00 del día siguiente.
 // Todo en hora argentina (UTC-3). Las reglas de Firestore hacen la misma cuenta.
 const TZ = 'America/Argentina/Buenos_Aires';
 const DIA = 864e5;
@@ -140,7 +140,10 @@ const abreVotacion = (fecha, hora) => {
   const h = horaDelPartido({ cuando: hora || '' });
   return h ? Date.parse(`${fecha}T${h}:00-03:00`) + 3600e3 : inicioDia(fecha) + DIA;
 };
-const cierraVotacion = fecha => inicioDia(fecha) + 2 * DIA;
+const CIERRE_MVP_H = 15;
+const cierraVotacion = fecha => inicioDia(fecha) + DIA + CIERRE_MVP_H * 3600e3;
+// Antes cerraba a las 00:00 del día siguiente: las reglas viejas de Firestore solo aceptan esa.
+const cierraVotacionVieja = fecha => inicioDia(fecha) + 2 * DIA;
 // "20", "20hs", "8:30", "20.30 hs" → "20:00", "08:30", "20:30". Si no se entiende, queda como está.
 function normalizarHora(t) {
   const m = t.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?\s*(?:h|hs|hrs?)?\.?$/i);
@@ -209,12 +212,14 @@ const momentoLindo = ms => {
   const iso = new Date(ms - 3 * 3600e3).toISOString();
   return `${fechaLinda(iso.slice(0, 10))} a las ${iso.slice(11, 16)}`;
 };
-// Hasta cuándo se vota: "hoy a las 23:59", "mañana a las 23:59" o la fecha.
+// Hasta cuándo se vota: "hoy a las 15:00", "mañana a las 15:00" o la fecha.
+// (Las votaciones viejas cerraban a las 00:00: se muestra como 23:59 del día anterior.)
 const hastaCuando = m => {
   const hoy = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
   const ultimo = new Date(m.cierra - 1 - 3 * 3600e3).toISOString().slice(0, 10);
+  const hora = new Date(m.cierra - 3 * 3600e3).toISOString().slice(11, 16);
   const manana = new Date(Date.parse(hoy + 'T12:00:00Z') + DIA).toISOString().slice(0, 10);
-  return `${ultimo === hoy ? 'hoy' : ultimo === manana ? 'mañana' : 'el ' + fechaLinda(ultimo)} a las 23:59`;
+  return `${ultimo === hoy ? 'hoy' : ultimo === manana ? 'mañana' : 'el ' + fechaLinda(ultimo)} a las ${hora === '00:00' ? '23:59' : hora}`;
 };
 const fechaLinda = f => {
   if (!f) return '';
@@ -962,9 +967,14 @@ function crearVotacion(fecha) {
   const datos = datosVotacion(D.grupo, fecha);
   if (!datos.candidatos.length) return Promise.resolve(false);
   const ref = refMvp(D.gid, fecha);
-  return act(() => F.runTransaction(db, async tx => {
-    if (!(await tx.get(ref)).exists()) tx.set(ref, datos);
-  }));
+  const crear = d => F.runTransaction(db, async tx => {
+    if (!(await tx.get(ref)).exists()) tx.set(ref, d);
+  });
+  return act(async () => {
+    try { await crear(datos); }
+    // Con las reglas viejas de Firestore, cierra como antes (a las 00:00).
+    catch (e) { if (e.code !== 'permission-denied') throw e; await crear({ ...datos, cierra: cierraVotacionVieja(fecha) }); }
+  });
 }
 
 // Una hora después de que empieza el partido, el primero que abre la app crea la votación.
@@ -972,13 +982,16 @@ let mvpIntentado = null;
 // Fecha fija: terminado el partido (y el rato de lista cerrada), se pasa a la fecha siguiente.
 // Antes se arma la votación del mejor con los titulares; el cambio lo hace api/avisar.js.
 let rotacionIntentada = null;
+// Sin fecha fija: cuando cierra la votación del mejor, la lista y los equipos se vacían.
 async function asegurarRotacion() {
-  const g = D.grupo;
-  if (!agendaActiva(g) || !D.miembros || !D.cargado.mvps || !D.cargado.faltas) return;
+  const g = D.grupo, fija = agendaActiva(g);
+  if (!D.miembros || !D.cargado.mvps || !D.cargado.faltas) return;
   const p = g.partido, t = tiemposDe(p);
+  if (!fija && !p.fecha) return;
   const termino = !p.fecha || (t ? Date.now() >= t.fin + BLOQUEO_DESPUES_H * 3600e3 : p.fecha < hoyArg());
+  const cerroVotacion = p.fecha && Date.now() >= (D.mvp?.id === p.fecha ? D.mvp.cierra : cierraVotacion(p.fecha));
   const clave = `${D.gid}/${p.fecha}`;
-  if (!termino || rotacionIntentada === clave) return;
+  if (!termino || (!fija && !cerroVotacion) || rotacionIntentada === clave) return;
   rotacionIntentada = clave;
   if (p.fecha && Date.now() < cierraVotacion(p.fecha) && D.mvp?.id !== p.fecha) await crearVotacion(p.fecha);
   avisar('rotar');
@@ -996,6 +1009,16 @@ function asegurarSuplentesMvp() {
   const candidatos = [...m.candidatos, ...faltan].slice(0, 30);
   const nombres = { ...(m.nombres || {}), ...Object.fromEntries(faltan.map(id => [id, jugador(id).usuario])) };
   F.updateDoc(refMvp(D.gid, m.id), { candidatos, nombres }).catch(e => console.warn(e));
+}
+
+// Cerrada la votación, el primero que la ve pide la notificación con el ganador
+// (api/avisar.js la manda una sola vez). Solo si cerró hace menos de un día.
+let avisoMvpPedido = null;
+function asegurarAvisoMvp() {
+  const m = D.mvp;
+  if (!m || m.avisado || estadoMvp() !== 'cerrada' || Date.now() > m.cierra + DIA || avisoMvpPedido === `${D.gid}/${m.id}`) return;
+  avisoMvpPedido = `${D.gid}/${m.id}`;
+  avisar('mvp', { fecha: m.id });
 }
 
 function asegurarVotacion() {
@@ -1257,6 +1280,7 @@ function mensajeWsp() {
     d.suplentes.forEach((j, i) => L.push(`S${i + 1}. ${j.usuario} ${pos(j).emoji}`));
   }
   if (D.grupo.equipos && !equiposDesactualizados(d)) L.push('', ...lineasEquipos());
+  L.push(...lineasTribuna());
   L.push('', `👉 Anotate acá: ${urlBase()}`);
   return L.join('\n');
 }
@@ -1277,13 +1301,19 @@ function lineasEquipos() {
   return L;
 }
 
-// Solo los equipos, para mandar cuando ya se armaron.
+// Los que van a ver el partido (nada si no va nadie).
+function lineasTribuna() {
+  const gente = D.grupo.publico.map(id => jugador(id) || D.miembros[id]).filter(Boolean);
+  return gente.length ? ['', `📣 *TRIBUNA* (${gente.length})`, ...gente.map(j => `• ${j.usuario}`)] : [];
+}
+
+// Solo los equipos (y la tribuna), para mandar cuando ya se armaron.
 function mensajeEquipos() {
   const p = D.grupo.partido;
   const L = [`⚽ *${p.titulo || 'Fulbo'}*`];
   if (p.fecha || p.cuando) L.push(`📅 ${[fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ')}`);
   if (p.lugar) L.push(`📍 ${p.lugar}`);
-  L.push('', ...lineasEquipos());
+  L.push('', ...lineasEquipos(), ...lineasTribuna());
   return L.join('\n');
 }
 
@@ -1839,13 +1869,16 @@ function tarjetaMisPartidos(completo = false) {
         </div>
       </li>`;
   };
+  // Las fechas que ya se jugaron no se muestran.
+  const proximos = ps.filter(x => !x.g || !x.viejo);
+  const vacio = '<p class="py-3 text-sm text-slate-400">No hay más fechas próximas.</p>';
   if (completo) {
-    // Pestaña Calendario: todo, cargando de a 10 a medida que se baja.
+    // Pestaña Calendario: el mes o la semana y, abajo, los próximos (de a 10 a medida que se baja).
     const lim = ui.calLimite || 10;
-    return card(`
-      ${tiraSemana(ps)}
-      <ul class="divide-y divide-slate-800">${ps.slice(0, lim).map(fila).join('')}</ul>
-      ${ps.length > lim ? `<button data-action="mas-cal" data-perezoso class="${BTN_SEC} w-full text-sm mt-2">Ver más (${ps.length - lim})</button>` : ''}`);
+    return calendario(ps) + card(`
+      <h2 class="text-base font-bold mb-1">Próximos partidos</h2>
+      ${proximos.length ? `<ul class="divide-y divide-slate-800">${proximos.slice(0, lim).map(fila).join('')}</ul>` : vacio}
+      ${proximos.length > lim ? `<button data-action="mas-cal" data-perezoso class="${BTN_SEC} w-full text-sm mt-2">Ver más (${proximos.length - lim})</button>` : ''}`);
   }
   // Plegable: se recuerda si lo dejaste abierto.
   const desplegado = guardado.get(LS + 'cal') === '1';
@@ -1861,8 +1894,123 @@ function tarjetaMisPartidos(completo = false) {
     ${desplegado ? `
       <div class="mt-3">
         ${tiraSemana(ps)}
-        <ul class="divide-y divide-slate-800">${ps.map(fila).join('')}</ul>
+        ${proximos.length ? `<ul class="divide-y divide-slate-800">${proximos.map(fila).join('')}</ul>` : vacio}
       </div>` : ''}`);
+}
+
+// ---- Calendario (mes y semana) ----
+// Partidos de todos mis grupos: la fecha cargada de cada uno y, si tiene fecha fija, las que siguen.
+const SEMANAS_CAL = 10;
+function eventosCal(ps) {
+  const ev = [];
+  for (const x of ps) {
+    if (!x.g) continue;
+    if (x.p.fecha && !x.viejo) ev.push({ fecha: x.p.fecha, hora: x.t?.hora || x.p.cuando || '', lugar: x.p.lugar || '', x, actual: true });
+    if (agendaActiva(x.g)) {
+      const desde = x.p.fecha && !x.viejo ? x.p.fecha : ayerArg();
+      proximasFechas(x.g.agenda, desde, SEMANAS_CAL * x.g.agenda.slots.length)
+        .forEach(o => ev.push({ fecha: o.fecha, hora: o.hora, lugar: o.lugar || x.p.lugar || '', x, actual: false }));
+    }
+  }
+  return ev.sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+}
+// Un color por grupo (igual siempre), para distinguirlos en el mes.
+const colorGrupo = nombre => `hsl(${[...nombre].reduce((h, c) => h + c.charCodeAt(0), 0) % 360} 65% 60%)`;
+const isoMas = (f, dias) => new Date(Date.parse(f + 'T12:00:00Z') + dias * DIA).toISOString().slice(0, 10);
+// Lunes de la semana de esa fecha.
+const lunesDe = f => isoMas(f, -((diaDe(f) + 6) % 7));
+const anotadoEv = e => e.actual && ['titular', 'suplente'].includes(e.x.estado);
+
+function calendario(ps) {
+  const ev = eventosCal(ps), hoy = hoyArg();
+  const vista = guardado.get(LS + 'calVista') === 'semana' ? 'semana' : 'mes';
+  const off = ui.calOffset || 0;
+  const del = f => ev.filter(e => e.fecha === f);
+  let sel = ui.calDia || hoy;
+  let dias, titulo;
+  if (vista === 'mes') {
+    const [a, m] = hoy.split('-').map(Number);
+    const primero = new Date(Date.UTC(a, m - 1 + off, 1, 12)).toISOString().slice(0, 10);
+    const inicio = lunesDe(primero);
+    const mesDe = primero.slice(0, 7);
+    if (!ui.calDia && off) sel = primero;
+    const semanas = Math.ceil((Math.round((Date.parse(primero + 'T12:00:00Z') - Date.parse(inicio + 'T12:00:00Z')) / DIA) + new Date(Date.UTC(a, m + off, 0)).getUTCDate()) / 7);
+    dias = Array.from({ length: semanas * 7 }, (_, i) => isoMas(inicio, i)).map(f => ({ f, fuera: f.slice(0, 7) !== mesDe }));
+    titulo = new Date(primero + 'T12:00:00Z').toLocaleDateString('es-AR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  } else {
+    // Los 7 días desde hoy (no desde el lunes: un sábado mostraría casi todo pasado).
+    const inicio = isoMas(hoy, off * 7);
+    dias = Array.from({ length: 7 }, (_, i) => ({ f: isoMas(inicio, i) }));
+    const corta = f => `${+f.slice(8)}/${+f.slice(5, 7)}`;
+    titulo = `Del ${corta(inicio)} al ${corta(dias[6].f)}`;
+  }
+  const pill = e => `
+    <span class="block truncate rounded px-1 text-[10px] leading-4 font-semibold ${e.actual ? '' : 'opacity-70 border border-dashed'}"
+      style="background:${anotadoEv(e) ? 'rgb(16 185 129 / .25)' : 'rgb(30 41 59 / .9)'};border-color:${colorGrupo(e.x.nombre)};box-shadow:inset 2px 0 0 ${colorGrupo(e.x.nombre)}">${esc(e.hora)} ${esc(e.x.nombre)}</span>`;
+  const punto = e => `<span class="w-1.5 h-1.5 rounded-full ${e.actual ? '' : 'opacity-60'}" style="background:${anotadoEv(e) ? '#34d399' : colorGrupo(e.x.nombre)}"></span>`;
+  const celda = ({ f, fuera }) => {
+    const es = del(f), pasado = f < hoy;
+    return `
+      <button data-action="cal-dia" data-fecha="${f}" class="min-h-[52px] sm:min-h-[84px] rounded-lg p-1 text-left align-top flex flex-col gap-0.5 transition
+        ${f === sel ? 'ring-2 ring-sky-400/70' : ''} ${fuera || pasado ? 'bg-slate-900/40 text-slate-600' : 'bg-slate-800/50 hover:bg-slate-800 text-slate-200'}">
+        <span class="text-xs font-bold ${f === hoy ? 'bg-sky-500 text-slate-950 rounded-full w-5 h-5 grid place-items-center' : ''}">${new Date(f + 'T12:00:00Z').getUTCDate()}</span>
+        ${pasado ? '' : `
+          <span class="hidden sm:flex flex-col gap-0.5 min-w-0">${es.slice(0, 3).map(pill).join('')}${es.length > 3 ? `<span class="text-[10px] text-slate-400">+${es.length - 3} más</span>` : ''}</span>
+          <span class="flex sm:hidden flex-wrap gap-0.5">${es.map(punto).join('')}</span>`}
+      </button>`;
+  };
+  // Semana: un renglón por día, con los partidos y su hora.
+  const renglon = ({ f }) => {
+    const es = del(f), pasado = f < hoy;
+    const d = new Date(f + 'T12:00:00Z');
+    return `
+      <li class="flex gap-3 py-2 ${pasado ? 'opacity-40' : ''}">
+        <div class="w-11 shrink-0 text-center rounded-xl py-1 ${f === hoy ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-400/40' : 'bg-slate-800/60 text-slate-400'}">
+          <p class="text-[10px] font-bold uppercase">${DIAS[d.getUTCDay()].slice(0, 3)}</p>
+          <p class="text-lg font-black leading-none">${d.getUTCDate()}</p>
+        </div>
+        <div class="flex-1 min-w-0 space-y-1 self-center">
+          ${es.length && !pasado ? es.map(e => `
+            <button data-action="cambiar-grupo" data-gid="${e.x.id}" class="w-full text-left rounded-lg px-2 py-1.5 text-sm ${anotadoEv(e) ? 'bg-emerald-500/15' : 'bg-slate-800/70'} ${e.actual ? '' : 'border border-dashed border-slate-700'}" style="box-shadow:inset 3px 0 0 ${colorGrupo(e.x.nombre)}">
+              <b>${esc(e.hora)}</b> · ${esc(e.x.nombre)}${e.lugar ? ` <span class="text-xs text-slate-400">· ${esc(e.lugar)}</span>` : ''}
+              ${anotadoEv(e) ? `<span class="text-[11px] text-emerald-300"> · ${e.x.estado === 'titular' ? 'Titular' : 'Suplente'}</span>` : e.actual ? '' : '<span class="text-[11px] text-slate-500"> · fecha fija</span>'}
+            </button>`).join('') : '<p class="text-xs text-slate-600">—</p>'}
+        </div>
+      </li>`;
+  };
+  // Detalle del día tocado en el mes.
+  const delSel = del(sel);
+  const detalle = vista === 'mes' ? `
+    <div class="mt-3 border-t border-slate-800 pt-3">
+      <p class="text-sm font-bold">${esc(fechaLinda(sel))}</p>
+      ${sel < hoy ? '<p class="text-xs text-slate-500 mt-1">Ya pasó.</p>' : delSel.length ? `<ul class="mt-1">${delSel.map(e => `
+        <li><button data-action="cambiar-grupo" data-gid="${e.x.id}" class="w-full text-left rounded-lg mt-1 px-2 py-1.5 text-sm ${anotadoEv(e) ? 'bg-emerald-500/15' : 'bg-slate-800/70'}" style="box-shadow:inset 3px 0 0 ${colorGrupo(e.x.nombre)}">
+          <b>${esc(e.hora)}</b> · ${esc(e.x.nombre)}${e.lugar ? ` <span class="text-xs text-slate-400">· ${esc(e.lugar)}</span>` : ''}
+          ${anotadoEv(e) ? `<span class="text-[11px] text-emerald-300"> · ${e.x.estado === 'titular' ? 'Titular' : 'Suplente'}</span>` : e.actual ? '<span class="text-[11px] text-slate-400"> · no anotado</span>' : '<span class="text-[11px] text-slate-500"> · fecha fija (la lista abre después)</span>'}
+        </button></li>`).join('')}</ul>` : '<p class="text-xs text-slate-500 mt-1">No hay partidos.</p>'}
+    </div>` : '';
+  const tab = (v, txt) => `<button data-action="cal-vista" data-vista="${v}" class="rounded-md px-3 py-1 text-xs font-semibold ${vista === v ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}">${txt}</button>`;
+  return card(`
+    <div class="flex items-center justify-between gap-2 mb-3">
+      <div class="flex items-center gap-1">
+        <button data-action="cal-mover" data-n="-1" aria-label="Anterior" class="${BTN_ICONO} !w-8 !h-8">${ic('chevron-right', 'rotate-180')}</button>
+        <button data-action="cal-mover" data-n="1" aria-label="Siguiente" class="${BTN_ICONO} !w-8 !h-8">${ic('chevron-right')}</button>
+        <h2 class="text-base font-bold first-letter:uppercase ml-1">${esc(titulo)}</h2>
+      </div>
+      <div class="flex items-center gap-2">
+        ${off ? `<button data-action="cal-hoy" class="${BTN_CHIP} !py-1">Hoy</button>` : ''}
+        <div class="flex rounded-lg bg-slate-800/80 p-0.5">${tab('mes', 'Mes')}${tab('semana', 'Semana')}</div>
+      </div>
+    </div>
+    ${vista === 'mes' ? `
+      <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase text-slate-500 mb-1">${['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map(d => `<span>${d}</span>`).join('')}</div>
+      <div class="grid grid-cols-7 gap-1">${dias.map(celda).join('')}</div>`
+    : `<ul class="divide-y divide-slate-800/70">${dias.map(renglon).join('')}</ul>`}
+    ${detalle}
+    <p class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+      <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>Estás anotado</span>
+      <span class="inline-flex items-center gap-1"><span class="w-3 h-2 rounded-sm border border-dashed border-slate-500"></span>Fecha fija (la lista todavía no abrió)</span>
+    </p>`);
 }
 
 // Semana: los próximos 7 días con un puntito donde hay partido (verde si estás anotado).
@@ -2402,7 +2550,7 @@ function vistaReglas() {
       '<b>Las calificaciones sirven solo para armar equipos equilibrados.</b> No son un ranking ni se usan para nada más. Calificá con honestidad y respeto.',
     ])}
     ${seccion('🏆 Jugador del partido', [
-      'La votación al mejor se habilita <b>una hora después de que empieza el partido</b> y dura <b>hasta el final del día siguiente</b> (23:59). Al entrar te aparece un cartel para votar.',
+      'La votación al mejor se habilita <b>una hora después de que empieza el partido</b> y dura <b>hasta el día siguiente a las 15:00</b>. Al entrar te aparece un cartel para votar.',
       'Se puede votar a cualquiera que estuvo anotado: <b>titulares y suplentes</b>, porque los suplentes también pueden haber entrado.',
       'Votan todos los del grupo, uno por persona (lo podés cambiar mientras esté abierta), y nadie se puede votar a sí mismo.',
       `Los votos se ven recién al cierre. Con menos de ${MIN_VOTOS_MVP} votos queda desierto.`,
@@ -3087,7 +3235,32 @@ function tarjetaResultado() {
         ${x === actual && puede ? '<button data-action="corregir-resultado" class="text-xs text-slate-400 hover:text-slate-200 underline-offset-2">Corregir</button>' : ''}
       </div>
       <p class="text-2xl font-black mt-1">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
+      ${equiposDelResultado(x)}
     </div>`;
+}
+
+// Los dos equipos como jugaron ese día, con sus suplentes. Se despliega tocando.
+function equiposDelResultado(x) {
+  if (!x.A?.length && !x.B?.length) return '';
+  // Los resultados viejos no guardaban suplentes: si es la fecha actual, salen de los equipos del grupo.
+  const eq = x.fecha === D.grupo.partido.fecha ? D.grupo.equipos : null;
+  const sup = e => x['S' + e] || eq?.['S' + e] || [];
+  const nombre = id => jugador(id)?.usuario || x.nombres?.[id] || 'Ex jugador';
+  const persona = id => jugador(id) || { id, usuario: nombre(id) };
+  const col = (e, color) => `
+    <div class="rounded-xl border ${color} p-2.5 ${x.ganador === e ? 'ring-1 ring-amber-400/60' : ''}">
+      <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}${x.ganador === e ? ' 🏆' : ''}</p>
+      <ul class="space-y-1 text-sm">${(x[e] || []).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span></li>`).join('')}</ul>
+      ${sup(e).length ? `
+        <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
+        <ul class="space-y-1 text-sm text-slate-300">${sup(e).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span></li>`).join('')}</ul>` : ''}
+    </div>`;
+  const abierto = ui.verResultado === x.fecha;
+  return `
+    <button data-action="ver-resultado" data-fecha="${x.fecha}" aria-expanded="${abierto}" class="mt-2 text-xs font-semibold text-slate-300 hover:text-white inline-flex items-center gap-1">
+      ${ic('users')} ${abierto ? 'Ocultar' : 'Ver'} los equipos <span class="transition ${abierto ? 'rotate-180' : ''}">▾</span>
+    </button>
+    ${abierto ? `<div class="grid grid-cols-2 gap-2 mt-2">${col('A', 'border-red-500/30 bg-red-500/5')}${col('B', 'border-sky-500/30 bg-sky-500/5')}</div>` : ''}`;
 }
 
 function tarjetaPartido() {
@@ -3214,6 +3387,49 @@ function marcaScout(id) {
   const otros = [...Object.keys(D.miembros), ...Object.keys(D.grupo.invitados)].filter(x => x !== id);
   const votados = D.notas ? D.notas.votados?.[id] || 0 : otros.filter(t => D.votos[t]?.[id]).length;
   return otros.length >= 3 && votados / otros.length >= 0.8 ? ' <span class="text-xs" title="Scout: calificó a casi todo el grupo">🧐</span>' : '';
+}
+
+// ---------------- 📊 Historial ----------------
+// Partidos con resultado cargado: cuántos jugó cada uno y cuántos ganó. Se leen todos
+// recién al abrir una ficha (en el grupo solo se escuchan los últimos 6).
+const todosResultados = { gid: null, docs: null };
+async function cargarTodosResultados() {
+  const gid = D.gid;
+  if (todosResultados.gid === gid) return;
+  Object.assign(todosResultados, { gid, docs: null });
+  try {
+    const qs = await F.getDocs(F.query(colResultados(gid), F.orderBy('fecha', 'desc'), F.limit(300)));
+    if (todosResultados.gid === gid) todosResultados.docs = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn(e.code);
+    if (todosResultados.gid === gid) todosResultados.docs = [];  // sin historial; no reintenta en cada dibujo
+  }
+  render();
+}
+function historialDe(id) {
+  if (todosResultados.gid !== D.gid || !todosResultados.docs) return null;
+  // Los recién cargados (escuchados en vivo) pisan a los leídos al abrir.
+  const porFecha = Object.fromEntries([...todosResultados.docs, ...D.resultados].map(x => [x.fecha, x]));
+  const h = { pj: 0, pg: 0, pe: 0, pp: 0 };
+  for (const x of Object.values(porFecha)) {
+    const e = ['A', 'B'].find(k => (x[k] || []).includes(id) || (x['S' + k] || []).includes(id));
+    if (!e) continue;
+    h.pj++;
+    if (x.ganador === 'empate') h.pe++; else if (x.ganador === e) h.pg++; else h.pp++;
+  }
+  return h;
+}
+function tarjetaHistorial(id) {
+  const h = historialDe(id);
+  if (!h) { cargarTodosResultados(); return ''; }
+  if (!h.pj) return '';
+  const caja = (n, txt, color) => `<div class="rounded-xl bg-slate-800/60 py-2"><p class="text-2xl font-black ${color}">${n}</p><p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">${txt}</p></div>`;
+  return card(`
+    <h2 class="font-bold">${ic('chart-column', 'text-emerald-400')} Partidos</h2>
+    <div class="grid grid-cols-4 gap-2 mt-3 text-center">
+      ${caja(h.pj, 'Jugados', 'text-slate-100')}${caja(h.pg, 'Ganados', 'text-emerald-300')}${caja(h.pe, 'Empates', 'text-slate-300')}${caja(h.pp, 'Perdidos', 'text-red-300')}
+    </div>
+    <p class="text-xs text-slate-500 mt-2">${Math.round(h.pg / h.pj * 100)}% ganados. Cuentan los partidos con resultado cargado.</p>`);
 }
 
 // ---------------- 📋 Asistencia ----------------
@@ -3485,6 +3701,7 @@ function vistaFicha(id) {
         }).join('')}
       </div>
     </div>
+    ${tarjetaHistorial(id)}
     ${esYo ? card(`
       <div class="flex items-center justify-between gap-3">
         <p class="text-sm">${p.lesionado ? '🤕 Estás marcado como <b>lesionado</b>.' : '¿Te lesionaste? Avisale al grupo.'}</p>
@@ -3702,6 +3919,7 @@ function render() {
     asegurarRotacion();
     asegurarVotacion();
     asegurarSuplentesMvp();
+    asegurarAvisoMvp();
     asegurarEquipos();
   }
 }
@@ -3736,13 +3954,22 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------------- Acciones ----------------
-// Guarda el resultado de la fecha, con los equipos con los que se jugó.
+// Guarda el resultado de la fecha, con los equipos con los que se jugó (suplentes
+// incluidos) y los nombres, así se sigue viendo aunque alguien se vaya del grupo.
 async function guardarResultado(ganador, goles = null) {
-  const p = D.grupo.partido, eq = D.grupo.equipos;
-  const ok = await act(() => F.setDoc(F.doc(colResultados(D.gid), p.fecha), {
+  const p = D.grupo.partido, eq = D.grupo.equipos, d = derivar();
+  const base = {
     fecha: p.fecha, ganador, A: eq?.A || [], B: eq?.B || [], por: miUid(), ts: Date.now(),
     ...(goles ? { golesA: goles[0], golesB: goles[1] } : {}),
-  }), '🏁 Resultado guardado');
+  };
+  const SA = suplentesDe('A', d).map(j => j.id), SB = suplentesDe('B', d).map(j => j.id);
+  const nombres = Object.fromEntries([...base.A, ...base.B, ...SA, ...SB].map(id => [id, jugador(id)?.usuario]).filter(x => x[1]));
+  const ref = F.doc(colResultados(D.gid), p.fecha);
+  const ok = await act(async () => {
+    try { await F.setDoc(ref, { ...base, SA, SB, nombres }); }
+    // Con las reglas viejas de Firestore no se pueden guardar los suplentes: va sin ellos.
+    catch (e) { if (e.code !== 'permission-denied') throw e; await F.setDoc(ref, base); }
+  }, '🏁 Resultado guardado');
   if (ok) { ui.corregirResultado = false; ui.sinGoles = false; render(); }
   return ok;
 }
@@ -3928,11 +4155,16 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   resultado: ({ ganador }) => guardarResultado(ganador),
   'sin-goles': () => { ui.sinGoles = true; render(); },
+  'ver-resultado': ({ fecha }) => { ui.verResultado = ui.verResultado === fecha ? null : fecha; render(); },
   'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
   'modo-resultado': ({ modo }) => actualizarGrupo(s => { s.modoResultado = modo; }, modo === 'goles' ? 'Se van a cargar los goles' : 'Se va a cargar solo quién ganó'),
   'quitar-foto-grupo': () => actualizarGrupo(s => { s.foto = ''; }, 'Foto del grupo quitada'),
   'toggle-cal': () => { guardado.set(LS + 'cal', guardado.get(LS + 'cal') === '1' ? '0' : '1'); render(); },
   'toggle-avisos': () => { ui.avisosAbiertos = !ui.avisosAbiertos; render(); },
+  'cal-dia': ({ fecha }) => { ui.calDia = fecha; render(); },
+  'cal-vista': ({ vista }) => { guardado.set(LS + 'calVista', vista); ui.calOffset = 0; ui.calDia = null; render(); },
+  'cal-mover': ({ n }) => { ui.calOffset = (ui.calOffset || 0) + Number(n); ui.calDia = null; render(); },
+  'cal-hoy': () => { ui.calOffset = 0; ui.calDia = null; render(); },
   'mas-cal': () => { ui.calLimite = (ui.calLimite || 10) + 10; render(); },
   sumarse: ({ que }) => { ui.sumarse = ui.sumarse === que ? null : que; render(); },
   'toggle-aprobacion': () => actualizarGrupo(s => { s.aprobacion = s.aprobacion === false; }, D.grupo.aprobacion === false ? '🔒 Ahora los nuevos necesitan que un admin los acepte' : 'Ahora cualquiera con el link entra directo'),

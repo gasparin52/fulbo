@@ -158,13 +158,26 @@ async function rotar(gid) {
   return db.runTransaction(async tx => {
     const g = (await tx.get(ref)).data() || {};
     const p = g.partido || {}, ag = g.agenda;
-    if (!ag?.slots?.length) return { rotado: false };
+    const fija = !!ag?.slots?.length;
+    if (!fija && !p.fecha) return { rotado: false };
     if (p.fecha) {
       const fin = Date.parse(`${p.fecha}T${horaDe(p)}:00-03:00`) + duracionMin(p) * 60e3;
       if (Date.now() < fin + 6 * 3600e3) return { rotado: false };
-      const votando = Date.now() < Date.parse(`${p.fecha}T00:00:00-03:00`) + 2 * DIA;
       const mvp = await tx.get(db.doc(`grupos/${gid}/mvp/${p.fecha}`));
+      // Hasta cuándo se vota: lo que diga la votación; si no se armó, a las 15:00 del día siguiente.
+      const cierra = mvp.data()?.cierra ?? Date.parse(`${p.fecha}T15:00:00-03:00`) + DIA;
+      const votando = Date.now() < cierra;
       if (votando && (g.anotados || []).length && !mvp.exists) return { rotado: false, falta: 'votacion' };
+      // Sin fecha fija: cuando cierra la votación, la lista y los equipos quedan vacíos para la próxima.
+      if (!fija) {
+        if (votando) return { rotado: false };
+        const { suspendido, ...resto } = p;
+        tx.update(ref, {
+          anotados: [], equipos: null, solicitudes: {}, rehacer: null, publico: [], avisos: [],
+          partido: { ...resto, fecha: '' },
+        });
+        return { rotado: true, fecha: '' };
+      }
     }
     const ayer = new Date(Date.parse(hoyArg() + 'T12:00:00Z') - DIA).toISOString().slice(0, 10);
     const [prox] = proximasFechas(ag, p.fecha && p.fecha > ayer ? p.fecha : ayer);
@@ -175,6 +188,32 @@ async function rotar(gid) {
       partido: { ...resto, fecha: prox.fecha, cuando: prox.hora, lugar: prox.lugar || p.lugar || '' },
     });
     return { rotado: true, fecha: prox.fecha };
+  });
+}
+
+// ---- Jugador del partido ----
+// Cuando cierra la votación, una notificación con el ganador. Sale una sola vez por
+// votación (queda marcada en la votación misma, que la lista nueva no borra).
+const MIN_VOTOS_MVP = 3;  // igual que index.html
+async function avisoMvp(gid, fecha) {
+  const ref = db.doc(`grupos/${gid}/mvp/${fecha}`);
+  const votos = await ref.collection('votos').get();
+  return db.runTransaction(async tx => {
+    const m = (await tx.get(ref)).data();
+    if (!m || m.avisado || Date.now() < m.cierra) return null;
+    tx.update(ref, { avisado: true });
+    const conteo = {};
+    votos.docs.forEach(d => { const v = d.data().voto; conteo[v] = (conteo[v] || 0) + 1; });
+    const total = votos.size, max = Math.max(0, ...Object.values(conteo));
+    const ganadores = total >= MIN_VOTOS_MVP ? Object.keys(conteo).filter(id => conteo[id] === max) : [];
+    if (!ganadores.length) return null;  // desierta: no vale la pena avisar
+    const nombres = ganadores.map(id => m.nombres?.[id] || 'Alguien');
+    const lista = nombres.length > 1 ? nombres.slice(0, -1).join(', ') + ' y ' + nombres.at(-1) : nombres[0];
+    return {
+      clave: `mvp:${fecha}`,
+      titulo: '🏆 Ya está el jugador del partido',
+      texto: `${ganadores.length > 1 ? 'Empataron' : 'Ganó'} ${lista} con ${max} de ${total} votos.`,
+    };
   });
 }
 
@@ -211,6 +250,15 @@ export default async function handler(req, res) {
     if (!gid || !(await db.doc(`grupos/${gid}/miembros/${uid}`).get()).exists) throw new ErrorApi(403, 'No sos del grupo');
 
     if (body.tipo === 'rotar') return res.status(200).json(await rotar(gid));
+    if (body.tipo === 'mvp') {
+      const fecha = String(body.fecha || '');
+      const aviso = /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? await avisoMvp(gid, fecha) : null;
+      if (!aviso) return res.status(200).json({ ok: true, enviado: false });
+      // Al que lo pidió no: lo está viendo en la app.
+      const miembros = (await db.collection(`grupos/${gid}/miembros`).listDocuments()).map(m => m.id);
+      const enviados = await notificar(gid, miembros.filter(u => u !== uid), aviso).catch(e => { console.error(e); return 0; });
+      return res.status(200).json({ ok: true, enviado: true, notificaciones: enviados });
+    }
 
     const ref = db.doc(`grupos/${gid}`);
     // Asistencia: bajas tardías y, si se suspende, perdonarlas.

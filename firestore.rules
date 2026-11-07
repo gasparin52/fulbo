@@ -121,7 +121,7 @@ service cloud.firestore {
 
       // Jugador del partido: una votación por fecha ("AAAA-MM-DD"). Abre una hora
       // después de que empieza el partido (si no tiene hora "HH:MM", a las 00:00 del
-      // día siguiente) y cierra al terminar el día siguiente. Hora argentina (UTC-3).
+      // día siguiente) y cierra el día siguiente a las 15:00. Hora argentina (UTC-3).
       match /mvp/{fecha} {
         function mvp() { return get(/databases/$(database)/documents/grupos/$(g)/mvp/$(fecha)).data; }
         function inicioDe(f) {
@@ -144,7 +144,8 @@ service cloud.firestore {
           && request.resource.data.abre is int
           && request.resource.data.abre >= inicioDe(fecha) + 3600000
           && request.resource.data.abre <= inicioDe(fecha) + 86400000
-          && request.resource.data.cierra == inicioDe(fecha) + 2 * 86400000
+          // A las 15:00 del día siguiente (antes era a las 00:00 del otro día).
+          && request.resource.data.cierra in [inicioDe(fecha) + 86400000 + 15 * 3600000, inicioDe(fecha) + 2 * 86400000]
           && request.resource.data.candidatos is list
           && request.resource.data.candidatos.size() > 0 && request.resource.data.candidatos.size() <= 30
           && (esAdmin(g) || (
@@ -231,12 +232,15 @@ service cloud.firestore {
       match /resultados/{f} {
         allow read: if esMiembro(g);
         allow create, update: if (esAdmin(g) || esArmador(g))
-          && request.resource.data.keys().hasOnly(['fecha', 'ganador', 'golesA', 'golesB', 'A', 'B', 'por', 'ts'])
+          && request.resource.data.keys().hasOnly(['fecha', 'ganador', 'golesA', 'golesB', 'A', 'B', 'SA', 'SB', 'nombres', 'por', 'ts'])
           && request.resource.data.fecha == f
           && request.resource.data.ganador in ['A', 'B', 'empate']
           && request.resource.data.por == uid()
           && request.resource.data.A is list && request.resource.data.A.size() <= 30
           && request.resource.data.B is list && request.resource.data.B.size() <= 30
+          && (!('SA' in request.resource.data) || (request.resource.data.SA is list && request.resource.data.SA.size() <= 30))
+          && (!('SB' in request.resource.data) || (request.resource.data.SB is list && request.resource.data.SB.size() <= 30))
+          && (!('nombres' in request.resource.data) || (request.resource.data.nombres is map && request.resource.data.nombres.size() <= 120))
           && (!('golesA' in request.resource.data) || (request.resource.data.golesA is int && request.resource.data.golesA >= 0 && request.resource.data.golesA <= 99
             && request.resource.data.golesB is int && request.resource.data.golesB >= 0 && request.resource.data.golesB <= 99));
         allow delete: if esAdmin(g);
