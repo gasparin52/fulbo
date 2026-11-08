@@ -21,6 +21,18 @@ service cloud.firestore {
       return nuevas.diff(resource.data.get('solicitudes', {})).affectedKeys().hasOnly([uid()])
         && (!(uid() in nuevas) || (nuevas[uid()].keys().hasOnly(['a', 'ts']) && nuevas[uid()].a in ['A', 'B']));
     }
+    // Posición en la cancha: cada uno toca solo su propio lugar (equipos.pos), y tiene que
+    // ser un lugar de su equipo ("A3", "B0"…). Que no esté ocupado lo controla la página.
+    function soloMiPosicion() {
+      let antes = resource.data.equipos;
+      let despues = request.resource.data.equipos;
+      let pos = despues.get('pos', {});
+      return despues.diff(antes).affectedKeys().hasOnly(['pos'])
+        && pos.diff(antes.get('pos', {})).affectedKeys().hasOnly([uid()])
+        && (!(uid() in pos)
+          || (uid() in despues.A && pos[uid()] is string && pos[uid()].matches('A[0-9]{1,2}'))
+          || (uid() in despues.B && pos[uid()] is string && pos[uid()].matches('B[0-9]{1,2}')));
+    }
     // Pedido para rehacer los equipos: el contador sube o baja de a uno y solo si en
     // la misma escritura aparece (o desaparece) el pedido propio de esta ronda.
     function miPedido(g) { return /databases/$(database)/documents/grupos/$(g)/rehacer/$(uid()); }
@@ -72,7 +84,7 @@ service cloud.firestore {
         && request.resource.data.admins == [uid()];
       // Los admins cambian todo; los armadores, los equipos y los pedidos de cambio;
       // los demás solo se anotan o se bajan a sí mismos (como jugadores o como público),
-      // piden cambiarse de equipo o piden rehacer los equipos.
+      // piden cambiarse de equipo, piden rehacer los equipos o eligen su lugar en la cancha.
       allow update: if esAdmin(g)
         || (esArmador(g) && cambia().hasOnly(['equipos', 'solicitudes', 'rehacer']))
         || (
@@ -83,7 +95,8 @@ service cloud.firestore {
           && request.resource.data.get('publico', []).removeAll([uid()]) == resource.data.get('publico', []).removeAll([uid()])
           && soloMiSolicitud()
         )
-        || (esMiembro(g) && cambia().hasOnly(['rehacer']) && cuentaMiPedido(g));
+        || (esMiembro(g) && cambia().hasOnly(['rehacer']) && cuentaMiPedido(g))
+        || (esMiembro(g) && cambia().hasOnly(['equipos']) && soloMiPosicion());
       allow delete: if esAdmin(g);
 
       // Al grupo se entra con el link por api/grupo.js (que pide la aprobación de un admin);

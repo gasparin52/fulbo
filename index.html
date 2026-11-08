@@ -378,7 +378,65 @@ function moverDeEquipo(s, id, a) {
     s.equipos[p + a] = [...(s.equipos[p + a] || []), id];
     s.equipos.editado = true;
   }
+  if (s.equipos.pos) delete s.equipos.pos[id];  // en el equipo nuevo elige otro lugar
 }
+
+// ---------------- Posiciones en la cancha ----------------
+// Cada titular elige un lugar libre de su equipo: el primero que lo toca se lo queda.
+// Se guardan en equipos.pos = { id: 'A3' } (equipo y número de lugar): si se rearman los
+// equipos se borran solas, y si alguien cambia de equipo su lugar viejo deja de valer.
+// Una hora antes se cierran y los que no eligieron se acomodan solos. Admins y armadores
+// pueden mover a cualquiera siempre.
+const CIERRE_POSICIONES_MIN = 60;
+// Líneas de cada formación según cuántos hay por equipo (sin contar el arquero).
+const LINEAS = { 2: [1], 3: [2], 4: [1, 2], 5: [1, 2, 1], 6: [2, 1, 2], 7: [2, 3, 1], 8: [3, 3, 1], 9: [3, 3, 2], 10: [3, 4, 2], 11: [4, 3, 3] };
+const ROLES = { arq: ['ARQ', 'Arquero'], def: ['DEF', 'Defensor'], med: ['VOL', 'Volante'], del: ['DEL', 'Delantero'] };
+const ROL_DE_POS = { arquero: 'arq', defensor: 'def', medio: 'med', delantero: 'del' };
+// Lugares de un equipo de n: x de 0 a 100 (izquierda a derecha), y de 0 (mitad de cancha) a 100 (su arco).
+function formacion(n) {
+  if (!n) return [];
+  const r = n - 1, a = Math.ceil(r / 3), b = Math.ceil((r - a) / 2);
+  const lineas = LINEAS[n] || (n > 1 ? [a, b, r - a - b] : []);
+  const lugares = [{ rol: 'arq', x: 50, y: 88 }];
+  lineas.forEach((k, l) => {
+    const rol = lineas.length === 1 ? 'med' : l === 0 ? 'def' : l === lineas.length - 1 ? 'del' : 'med';
+    const y = lineas.length === 1 ? 50 : 64 - (l * 46) / (lineas.length - 1);
+    for (let j = 0; j < k; j++) lugares.push({ rol, x: (100 * (j + 1)) / (k + 1), y });
+  });
+  return lugares;
+}
+// Quién está en cada lugar: { A: { forma, ocupa: [id | null] }, B: … }. Si dos quedaron en el
+// mismo lugar vale el que se anotó antes. Con completar, se acomoda a los que no eligieron.
+function lugaresDe(eq, anotados, completar = false) {
+  const llegada = id => { const i = anotados.indexOf(id); return i < 0 ? 1e9 : i; };
+  const out = {};
+  for (const e of ['A', 'B']) {
+    const forma = formacion(eq[e].length), ocupa = forma.map(() => null);
+    const orden = [...eq[e]].sort((a, b) => llegada(a) - llegada(b));
+    for (const id of orden) {
+      const m = String(eq.pos?.[id] || '').match(/^([AB])(\d+)$/);
+      if (m && m[1] === e && +m[2] < forma.length && !ocupa[+m[2]]) ocupa[+m[2]] = id;
+    }
+    if (completar) acomodar(forma, ocupa, orden.filter(id => !ocupa.includes(id)));
+    out[e] = { forma, ocupa };
+  }
+  return out;
+}
+// Los que no eligieron: primero cada uno a un lugar de la posición de su perfil; después el
+// resto en orden de llegada, de adelante para atrás (el último que queda va al arco).
+function acomodar(forma, ocupa, ids) {
+  const libres = rol => forma.map((_, i) => i).filter(i => !ocupa[i] && (!rol || forma[i].rol === rol)).sort((a, b) => forma[a].y - forma[b].y);
+  const quedan = [];
+  for (const id of ids) {
+    const rol = ROL_DE_POS[jugador(id)?.posicion];
+    const [i] = rol ? libres(rol) : [];
+    if (i != null) ocupa[i] = id; else quedan.push(id);
+  }
+  for (const id of quedan) { const [i] = libres(); if (i != null) ocupa[i] = id; }
+}
+const posDeLugares = L => Object.fromEntries(['A', 'B'].flatMap(e => L[e].ocupa.map((id, i) => id && [id, e + i]).filter(Boolean)));
+const cierrePosiciones = () => { const t = tiemposPartido(); return t ? t.inicio - CIERRE_POSICIONES_MIN * 60e3 : null; };
+const posicionesCerradas = () => equiposCerrados() || (cierrePosiciones() != null && Date.now() >= cierrePosiciones());
 
 // Cada suplente queda asignado a un equipo (SA / SB) por si le toca entrar. Se
 // equilibran aparte de los titulares: cada uno va al lado con menos suplentes y, si
@@ -1186,7 +1244,7 @@ const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== 
 
 // Cuando se llena el cupo, el primer admin o armador que tiene la app abierta arma
 // los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
-let autoArmado = null, supsRepartidos = null, rondaIniciada = null, rehechos = null;
+let autoArmado = null, supsRepartidos = null, rondaIniciada = null, rehechos = null, cambioHecho = null, completadas = null;
 function asegurarEquipos() {
   const c = D.cargado;
   if (!puedeEditarEquipos() || !D.miembros || !c.votos || !c.niveles || !c.mvps || !c.faltas) return;
@@ -1202,6 +1260,39 @@ function asegurarEquipos() {
     if (supsRepartidos !== clave) {
       supsRepartidos = clave;
       actualizarGrupo(s => { if (s.equipos) repartirSuplentes(s); });
+    }
+  }
+  // Se bajó un titular y subió un suplente: entra en su lugar (mismo equipo y posición).
+  if (eq && equiposDesactualizados(d)) {
+    const ids = d.titulares.map(p => p.id);
+    const sale = [...eq.A, ...eq.B].filter(id => !ids.includes(id));
+    const entra = ids.filter(id => !eq.A.includes(id) && !eq.B.includes(id));
+    const clave = `${D.gid}/${sale}/${entra}`;
+    if (sale.length === 1 && entra.length === 1 && cambioHecho !== clave) {
+      cambioHecho = clave;
+      return actualizarGrupo(s => {
+        if (!s.equipos) return;
+        const { titulares } = dividir(s);
+        const ts = titulares.map(p => p.id);
+        const [sa] = [...s.equipos.A, ...s.equipos.B].filter(id => !ts.includes(id));
+        const nuevos = ts.filter(id => !s.equipos.A.includes(id) && !s.equipos.B.includes(id));
+        if (!sa || nuevos.length !== 1) return;
+        for (const k of ['A', 'B']) s.equipos[k] = s.equipos[k].map(x => (x === sa ? nuevos[0] : x));
+        if (s.equipos.pos?.[sa]) s.equipos.pos[nuevos[0]] = s.equipos.pos[sa];
+        if (s.equipos.pos) delete s.equipos.pos[sa];
+        s.equipos.base = baseKey(titulares);
+        repartirSuplentes(s);
+      }, `⇄ ${jugador(entra[0])?.usuario || 'El suplente'} entra por el que se bajó`);
+    }
+  }
+  // Cerradas las posiciones: los que no eligieron quedan acomodados.
+  if (eq && !equiposDesactualizados(d) && posicionesCerradas()) {
+    const L = lugaresDe(eq, D.grupo.anotados);
+    const faltan = ['A', 'B'].some(e => L[e].ocupa.some(x => !x));
+    const clave = `${D.gid}/${eq.base}/${JSON.stringify(eq.pos || {})}`;
+    if (faltan && completadas !== clave) {
+      completadas = clave;
+      actualizarGrupo(s => { if (s.equipos) s.equipos.pos = posDeLugares(lugaresDe(s.equipos, s.anotados, true)); });
     }
   }
   const ronda = rondaActual();
@@ -3055,8 +3146,96 @@ function equipos(d) {
         ${botones}
       </div>` : ''}
     <div class="grid ${pedido && botonRehacer ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-3">${pedido}${botonRehacer}</div>
+    ${vigentes ? botonCancha(eq) : ''}
     ${vigentes ? `<button data-action="copiar-equipos" class="${BTN_SEC} w-full mt-2 text-xs py-2">${ic('copy')} Copiar equipos para WhatsApp</button>` : ''}
     ${editor && !vigentes ? botones : ''}`);
+}
+
+// Botón para abrir la cancha: si te falta elegir, resalta.
+function botonCancha(eq) {
+  const L = lugaresDe(eq, D.grupo.anotados);
+  const total = eq.A.length + eq.B.length;
+  const eligieron = ['A', 'B'].reduce((t, e) => t + L[e].ocupa.filter(Boolean).length, 0);
+  const yo = miUid(), mio = equipoDe(yo);
+  const meFalta = mio && !L[mio].ocupa.includes(yo) && !posicionesCerradas();
+  return meFalta
+    ? `<button data-action="ver-cancha" class="${BTN_OK} w-full mt-3 text-sm">📍 Elegí tu posición en la cancha</button>`
+    : `<button data-action="ver-cancha" class="${BTN_SEC} w-full mt-3 text-xs py-2">🏟️ Posiciones en la cancha${posicionesCerradas() ? '' : ` · ${eligieron} de ${total} eligieron`}</button>`;
+}
+
+function modalCancha() {
+  const eq = D.grupo.equipos;
+  if (!eq) return '';
+  const d = derivar(), editor = puedeEditarEquipos(), cerradas = posicionesCerradas();
+  const L = lugaresDe(eq, D.grupo.anotados, cerradas);
+  const yo = miUid(), mio = equipoDe(yo), elegido = ui.elegidoCancha;
+  const color = { A: 'ring-red-400', B: 'ring-sky-400' };
+  const punto = (e, i) => {
+    const l = L[e].forma[i], id = L[e].ocupa[i], p = id && jugador(id);
+    const top = e === 'A' ? (100 - l.y) / 2 : 50 + l.y / 2;
+    const puedo = !id && !cerradas && mio === e && !editor;
+    const marca = id === elegido ? 'ring-4 ring-white animate-pulse' : id === yo ? 'ring-[3px] ring-amber-300' : `ring-2 ${color[e]}`;
+    return `
+      <button data-action="tocar-lugar" data-e="${e}" data-i="${i}" style="left:${l.x}%;top:${top}%" class="absolute -translate-x-1/2 -translate-y-1/2 w-16 flex flex-col items-center gap-0.5">
+        ${p
+          ? `<span class="rounded-full ${marca}">${avatar(p, 32)}</span>
+             <span class="max-w-full truncate rounded bg-black/60 px-1 text-[10px] font-semibold leading-4 text-white">${esc(p.usuario)}</span>`
+          : `<span class="w-8 h-8 rounded-full border-2 border-dashed grid place-items-center text-[9px] font-black ${puedo ? 'border-amber-300 bg-amber-300/20 text-amber-200 animate-pulse' : 'border-white/50 bg-black/20 text-white/70'}">${ROLES[l.rol][0]}</span>
+             <span class="rounded bg-black/40 px-1 text-[10px] leading-4 text-white/70">Libre</span>`}
+      </button>`;
+  };
+  const sinLugar = cerradas ? [] : ['A', 'B'].flatMap(e => eq[e].filter(id => !L[e].ocupa.includes(id)).map(id => [e, id]));
+  const banco = [...suplentesDe('A', d), ...suplentesDe('B', d)];
+  const miLugar = mio && L[mio].ocupa.indexOf(yo);
+  const estado = editor
+    ? (elegido ? `Moviendo a <b>${esc(jugador(elegido)?.usuario || '')}</b>: tocá otro lugar de su equipo (si está ocupado, se intercambian).` : 'Tocá a un jugador para moverlo. Podés cambiar todo, aunque estén cerradas.')
+    : !mio ? 'Mirá dónde juega cada uno.'
+    : miLugar >= 0 ? `Jugás de <b>${ROLES[L[mio].forma[miLugar].rol][1]}</b>.${cerradas ? '' : ' Si querés, pasate a otro lugar libre.'}`
+    : cerradas ? 'No elegiste a tiempo: te acomodó el sistema.' : 'Tocá un lugar libre de tu equipo (los amarillos). El primero que lo elige se lo queda.';
+  const cierre = cierrePosiciones();
+  return `
+    <div class="fixed inset-0 z-50 bg-slate-950 overflow-y-auto" role="dialog" aria-label="Posiciones en la cancha">
+      <div class="max-w-md mx-auto p-4 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-lg font-black">🏟️ Posiciones</h2>
+          <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-9 !h-9">${ic('x')}</button>
+        </div>
+        <p class="text-sm text-slate-300">${estado}</p>
+        <p class="text-xs ${cerradas ? 'text-amber-300' : 'text-slate-500'}">${cerradas ? '🔒 Las posiciones ya se cerraron.' : cierre ? `Se cierran el ${esc(momentoLindo(cierre))} (una hora antes). Los que no elijan se acomodan solos.` : 'Se cierran una hora antes del partido.'}</p>
+        <div class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden border border-emerald-500/30 shadow-lg shadow-emerald-950/50" style="background:radial-gradient(ellipse at center,rgba(16,185,129,.12),transparent 70%),repeating-linear-gradient(180deg,#052e22 0 10%,#063a2b 10% 20%)">
+          <div class="absolute inset-x-0 top-1/2 border-t-2 border-emerald-300/25"></div>
+          <div class="absolute left-1/2 top-1/2 w-24 h-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-300/25"></div>
+          <div class="absolute left-1/2 top-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300/40"></div>
+          <div class="absolute left-1/2 top-0 w-2/5 h-[12%] -translate-x-1/2 border-2 border-t-0 border-emerald-300/25"></div>
+          <div class="absolute left-1/2 bottom-0 w-2/5 h-[12%] -translate-x-1/2 border-2 border-b-0 border-emerald-300/25"></div>
+          <span class="absolute left-2 top-2 text-xs font-black text-red-200 drop-shadow">🔴 A</span>
+          <span class="absolute left-2 bottom-2 text-xs font-black text-sky-200 drop-shadow">🔵 B</span>
+          ${['A', 'B'].map(e => L[e].forma.map((_, i) => punto(e, i)).join('')).join('')}
+        </div>
+        ${sinLugar.length ? `
+          <div>
+            <p class="text-xs font-semibold text-slate-400 mb-1.5">Todavía sin lugar</p>
+            <div class="flex flex-wrap gap-1.5">
+              ${sinLugar.map(([e, id]) => `<button data-action="elegir-en-cancha" data-id="${id}" class="inline-flex items-center gap-1.5 rounded-full border ${id === elegido ? 'border-white bg-slate-700' : e === 'A' ? 'border-red-500/40' : 'border-sky-500/40'} bg-slate-800 pl-0.5 pr-2.5 py-0.5 text-xs">${avatar(jugador(id), 22)} ${esc(jugador(id)?.usuario || '')}</button>`).join('')}
+            </div>
+          </div>` : ''}
+        ${banco.length ? `
+          <div>
+            <p class="text-xs font-semibold text-amber-300/80 mb-1.5">${ic('repeat')} Banco de suplentes · si se baja alguien, el que entra ocupa su lugar</p>
+            <div class="flex flex-wrap gap-1.5">
+              ${banco.map(p => `<span class="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 pl-0.5 pr-2.5 py-0.5 text-xs">${avatar(p, 22)} ${esc(p.usuario)}</span>`).join('')}
+            </div>
+          </div>` : ''}
+        ${editor ? `
+          <div class="flex flex-wrap gap-2 pt-1">
+            ${elegido ? `
+              ${eq.pos?.[elegido] ? `<button data-action="sacar-de-lugar" class="${BTN_SEC} text-xs py-2">Sacarlo de su lugar</button>` : ''}
+              <button data-action="elegir-en-cancha" data-id="" class="${BTN_SEC} text-xs py-2">Cancelar</button>`
+            : ['A', 'B'].some(e => lugaresDe(eq, D.grupo.anotados)[e].ocupa.some(x => !x)) ? `<button data-action="completar-posiciones" class="${BTN_OK} text-sm flex-1">✨ Completar posiciones</button>` : ''}
+          </div>
+          ${elegido ? '' : '<p class="text-[11px] text-slate-500">Completar respeta a los que ya eligieron y acomoda al resto según la posición de su perfil.</p>'}` : ''}
+      </div>
+    </div>`;
 }
 
 function tarjetaMvp() {
@@ -4058,9 +4237,10 @@ function renderModal() {
   if (ui.modal === 'faltas' && !m) ui.modal = null;
   if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
+  if (ui.modal === 'cancha' && !D.grupo.equipos) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : '';
 }
 
 const avisoCalificaciones = `
@@ -4703,6 +4883,47 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   resultado: ({ ganador }) => guardarResultado(ganador),
   'sin-goles': () => { ui.sinGoles = true; render(); },
+  'ver-cancha': () => { ui.modal = 'cancha'; ui.elegidoCancha = null; render(); },
+  'elegir-en-cancha': ({ id }) => { if (!puedeEditarEquipos()) return; ui.elegidoCancha = id && id !== ui.elegidoCancha ? id : null; render(); },
+  'tocar-lugar': ({ e, i }) => {
+    const eq = D.grupo.equipos;
+    if (!eq) return;
+    const n = Number(i), yo = miUid();
+    const L = lugaresDe(eq, D.grupo.anotados, posicionesCerradas());
+    const ahi = L[e].ocupa[n];
+    // Admins y armadores: tocar a uno lo elige; después, tocar otro lugar lo mueve (o los intercambia).
+    if (puedeEditarEquipos()) {
+      const el = ui.elegidoCancha;
+      if (!el) { ui.elegidoCancha = ahi || null; if (!ahi) toast('Tocá primero a un jugador'); return render(); }
+      if (el === ahi) { ui.elegidoCancha = null; return render(); }
+      if (equipoDe(el) !== e) return toast('Ese lugar es del otro equipo');
+      ui.elegidoCancha = null;
+      return actualizarGrupo(s => {
+        if (!s.equipos) return;
+        const M = lugaresDe(s.equipos, s.anotados, posicionesCerradas());
+        const de = M[e].ocupa.indexOf(el), otro = M[e].ocupa[n];
+        M[e].ocupa[n] = el;
+        if (de >= 0) M[e].ocupa[de] = otro || null;  // si había otro, se intercambian; si no, el que estaba queda sin lugar
+        s.equipos.pos = posDeLugares(M);
+      }, '📍 Posición cambiada');
+    }
+    if (equipoDe(yo) !== e) return toast(equipoDe(yo) ? 'Ese lugar es del otro equipo' : 'Solo eligen los titulares');
+    if (posicionesCerradas()) return toast('🔒 Las posiciones ya se cerraron');
+    if (ahi) return toast(ahi === yo ? 'Ya estás ahí' : `Ese lugar ya lo eligió ${jugador(ahi)?.usuario || 'otro'}`);
+    actualizarGrupo(s => {
+      if (!s.equipos?.[e]?.includes(yo)) return;
+      if (lugaresDe(s.equipos, s.anotados)[e].ocupa[n]) throw Object.assign(new Error('ocupado'), { mensaje: 'Justo lo eligió otro, probá con otro lugar' });
+      s.equipos.pos = { ...(s.equipos.pos || {}), [yo]: e + n };
+    }, `📍 Jugás de ${ROLES[L[e].forma[n].rol][1]}`);
+  },
+  'sacar-de-lugar': () => {
+    const el = ui.elegidoCancha;
+    ui.elegidoCancha = null;
+    actualizarGrupo(s => { if (s.equipos?.pos) delete s.equipos.pos[el]; }, 'Quedó sin lugar');
+  },
+  'completar-posiciones': () => actualizarGrupo(s => {
+    if (s.equipos) s.equipos.pos = posDeLugares(lugaresDe(s.equipos, s.anotados, true));
+  }, '✨ Posiciones completadas'),
   'ver-votos': ({ id }) => { ui.verVotos = ui.verVotos === id ? null : id; render(); },
   'ver-resultado': ({ fecha }) => { ui.verResultado = ui.verResultado === fecha ? null : fecha; render(); },
   'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
@@ -5041,6 +5262,8 @@ const formularios = {
       // Entra en el mismo equipo; si los equipos estaban al día, siguen al día.
       if (s.equipos) {
         for (const k of ['A', 'B', 'SA', 'SB']) if (s.equipos[k]) s.equipos[k] = s.equipos[k].map(x => (x === sale ? entra : x));
+        if (s.equipos.pos?.[sale]) s.equipos.pos[entra] = s.equipos.pos[sale];
+        if (s.equipos.pos) delete s.equipos.pos[sale];
         if (alDia) s.equipos.base = baseKey(titulares.map(p => ({ id: p.id === sale ? entra : p.id })));
       }
     }, `⇄ ${jugador(sale)?.usuario || 'Jugador'} reemplazado`);
