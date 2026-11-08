@@ -4592,7 +4592,11 @@ function pintar(el, html) {
   // Dónde estaba el cursor: si no, al redibujar queda al principio y se escribe al revés.
   let cursor = null;
   try { if (foco) cursor = [document.activeElement.selectionStart, document.activeElement.selectionEnd]; } catch {}
+  // Lo que tenía scroll propio (los modales, como la cancha): que no vuelva arriba al redibujar.
+  const conScroll = () => [...el.querySelectorAll('.overflow-y-auto, .overflow-auto')].map((x, i) => [`${i}:${x.getAttribute('aria-label') || ''}`, x]);
+  const scrolls = new Map(conScroll().filter(([, x]) => x.scrollTop).map(([k, x]) => [k, x.scrollTop]));
   el.innerHTML = el._html = html;
+  if (scrolls.size) conScroll().forEach(([k, x]) => { if (scrolls.has(k)) x.scrollTop = scrolls.get(k); });
   sucios.forEach(([id, v, checked]) => {
     const i = document.getElementById(id);
     if (!i) return;
