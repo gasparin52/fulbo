@@ -407,11 +407,14 @@ function formacion(n) {
 }
 // Quién está en cada lugar: { A: { forma, ocupa: [id | null] }, B: … }. Si dos quedaron en el
 // mismo lugar vale el que se anotó antes. Con completar, se acomoda a los que no eligieron.
-function lugaresDe(eq, anotados, completar = false) {
+// La cancha tiene todos los puestos de la modalidad (5 por lado en fútbol 5), aunque el
+// equipo todavía tenga menos: así cada uno elige en cualquier lugar libre.
+function lugaresDe(eq, anotados, completar = false, cupo = D.grupo?.partido?.cupo) {
+  const porLado = Math.ceil((Number(cupo) || 10) / 2);
   const llegada = id => { const i = anotados.indexOf(id); return i < 0 ? 1e9 : i; };
   const out = {};
   for (const e of ['A', 'B']) {
-    const forma = formacion(eq[e].length), ocupa = forma.map(() => null);
+    const forma = formacion(Math.max(eq[e].length, porLado)), ocupa = forma.map(() => null);
     const orden = [...eq[e]].sort((a, b) => llegada(a) - llegada(b));
     for (const id of orden) {
       const m = String(eq.pos?.[id] || '').match(/^([AB])(\d+)$/);
@@ -432,6 +435,9 @@ function acomodar(forma, ocupa, ids) {
     const [i] = rol ? libres(rol) : [];
     if (i != null) ocupa[i] = id; else quedan.push(id);
   }
+  // Si sobran lugares, el arco no queda vacío: el último que queda va al arco.
+  const arco = forma.findIndex((l, i) => l.rol === 'arq' && !ocupa[i]);
+  if (arco >= 0 && quedan.length) ocupa[arco] = quedan.pop();
   for (const id of quedan) { const [i] = libres(); if (i != null) ocupa[i] = id; }
 }
 const posDeLugares = L => Object.fromEntries(['A', 'B'].flatMap(e => L[e].ocupa.map((id, i) => id && [id, e + i]).filter(Boolean)));
@@ -1288,7 +1294,7 @@ function asegurarEquipos() {
   // Cerradas las posiciones: los que no eligieron quedan acomodados.
   if (eq && !equiposDesactualizados(d) && posicionesCerradas()) {
     const L = lugaresDe(eq, D.grupo.anotados);
-    const faltan = ['A', 'B'].some(e => L[e].ocupa.some(x => !x));
+    const faltan = ['A', 'B'].some(e => eq[e].some(id => !L[e].ocupa.includes(id)));
     const clave = `${D.gid}/${eq.base}/${JSON.stringify(eq.pos || {})}`;
     if (faltan && completadas !== clave) {
       completadas = clave;
@@ -3271,7 +3277,7 @@ function modalCancha() {
             ${elegido ? `
               ${eq.pos?.[elegido] ? `<button data-action="sacar-de-lugar" class="${BTN_SEC} text-xs py-2">Sacarlo de su lugar</button>` : ''}
               <button data-action="elegir-en-cancha" data-id="" class="${BTN_SEC} text-xs py-2">Cancelar</button>`
-            : ['A', 'B'].some(e => lugaresDe(eq, D.grupo.anotados)[e].ocupa.some(x => !x)) ? `<button data-action="completar-posiciones" class="${BTN_OK} text-sm flex-1">✨ Completar posiciones</button>` : ''}
+            : sinLugar.length ? `<button data-action="completar-posiciones" class="${BTN_OK} text-sm flex-1">✨ Completar posiciones</button>` : ''}
           </div>
           ${elegido ? '' : '<p class="text-[11px] text-slate-500">Completar respeta a los que ya eligieron y acomoda al resto según la posición de su perfil.</p>'}` : ''}
       </div>
