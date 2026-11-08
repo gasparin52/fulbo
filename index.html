@@ -2850,17 +2850,13 @@ function cuantoFalta(fecha) {
   return dias === 0 ? 'Hoy' : dias === 1 ? 'Mañana' : dias > 1 && dias < 7 ? `En ${dias} días` : '';
 }
 
+// Debajo de la fecha, corto: "Todos los viernes" (la hora ya está al lado). Saltear una
+// fecha (feriado, etc.) se hace desde el cartel de la fecha.
 function lineaAgenda() {
   const g = D.grupo;
   if (!agendaActiva(g)) return '';
-  const lista = ocurrencias(g.agenda, g.partido.fecha || ayerArg(), 3, true);
-  const corta = f => { const t = fechaLinda(f); return t.slice(0, 3) + ' ' + t.split(' ')[1]; };
-  const item = o => esAdmin()
-    ? `<button data-action="saltear" data-fecha="${o.fecha}" title="${o.salteada ? 'Volver a jugar esa fecha' : 'No se juega esa fecha (feriado, etc.)'}" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-600 hover:text-slate-200">${corta(o.fecha)}</button>`
-    : `<span class="${o.salteada ? 'line-through text-slate-600' : ''}">${corta(o.fecha)}</span>`;
-  return `
-    <p class="mt-2 text-xs text-slate-400">${ic('repeat', 'text-emerald-400')} ${esc(textoAgenda(g.agenda))}${lista.length ? ' · Después: ' + lista.map(item).join(', ') : ''}</p>
-    ${esAdmin() && lista.length ? '<p class="text-[11px] text-slate-600 mt-0.5">Tocá una fecha para saltearla (feriado, etc.).</p>' : ''}`;
+  const dias = [...new Set(g.agenda.slots.map(x => DIAS_PLURAL[x.dia]))];
+  return `<p class="mt-1.5 text-xs text-slate-500">${ic('repeat', 'text-emerald-400')} Todos los ${esc(dias.join(' y '))}</p>`;
 }
 
 function formAgenda() {
@@ -2914,6 +2910,14 @@ function modalFecha() {
           <p class="text-xs text-slate-400">Si cambiás algo…</p>
           <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="esta" checked class="accent-emerald-500"> Solo para esta fecha</label>
           <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="todas" class="accent-emerald-500"> Para esta y todas las siguientes</label>
+          ${(() => {
+            const lista = ocurrencias(g.agenda, p.fecha || ayerArg(), 3, true);
+            return lista.length ? `
+              <p class="text-xs text-slate-400 pt-2">Próximas (tocá una para no jugar esa fecha, por feriado o lo que sea):</p>
+              <div class="flex flex-wrap gap-1.5">
+                ${lista.map(o => `<button type="button" data-action="saltear" data-fecha="${o.fecha}" class="rounded-lg px-2.5 py-1 text-xs font-semibold ${o.salteada ? 'bg-slate-800 text-slate-500 line-through' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}">${esc(fechaLinda(o.fecha))}</button>`).join('')}
+              </div>` : '';
+          })()}
           <button type="button" data-action="agenda-quitar" class="text-xs text-red-300 hover:text-red-200 pt-1">Dejar de repetir</button>
         </div>`
       : `
