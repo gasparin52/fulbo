@@ -2892,12 +2892,47 @@ function formAgenda() {
     </form>`;
 }
 
+// Fecha, hora y lugar del partido (el admin toca la fecha en Partido). Desde acá también se
+// activa la fecha fija: "Se juega todas las semanas" usa el día de esa fecha y esa hora.
+function modalFecha() {
+  const g = D.grupo, p = g.partido, fija = agendaActiva(g);
+  const hora = horaDelPartido(p) || '';
+  return modal(`
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Fecha del partido</h2>
+      <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-9 !h-9">${ic('x')}</button>
+    </div>
+    <form data-form="fecha-partido" class="space-y-3">
+      <div class="grid grid-cols-[1fr_6.5rem] gap-2">
+        <label class="text-sm text-slate-400">Fecha<input id="fp-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
+        <label class="text-sm text-slate-400">Hora<input id="fp-hora" name="cuando" value="${esc(hora || p.cuando)}" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} mt-1"></label>
+      </div>
+      <label class="block text-sm text-slate-400">Dónde<input id="fp-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
+      ${fija ? `
+        <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm space-y-1">
+          <p class="font-semibold text-emerald-300">${ic('repeat')} Fecha fija: ${esc(textoAgenda(g.agenda))}</p>
+          <p class="text-xs text-slate-400">Si cambiás algo…</p>
+          <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="esta" checked class="accent-emerald-500"> Solo para esta fecha</label>
+          <label class="flex items-center gap-2 py-1"><input type="radio" name="alcance" value="todas" class="accent-emerald-500"> Para esta y todas las siguientes</label>
+          <button type="button" data-action="agenda-quitar" class="text-xs text-red-300 hover:text-red-200 pt-1">Dejar de repetir</button>
+        </div>`
+      : `
+        <label class="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-800/40 p-3 cursor-pointer">
+          <input type="checkbox" name="repetir" class="mt-1 w-4 h-4 accent-emerald-500">
+          <span class="text-sm"><b class="text-slate-100">${ic('repeat', 'text-emerald-400')} Se juega todas las semanas</b>
+            <span class="block text-xs text-slate-400 mt-0.5">Mismo día y hora. Cuando termina un partido, se abre sola la fecha siguiente. Para jugar más de un día por semana, en Administrar → Partido → Fecha fija.</span></span>
+        </label>`}
+      <button class="${BTN_OK} w-full">${ic('save')} Guardar</button>
+    </form>`);
+}
+
 function header(d) {
   const p = D.grupo.partido;
   const faltan = d.cupo - d.titulares.length;
   const falta = cuantoFalta(p.fecha);
   const fecha = fechaLinda(p.fecha);
   const chip = 'inline-flex items-center gap-1.5 rounded-lg bg-slate-800/70 border border-slate-700/60 px-2.5 py-1';
+  const editaFecha = esAdmin();
   const mapa = p.lugar ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([p.lugar, D.grupo.ciudad?.nombre].filter(Boolean).join(', '))}` : '';
   return `
     <div>
@@ -2906,8 +2941,9 @@ function header(d) {
           <h1 class="text-3xl font-black tracking-tight">${esc(p.titulo || 'Fulbo ⚽')}</h1>
           <p class="text-xs font-semibold text-emerald-300/80 mt-0.5">${modalidadDe(d.cupo)}</p>
           <div class="mt-2 flex flex-wrap gap-1.5 text-sm">
-            ${fecha ? `<span class="${chip}">${ic('calendar', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(fecha[0].toUpperCase() + fecha.slice(1))}</b>${falta ? `<span class="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300">${falta}</span>` : ''}</span>` : ''}
-            ${p.cuando ? `<span class="${chip}">${ic('clock', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></span>` : ''}
+            ${fecha ? `<${editaFecha ? 'button data-action="editar-fecha" title="Cambiar fecha, hora o lugar"' : 'span'} class="${chip} ${editaFecha ? 'hover:border-slate-500' : ''}">${ic('calendar', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(fecha[0].toUpperCase() + fecha.slice(1))}</b>${falta ? `<span class="text-[11px] font-semibold rounded px-1.5 py-0.5 bg-emerald-500/15 text-emerald-300">${falta}</span>` : ''}${editaFecha ? ic('pencil', 'text-slate-500 !w-3.5 !h-3.5') : ''}</${editaFecha ? 'button' : 'span'}>`
+              : editaFecha ? `<button data-action="editar-fecha" class="${chip} border-dashed border-emerald-500/50 text-emerald-300 hover:border-emerald-400">${ic('calendar-plus')} <b class="font-semibold">Poner fecha</b></button>` : ''}
+            ${p.cuando ? `<${editaFecha ? 'button data-action="editar-fecha" title="Cambiar fecha, hora o lugar"' : 'span'} class="${chip} ${editaFecha ? 'hover:border-slate-500' : ''}">${ic('clock', 'text-slate-400')} <b class="font-semibold text-slate-100">${esc(p.cuando)}</b></${editaFecha ? 'button' : 'span'}>` : ''}
             ${p.lugar ? `<a href="${esc(mapa)}" target="_blank" rel="noopener" title="Ver en el mapa" class="${chip} min-w-0 hover:border-slate-500">${ic('map-pin', 'text-slate-400')} <b class="font-semibold text-slate-100 truncate">${esc(p.lugar)}</b></a>` : ''}
           </div>
           ${lineaAgenda()}
@@ -3330,6 +3366,8 @@ function avisoPendientes() {
 
 // Pantalla de administración del grupo (solo admins).
 function vistaAdmin() {
+  // Dos pestañas: Partido (fecha, cancha, fecha fija, resultado) y Grupo (foto, link, jugadores).
+  const tab = guardado.get(LS + 'adminTab') === 'grupo' ? 'grupo' : 'partido';
   return `
     <div class="flex items-center gap-2">
       <a href="#/" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm" aria-label="Volver al grupo">${ic('arrow-left')} Grupo</a>
@@ -3338,6 +3376,11 @@ function vistaAdmin() {
         <p class="font-bold truncate leading-tight">${esc(D.grupo.nombre)}</p>
       </div>
     </div>
+    <div class="grid grid-cols-2 gap-1 rounded-2xl bg-slate-900 border border-slate-800 p-1">
+      ${[['partido', 'calendar', 'Partido'], ['grupo', 'users', 'Grupo']].map(([k, i, t]) => `
+        <button data-action="admin-tab" data-tab="${k}" class="rounded-xl py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5 ${tab === k ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}">${ic(i)} ${t}${k === 'grupo' && D.pendientes.length ? ` <span class="rounded-full bg-amber-400 text-slate-950 text-[10px] font-black px-1.5">${D.pendientes.length}</span>` : ''}</button>`).join('')}
+    </div>
+    ${tab === 'partido' ? panelPartido(derivar()) : `
     ${card(`
       <div class="flex items-center gap-4">
         ${fotoGrupo(D.grupo, 64)}
@@ -3351,7 +3394,7 @@ function vistaAdmin() {
         </div>
       </div>`)}
     ${tarjetaPendientes()}
-    ${panelAdmin(derivar())}
+    ${panelAdmin(derivar())}`}
     ${pie()}`;
 }
 
@@ -4238,9 +4281,10 @@ function renderModal() {
   if (ui.modal === 'mvp-votar' && clave) try { sessionStorage.setItem(clave, '1'); } catch {}
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'cancha' && !D.grupo.equipos) ui.modal = null;
+  if (ui.modal === 'fecha' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : ui.modal === 'fecha' ? modalFecha() : '';
 }
 
 const avisoCalificaciones = `
@@ -4391,32 +4435,13 @@ function vistaFicha(id) {
       </div>`) : ''}`;
 }
 
-function panelAdmin(d) {
+// Administrar → Partido: lo de cada fecha (separado de la configuración del grupo).
+function panelPartido(d) {
   if (!esAdmin()) return '';
   const p = D.grupo.partido;
-  const anotados = new Set(D.grupo.anotados);
-  const filas = [
-    ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
-    ...Object.keys(D.grupo.invitados).map(jugador),
-  ];
   return card(`
-    <h2 class="text-lg font-bold">${ic('settings', 'text-emerald-400')} Configuración del grupo</h2>
-
-    <div class="mt-4">
-      <h3 class="font-semibold text-sm text-slate-300">${ic('ticket')} Link de invitación</h3>
-      <label class="flex items-start gap-2 text-sm mt-2 cursor-pointer">
-        <input type="checkbox" data-action="toggle-aprobacion" ${D.grupo.aprobacion !== false ? 'checked' : ''} class="mt-1 accent-emerald-500">
-        <span>Un admin tiene que aceptar a los que entran con el link <span class="block text-xs text-slate-500">Recomendado: si el link se reenvía, no entra cualquiera.</span></span>
-      </label>
-      <p class="text-xs text-slate-500 mb-2">Mandáselo a los que quieras invitar. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
-      <div class="flex gap-2">
-        <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
-        <button data-action="copiar-invitacion" class="${BTN_OK} text-sm shrink-0">Copiar</button>
-      </div>
-      <button data-action="nuevo-codigo" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500 hover:text-amber-300 mt-2">Generar link nuevo</button>
-    </div>
-
-    <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-6">
+    <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Partido</h2>
+    <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-4">
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Fecha del partido<input id="p-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
@@ -4458,6 +4483,32 @@ function panelAdmin(d) {
           <button data-action="modo-resultado" data-modo="${m}" class="${BTN} text-sm leading-tight ${(D.grupo.modoResultado || 'ganador') === m ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">${txt}</button>`).join('')}
       </div>
       ${conGoleadores() ? '<p class="text-xs text-slate-500 mt-2">El admin o un armador anota cuántos hizo cada uno. Los goles salen en el historial y en la ficha de cada jugador.</p>' : ''}
+    </div>`);
+}
+
+function panelAdmin(d) {
+  if (!esAdmin()) return '';
+  const p = D.grupo.partido;
+  const anotados = new Set(D.grupo.anotados);
+  const filas = [
+    ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+    ...Object.keys(D.grupo.invitados).map(jugador),
+  ];
+  return card(`
+    <h2 class="text-lg font-bold">${ic('settings', 'text-emerald-400')} Grupo</h2>
+
+    <div class="mt-4">
+      <h3 class="font-semibold text-sm text-slate-300">${ic('ticket')} Link de invitación</h3>
+      <label class="flex items-start gap-2 text-sm mt-2 cursor-pointer">
+        <input type="checkbox" data-action="toggle-aprobacion" ${D.grupo.aprobacion !== false ? 'checked' : ''} class="mt-1 accent-emerald-500">
+        <span>Un admin tiene que aceptar a los que entran con el link <span class="block text-xs text-slate-500">Recomendado: si el link se reenvía, no entra cualquiera.</span></span>
+      </label>
+      <p class="text-xs text-slate-500 mb-2">Mandáselo a los que quieras invitar. Si se filtra, generá uno nuevo y el viejo deja de andar.</p>
+      <div class="flex gap-2">
+        <input readonly value="${esc(linkInvitacion())}" class="${INPUT} text-xs font-mono" onclick="this.select()">
+        <button data-action="copiar-invitacion" class="${BTN_OK} text-sm shrink-0">Copiar</button>
+      </div>
+      <button data-action="nuevo-codigo" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-500 hover:text-amber-300 mt-2">Generar link nuevo</button>
     </div>
 
     <h3 class="font-semibold text-sm text-slate-300 mt-6">Jugadores y puntajes</h3>
@@ -4883,6 +4934,8 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   resultado: ({ ganador }) => guardarResultado(ganador),
   'sin-goles': () => { ui.sinGoles = true; render(); },
+  'admin-tab': ({ tab }) => { guardado.set(LS + 'adminTab', tab); render(); },
+  'editar-fecha': () => { ui.modal = 'fecha'; render(); },
   'ver-cancha': () => { ui.modal = 'cancha'; ui.elegidoCancha = null; render(); },
   'elegir-en-cancha': ({ id }) => { if (!puedeEditarEquipos()) return; ui.elegidoCancha = id && id !== ui.elegidoCancha ? id : null; render(); },
   'tocar-lugar': ({ e, i }) => {
@@ -5321,6 +5374,26 @@ const formularios = {
     }, ciudad && ciudad.nombre !== D.grupo.ciudad?.nombre ? `💾 Partido guardado · clima de ${ciudad.nombre}` : '💾 Partido guardado');
     // El campo de ciudad muestra el nombre que encontró (puede diferir de lo escrito).
     if (ok) { const i = $('#p-ciudad'); if (i) i.value = ciudad?.nombre || ''; }
+    return ok;
+  },
+  'fecha-partido': async f => {
+    const fecha = f.get('fecha') || '', lugar = (f.get('lugar') || '').trim();
+    const crudo = (f.get('cuando') || '').trim();
+    const cuando = (c => horaDelPartido({ cuando: c }) || c)(normalizarHora(crudo));
+    const repetir = !!f.get('repetir'), todas = f.get('alcance') === 'todas';
+    if ((repetir || todas) && !fecha) return toast('Elegí la fecha del partido');
+    if ((repetir || todas) && !horaValida(cuando)) return toast('Poné la hora como 20:00');
+    const ok = await actualizarGrupo(s => {
+      const antes = s.partido;
+      s.partido = { ...s.partido, fecha, cuando, lugar };
+      if (repetir && !agendaActiva(s)) s.agenda = { slots: [{ dia: diaDe(fecha), hora: cuando, lugar }], saltear: [] };
+      // "Esta y todas las siguientes": se cambia la fecha fija que generó esta fecha.
+      if (todas && agendaActiva(s)) {
+        const i = Math.max(0, s.agenda.slots.findIndex(x => antes.fecha && x.dia === diaDe(antes.fecha) && x.hora === antes.cuando));
+        s.agenda.slots[i] = { dia: diaDe(fecha), hora: cuando, lugar };
+      }
+    }, repetir ? '🔁 Guardado: se juega todas las semanas' : '💾 Fecha guardada');
+    if (ok) { ui.modal = null; render(); }
     return ok;
   },
   invitado: f => {
