@@ -3216,13 +3216,14 @@ function modalCancha() {
   const L = lugaresDe(eq, D.grupo.anotados, cerradas);
   const yo = miUid(), mio = equipoDe(yo), elegido = ui.elegidoCancha;
   const color = { A: 'ring-red-400', B: 'ring-sky-400' };
+  const arrastra = id => id && (editor || (id === yo && !cerradas)) ? `data-arrastra="${id}"` : '';
   const punto = (e, i) => {
     const l = L[e].forma[i], id = L[e].ocupa[i], p = id && jugador(id);
     const top = e === 'A' ? (100 - l.y) / 2 : 50 + l.y / 2;
     const puedo = !id && !cerradas && mio === e && !editor;
     const marca = id === elegido ? 'ring-4 ring-white animate-pulse' : id === yo ? 'ring-[3px] ring-amber-300' : `ring-2 ${color[e]}`;
     return `
-      <button data-action="tocar-lugar" data-e="${e}" data-i="${i}" style="left:${l.x}%;top:${top}%" class="absolute -translate-x-1/2 -translate-y-1/2 w-16 flex flex-col items-center gap-0.5">
+      <button data-action="tocar-lugar" data-e="${e}" data-i="${i}" ${arrastra(id)} style="left:${l.x}%;top:${top}%;${arrastra(id) ? 'touch-action:none' : ''}" class="absolute -translate-x-1/2 -translate-y-1/2 w-16 flex flex-col items-center gap-0.5">
         ${p
           ? `<span class="rounded-full ${marca}">${avatar(p, 32)}</span>
              <span class="max-w-full truncate rounded bg-black/60 px-1 text-[10px] font-semibold leading-4 text-white">${esc(p.usuario)}</span>`
@@ -3234,10 +3235,10 @@ function modalCancha() {
   const banco = [...suplentesDe('A', d), ...suplentesDe('B', d)];
   const miLugar = mio && L[mio].ocupa.indexOf(yo);
   const estado = editor
-    ? (elegido ? `Moviendo a <b>${esc(jugador(elegido)?.usuario || '')}</b>: tocá otro lugar de su equipo (si está ocupado, se intercambian).` : 'Tocá a un jugador para moverlo. Podés cambiar todo, aunque estén cerradas.')
+    ? (elegido ? `Moviendo a <b>${esc(jugador(elegido)?.usuario || '')}</b>: tocá otro lugar de su equipo (si está ocupado, se intercambian).` : 'Arrastrá a un jugador a otro lugar (o tocalo y tocá el lugar). Podés cambiar todo, aunque estén cerradas.')
     : !mio ? 'Mirá dónde juega cada uno.'
-    : miLugar >= 0 ? `Jugás de <b>${ROLES[L[mio].forma[miLugar].rol][1]}</b>.${cerradas ? '' : ' Si querés, pasate a otro lugar libre.'}`
-    : cerradas ? 'No elegiste a tiempo: te acomodó el sistema.' : 'Tocá un lugar libre de tu equipo (los amarillos). El primero que lo elige se lo queda.';
+    : miLugar >= 0 ? `Jugás de <b>${ROLES[L[mio].forma[miLugar].rol][1]}</b>.${cerradas ? '' : ' Si querés, arrastrá tu foto a otro lugar libre.'}`
+    : cerradas ? 'No elegiste a tiempo: te acomodó el sistema.' : 'Arrastrá tu foto a un lugar libre de tu equipo (los amarillos) o tocalo. El primero que lo elige se lo queda.';
   const cierre = cierrePosiciones();
   return `
     <div class="fixed inset-0 z-50 bg-slate-950 overflow-y-auto" role="dialog" aria-label="Posiciones en la cancha">
@@ -3262,7 +3263,7 @@ function modalCancha() {
           <div>
             <p class="text-xs font-semibold text-slate-400 mb-1.5">Todavía sin lugar</p>
             <div class="flex flex-wrap gap-1.5">
-              ${sinLugar.map(([e, id]) => `<button data-action="elegir-en-cancha" data-id="${id}" class="inline-flex items-center gap-1.5 rounded-full border ${id === elegido ? 'border-white bg-slate-700' : e === 'A' ? 'border-red-500/40' : 'border-sky-500/40'} bg-slate-800 pl-0.5 pr-2.5 py-0.5 text-xs">${avatar(jugador(id), 22)} ${esc(jugador(id)?.usuario || '')}</button>`).join('')}
+              ${sinLugar.map(([e, id]) => `<button data-action="elegir-en-cancha" data-id="${id}" ${arrastra(id)} style="${arrastra(id) ? 'touch-action:none' : ''}" class="inline-flex items-center gap-1.5 rounded-full border ${id === elegido ? 'border-white bg-slate-700' : e === 'A' ? 'border-red-500/40' : 'border-sky-500/40'} bg-slate-800 pl-0.5 pr-2.5 py-0.5 text-xs">${avatar(jugador(id), 22)} ${esc(jugador(id)?.usuario || '')}</button>`).join('')}
             </div>
           </div>` : ''}
         ${banco.length ? `
@@ -5429,6 +5430,51 @@ document.addEventListener('click', e => {
   }
   acciones[b.dataset.action]?.(b.dataset);
 });
+// Arrastrar y soltar en la cancha: soltar a un jugador sobre un lugar es lo mismo que
+// elegirlo y tocar ese lugar (mismas reglas: si está ocupado se intercambian, etc.).
+let arrastre = null, sinClic = false;
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('[data-arrastra]');
+  if (!el || e.button > 0) return;
+  if (e.pointerType === 'mouse') e.preventDefault();  // que no arrastre la imagen sola
+  arrastre = { id: el.dataset.arrastra, x: e.clientX, y: e.clientY, fantasma: null, sobre: null };
+});
+const lugarEn = (x, y) => document.elementFromPoint(x, y)?.closest('[data-action="tocar-lugar"]');
+document.addEventListener('pointermove', e => {
+  const a = arrastre;
+  if (!a) return;
+  if (!a.fantasma) {
+    if (Math.hypot(e.clientX - a.x, e.clientY - a.y) < 8) return;
+    a.fantasma = document.createElement('div');
+    a.fantasma.className = 'fixed z-[60] pointer-events-none -translate-x-1/2 -translate-y-1/2 rounded-full ring-4 ring-white shadow-2xl opacity-90';
+    a.fantasma.innerHTML = avatar(jugador(a.id), 44);
+    document.body.appendChild(a.fantasma);
+  }
+  a.fantasma.style.left = e.clientX + 'px';
+  a.fantasma.style.top = e.clientY + 'px';
+  const sobre = lugarEn(e.clientX, e.clientY);
+  if (sobre !== a.sobre) {
+    a.sobre?.classList.remove('scale-125');
+    sobre?.classList.add('scale-125');
+    a.sobre = sobre;
+  }
+});
+function terminarArrastre(e, soltar) {
+  const a = arrastre;
+  arrastre = null;
+  if (!a?.fantasma) return;
+  a.fantasma.remove();
+  a.sobre?.classList.remove('scale-125');
+  sinClic = true;  // el clic que viene después de soltar no cuenta
+  setTimeout(() => { sinClic = false; }, 60);
+  const lugar = soltar && lugarEn(e.clientX, e.clientY);
+  if (!lugar) return;
+  if (puedeEditarEquipos()) ui.elegidoCancha = a.id;
+  acciones['tocar-lugar'](lugar.dataset);
+}
+document.addEventListener('pointerup', e => terminarArrastre(e, true));
+document.addEventListener('pointercancel', e => terminarArrastre(e, false));
+document.addEventListener('click', e => { if (sinClic) { e.stopPropagation(); e.preventDefault(); } }, true);
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]');
   if (el) cambios[el.dataset.change]?.(el, el.dataset);
