@@ -3235,9 +3235,9 @@ function modalCancha() {
   const banco = [...suplentesDe('A', d), ...suplentesDe('B', d)];
   const miLugar = mio && L[mio].ocupa.indexOf(yo);
   const estado = editor
-    ? (elegido ? `Moviendo a <b>${esc(jugador(elegido)?.usuario || '')}</b>: tocá otro lugar de su equipo (si está ocupado, se intercambian).` : 'Arrastrá a un jugador a otro lugar (o tocalo y tocá el lugar). Podés cambiar todo, aunque estén cerradas.')
+    ? (elegido ? `Moviendo a <b>${esc(jugador(elegido)?.usuario || '')}</b>: tocá otro lugar de su equipo (si está ocupado, se intercambian).` : 'Arrastrá a un jugador a otro lugar (o tocalo y tocá el lugar). Soltalo afuera de la cancha para sacarlo. Podés cambiar todo, aunque estén cerradas.')
     : !mio ? 'Mirá dónde juega cada uno.'
-    : miLugar >= 0 ? `Jugás de <b>${ROLES[L[mio].forma[miLugar].rol][1]}</b>.${cerradas ? '' : ' Si querés, arrastrá tu foto a otro lugar libre.'}`
+    : miLugar >= 0 ? `Jugás de <b>${ROLES[L[mio].forma[miLugar].rol][1]}</b>.${cerradas ? '' : ' Si querés, arrastrá tu foto a otro lugar libre (o afuera de la cancha para dejarlo).'}`
     : cerradas ? 'No elegiste a tiempo: te acomodó el sistema.' : 'Arrastrá tu foto a un lugar libre de tu equipo (los amarillos) o tocalo. El primero que lo elige se lo queda.';
   const cierre = cierrePosiciones();
   return `
@@ -3249,7 +3249,7 @@ function modalCancha() {
         </div>
         <p class="text-sm text-slate-300">${estado}</p>
         <p class="text-xs ${cerradas ? 'text-amber-300' : 'text-slate-500'}">${cerradas ? '🔒 Las posiciones ya se cerraron.' : cierre ? `Se cierran el ${esc(momentoLindo(cierre))} (una hora antes). Los que no elijan se acomodan solos.` : 'Se cierran una hora antes del partido.'}</p>
-        <div class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden border border-emerald-500/30 shadow-lg shadow-emerald-950/50" style="background:radial-gradient(ellipse at center,rgba(16,185,129,.12),transparent 70%),repeating-linear-gradient(180deg,#052e22 0 10%,#063a2b 10% 20%)">
+        <div data-cancha class="relative w-full aspect-[2/3] rounded-2xl overflow-hidden border border-emerald-500/30 shadow-lg shadow-emerald-950/50" style="background:radial-gradient(ellipse at center,rgba(16,185,129,.12),transparent 70%),repeating-linear-gradient(180deg,#052e22 0 10%,#063a2b 10% 20%)">
           <div class="absolute inset-x-0 top-1/2 border-t-2 border-emerald-300/25"></div>
           <div class="absolute left-1/2 top-1/2 w-24 h-24 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-300/25"></div>
           <div class="absolute left-1/2 top-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-300/40"></div>
@@ -4746,6 +4746,11 @@ async function escribirPerfil(cambio, msg = '💾 Guardado') {
   }, msg);
 }
 
+function sacarDeLugar(id) {
+  if (!puedeEditarEquipos() && (id !== miUid() || posicionesCerradas())) return;
+  actualizarGrupo(s => { if (s.equipos?.pos) delete s.equipos.pos[id]; }, id === miUid() ? 'Quedaste sin lugar' : 'Quedó sin lugar');
+}
+
 const acciones = {
   tab: ({ tab }) => { ui.tab = tab; ui.foto = null; render(); },
   'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
@@ -4983,7 +4988,7 @@ const acciones = {
   'sacar-de-lugar': () => {
     const el = ui.elegidoCancha;
     ui.elegidoCancha = null;
-    actualizarGrupo(s => { if (s.equipos?.pos) delete s.equipos.pos[el]; }, 'Quedó sin lugar');
+    sacarDeLugar(el);
   },
   'completar-posiciones': () => actualizarGrupo(s => {
     if (s.equipos) s.equipos.pos = posDeLugares(lugaresDe(s.equipos, s.anotados, true));
@@ -5432,45 +5437,57 @@ document.addEventListener('click', e => {
 });
 // Arrastrar y soltar en la cancha: soltar a un jugador sobre un lugar es lo mismo que
 // elegirlo y tocar ese lugar (mismas reglas: si está ocupado se intercambian, etc.).
+// Soltarlo afuera de la cancha lo deja sin lugar. Con el dedo, la foto va un poco más
+// arriba para que el dedo no la tape, y cuenta donde está la foto, no el dedo.
 let arrastre = null, sinClic = false;
 document.addEventListener('pointerdown', e => {
   const el = e.target.closest('[data-arrastra]');
   if (!el || e.button > 0) return;
   if (e.pointerType === 'mouse') e.preventDefault();  // que no arrastre la imagen sola
-  arrastre = { id: el.dataset.arrastra, x: e.clientX, y: e.clientY, fantasma: null, sobre: null };
+  arrastre = { id: el.dataset.arrastra, el, x: e.clientX, y: e.clientY, alto: e.pointerType === 'mouse' ? 0 : 60, fantasma: null, sobre: null };
 });
 const lugarEn = (x, y) => document.elementFromPoint(x, y)?.closest('[data-action="tocar-lugar"]');
+const enCancha = (x, y) => !!document.elementFromPoint(x, y)?.closest('[data-cancha]');
 document.addEventListener('pointermove', e => {
   const a = arrastre;
   if (!a) return;
   if (!a.fantasma) {
     if (Math.hypot(e.clientX - a.x, e.clientY - a.y) < 8) return;
     a.fantasma = document.createElement('div');
-    a.fantasma.className = 'fixed z-[60] pointer-events-none -translate-x-1/2 -translate-y-1/2 rounded-full ring-4 ring-white shadow-2xl opacity-90';
-    a.fantasma.innerHTML = avatar(jugador(a.id), 44);
+    a.fantasma.style.cssText = 'position:fixed;z-index:60;pointer-events:none;transform:translate(-50%,-50%) scale(1.2);border-radius:9999px;box-shadow:0 0 0 4px #fff,0 12px 30px rgba(0,0,0,.6);transition:box-shadow .15s';
+    a.fantasma.innerHTML = avatar(jugador(a.id), 48);
     document.body.appendChild(a.fantasma);
+    a.el.style.opacity = '.3';
   }
-  a.fantasma.style.left = e.clientX + 'px';
-  a.fantasma.style.top = e.clientY + 'px';
-  const sobre = lugarEn(e.clientX, e.clientY);
+  const x = e.clientX, y = e.clientY - a.alto;
+  a.fantasma.style.left = x + 'px';
+  a.fantasma.style.top = y + 'px';
+  const sobre = lugarEn(x, y);
   if (sobre !== a.sobre) {
     a.sobre?.classList.remove('scale-125');
     sobre?.classList.add('scale-125');
     a.sobre = sobre;
   }
+  // Afuera de la cancha: borde rojo (si lo suelta ahí, queda sin lugar).
+  a.fantasma.style.boxShadow = `0 0 0 4px ${enCancha(x, y) ? '#fff' : '#f87171'},0 12px 30px rgba(0,0,0,.6)`;
 });
 function terminarArrastre(e, soltar) {
   const a = arrastre;
   arrastre = null;
   if (!a?.fantasma) return;
   a.fantasma.remove();
+  a.el.style.opacity = '';
   a.sobre?.classList.remove('scale-125');
   sinClic = true;  // el clic que viene después de soltar no cuenta
   setTimeout(() => { sinClic = false; }, 60);
-  const lugar = soltar && lugarEn(e.clientX, e.clientY);
-  if (!lugar) return;
-  if (puedeEditarEquipos()) ui.elegidoCancha = a.id;
-  acciones['tocar-lugar'](lugar.dataset);
+  if (!soltar) return;
+  const x = e.clientX, y = e.clientY - a.alto;
+  const lugar = lugarEn(x, y);
+  if (lugar) {
+    if (puedeEditarEquipos()) ui.elegidoCancha = a.id;
+    return acciones['tocar-lugar'](lugar.dataset);
+  }
+  if (!enCancha(x, y) && D.grupo.equipos?.pos?.[a.id]) sacarDeLugar(a.id);
 }
 document.addEventListener('pointerup', e => terminarArrastre(e, true));
 document.addEventListener('pointercancel', e => terminarArrastre(e, false));
