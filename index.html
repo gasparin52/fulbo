@@ -16,6 +16,9 @@
     body { -webkit-tap-highlight-color: transparent; }
     select, input { color-scheme: dark; }
     input[type=range] { accent-color: #10b981; }
+    /* Jugadores que se arrastran en la cancha: sin el arrastre ni el menú propios del navegador. */
+    [data-arrastra] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+    [data-arrastra] img { pointer-events: none; -webkit-user-drag: none; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
@@ -5494,6 +5497,8 @@ function terminarArrastre(e, soltar) {
   if (!enCancha(x, y) && D.grupo.equipos?.pos?.[a.id]) sacarDeLugar(a.id);
 }
 document.addEventListener('pointerup', e => terminarArrastre(e, true));
+// Que mantener el dedo sobre la foto no arranque el arrastre ni el menú del navegador.
+for (const t of ['dragstart', 'contextmenu']) document.addEventListener(t, e => { if (e.target.closest?.('[data-arrastra]')) e.preventDefault(); });
 document.addEventListener('pointercancel', e => terminarArrastre(e, false));
 document.addEventListener('click', e => { if (sinClic) { e.stopPropagation(); e.preventDefault(); } }, true);
 document.addEventListener('change', e => {
