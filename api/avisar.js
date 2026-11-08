@@ -212,7 +212,7 @@ async function avisoMvp(gid, fecha) {
     return {
       clave: `mvp:${fecha}`,
       titulo: '🏆 Ya está el jugador del partido',
-      texto: `${ganadores.length > 1 ? 'Empataron' : 'Ganó'} ${lista} con ${max} de ${total} votos.`,
+      texto: ganadores.length > 1 ? `Empataron ${lista}, con ${max} votos cada uno (votaron ${total}).` : `Ganó ${lista}, con ${max} de ${total} votos.`,
     };
   });
 }

@@ -1489,6 +1489,50 @@ const BTN_SEC = `${BTN} bg-slate-800 hover:bg-slate-700`;
 const BTN_CHIP = 'inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0';
 const BTN_ICONO = 'relative w-10 h-10 grid place-items-center rounded-xl bg-slate-800/70 hover:bg-slate-700 text-slate-300 transition shrink-0';
 const card = html => `<div class="${CARD}">${html}</div>`;
+// Desplegable propio: el <select> del celu abre el cartel de Chrome, que queda feo. El valor va
+// en un input oculto (para el formulario y data-change) y la lista se abre debajo, sobre la página.
+// Elegir no redibuja: se actualiza ahí mismo (y sincronizarDesplegables lo repone si algo redibuja).
+function desplegable({ id, name = '', opciones, valor, cambio = '', vacio = 'Elegí', clase = '' }) {
+  const v = String(valor ?? '');
+  const actual = opciones.find(o => String(o.v) === v);
+  return `
+    <div class="relative ${clase}" data-desplegable>
+      <input type="hidden" id="${id}" ${name ? `name="${name}"` : ''} value="${esc(v)}" ${cambio ? `data-change="${cambio}"` : ''}>
+      <button type="button" data-action="desplegar" data-id="${id}" aria-haspopup="listbox" aria-expanded="false" class="${INPUT} flex items-center gap-2 text-left">
+        <span data-texto class="flex-1 truncate ${actual ? '' : 'text-slate-500'}">${esc(actual ? actual.t : vacio)}</span>
+        <span class="text-slate-500 rotate-90">${ic('chevron-right')}</span>
+      </button>
+      <div data-lista role="listbox" hidden class="absolute z-40 left-0 right-0 mt-1 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60 max-h-80 overflow-y-auto py-1">
+        ${opciones.map(o => `
+          <button type="button" role="option" data-action="elegir-opcion" data-id="${id}" data-v="${esc(o.v)}" class="w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-slate-800 ${o === actual ? 'text-emerald-300' : ''}">
+            <span class="flex-1">${esc(o.t)}</span><span data-tilde class="text-emerald-400 ${o === actual ? '' : 'invisible'}">${ic('check')}</span>
+          </button>`).join('')}
+      </div>
+    </div>`;
+}
+function cerrarDesplegables(salvo) {
+  document.querySelectorAll('[data-desplegable]').forEach(d => {
+    if (d === salvo) return;
+    d.querySelector('[data-lista]').hidden = true;
+    d.querySelector('[data-action="desplegar"]').setAttribute('aria-expanded', 'false');
+  });
+}
+// Texto del botón y tilde según el valor del input (por si se redibujó con un valor sin guardar).
+function sincronizarDesplegables() {
+  document.querySelectorAll('[data-desplegable]').forEach(d => {
+    const v = d.querySelector('input[type=hidden]').value;
+    let texto = null;
+    d.querySelectorAll('[data-action="elegir-opcion"]').forEach(o => {
+      const si = o.dataset.v === v;
+      o.classList.toggle('text-emerald-300', si);
+      o.querySelector('[data-tilde]').classList.toggle('invisible', !si);
+      if (si) texto = o.querySelector('span').textContent;
+    });
+    const t = d.querySelector('[data-texto]');
+    if (texto != null) { t.textContent = texto; t.classList.remove('text-slate-500'); }
+  });
+}
+
 // Selector de posición: radios ocultos con botones dibujados (el <select> nativo queda feo en el celular).
 const selectorPos = (pref, sel = 'comodin') => `
   <div class="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label="Posición">
@@ -2725,18 +2769,18 @@ function lineaAgenda() {
 
 function formAgenda() {
   const g = D.grupo, p = g.partido;
-  const slots = g.agenda?.slots?.length ? g.agenda.slots : [{ dia: p.fecha ? diaDe(p.fecha) : 5, hora: horaValida(p.cuando) ? p.cuando : '20:00', lugar: p.lugar }];
+  // agendaBorrador: las filas como quedaron después de sacar una con la X (hasta guardar).
+  const slots = ui.agendaBorrador || (g.agenda?.slots?.length ? g.agenda.slots : [{ dia: p.fecha ? diaDe(p.fecha) : 5, hora: horaValida(p.cuando) ? p.cuando : '20:00', lugar: p.lugar }]);
   const filas = Math.min(3, Math.max(slots.length, ui.agendaFilas || 1));
   const fila = i => {
     const x = slots[i] || { dia: '', hora: '', lugar: '' };
+    const sacar = filas > 1;
     return `
-      <div class="grid grid-cols-[1fr_5.5rem] sm:grid-cols-[9rem_5.5rem_1fr] gap-2">
-        <select id="ag-dia-${i}" name="dia" class="${INPUT}">
-          ${i ? '<option value="">— Ninguno —</option>' : ''}
-          ${DIAS.map((n, k) => `<option value="${k}" ${x.dia === k ? 'selected' : ''}>${n[0].toUpperCase() + n.slice(1)}</option>`).join('')}
-        </select>
+      <div class="grid ${sacar ? 'grid-cols-[1fr_5.5rem_2.75rem] sm:grid-cols-[9rem_5.5rem_1fr_2.75rem]' : 'grid-cols-[1fr_5.5rem] sm:grid-cols-[9rem_5.5rem_1fr]'} gap-2">
+        ${desplegable({ id: `ag-dia-${i}`, name: 'dia', valor: x.dia, vacio: 'Día', opciones: DIAS.map((n, k) => ({ v: k, t: n[0].toUpperCase() + n.slice(1) })) })}
         <input id="ag-hora-${i}" name="hora" value="${esc(x.hora)}" placeholder="20:00" maxlength="5" class="${INPUT}">
-        <input id="ag-lugar-${i}" name="lugarFijo" value="${esc(x.lugar || '')}" placeholder="Lugar (si cambia)" maxlength="60" class="${INPUT} col-span-2 sm:col-span-1">
+        ${sacar ? `<button type="button" data-action="agenda-sacar" data-i="${i}" aria-label="Sacar este día" title="Sacar este día" class="rounded-xl border border-slate-700 bg-slate-800 text-slate-400 hover:text-red-300 hover:bg-red-950 grid place-items-center sm:order-last">${ic('x')}</button>` : ''}
+        <input id="ag-lugar-${i}" name="lugarFijo" value="${esc(x.lugar || '')}" placeholder="Lugar (si cambia)" maxlength="60" class="${INPUT} ${sacar ? 'col-span-3' : 'col-span-2'} sm:col-span-1">
       </div>`;
   };
   return `
@@ -3062,7 +3106,7 @@ function tarjetaMvp() {
              <b>${esc(nombreCandidato(m, id))}</b>
            </div>`).join('')}
        </div>
-       <p class="text-center text-xs text-slate-400 mt-2">${r.ganadores.length > 1 ? 'Empate con' : 'Con'} ${r.max} de ${r.total} votos</p>
+       <p class="text-center text-xs text-slate-400 mt-2">${r.ganadores.length > 1 ? `Empataron con ${r.max} votos cada uno · votaron ${r.total}` : `${r.max} de ${r.total} votos`}</p>
        <button data-action="mvp-copiar" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">${ic('copy')} Copiar resultado para WhatsApp</button>`;
   return `
     <div class="${CARD} border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-slate-900">
@@ -4179,16 +4223,14 @@ function panelAdmin(d) {
       ${p.fecha && !horaDelPartido(p) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Modalidad
-        <select id="p-modalidad" data-change="modalidad" class="${INPUT} mt-1">
-          ${MODALIDADES.map(n => `<option value="${n * 2}" ${d.cupo === n * 2 ? 'selected' : ''}>Fútbol ${n} (${n} vs ${n})</option>`).join('')}
-          ${MODALIDADES.includes(d.cupo / 2) ? '' : `<option value="" selected>Otra: ${d.cupo} jugadores</option>`}
-        </select>
+        ${desplegable({ id: 'p-modalidad', cambio: 'modalidad', clase: 'mt-1', valor: MODALIDADES.includes(d.cupo / 2) ? d.cupo : '', opciones: [
+          ...MODALIDADES.map(n => ({ v: n * 2, t: `Fútbol ${n} (${n} vs ${n})` })),
+          ...(MODALIDADES.includes(d.cupo / 2) ? [] : [{ v: '', t: `Otra: ${d.cupo} jugadores` }]),
+        ] })}
       </label>
       <label class="text-sm text-slate-400">Titulares en total<input id="p-cupo" name="cupo" type="number" min="2" max="30" value="${d.cupo}" class="${INPUT} mt-1"></label>
       <label class="text-sm text-slate-400">Duración del partido
-        <select id="p-duracion" name="duracion" class="${INPUT} mt-1">
-          ${DURACIONES.map(m => `<option value="${m}" ${duracionDe(p) === m ? 'selected' : ''}>${m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`}</option>`).join('')}
-        </select>
+        ${desplegable({ id: 'p-duracion', name: 'duracion', clase: 'mt-1', valor: duracionDe(p), opciones: DURACIONES.map(m => ({ v: m, t: m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min` })) })}
       </label>
       ${agendaActiva(D.grupo) ? `
         <fieldset class="sm:col-span-2 rounded-xl border border-slate-700 p-3 text-sm">
@@ -4353,6 +4395,7 @@ function render() {
   activarCargaPerezosa();
   sumarGoles();
   filtrarCuadros();
+  sincronizarDesplegables();
   anuncio();
   if (listo) {
     asegurarRotacion();
@@ -4501,7 +4544,7 @@ const acciones = {
   'mvp-copiar': () => {
     const m = D.mvp, r = resultadoMvp(m);
     const nombres = r.ganadores.map(id => `*${nombreCandidato(m, id)}*`).join(' y ');
-    copiar(`🏆 *JUGADOR DEL PARTIDO* (${fechaLinda(m.id)})\n${r.ganadores.length > 1 ? '🤝 Empate: ' : '👑 '}${nombres} con ${r.max} de ${r.total} votos`);
+    copiar(`🏆 *JUGADOR DEL PARTIDO* (${fechaLinda(m.id)})\n${r.ganadores.length > 1 ? `🤝 Empate: ${nombres}, con ${r.max} votos cada uno (votaron ${r.total})` : `👑 ${nombres}, con ${r.max} de ${r.total} votos`}`);
   },
   logout: () => A.signOut(auth),
   anotarme: () => listaBloqueada() ? toast('El partido ya empezó: la lista está cerrada') : actualizarGrupo(s => {
@@ -4586,10 +4629,39 @@ const acciones = {
       s.publico = s.publico.filter(x => x !== miUid());
     }, `⚽ ¡Anotado en ${g.nombre}!`, gid);
   },
+  desplegar: ({ id }) => {
+    const d = document.getElementById(id).closest('[data-desplegable]');
+    const lista = d.querySelector('[data-lista]');
+    lista.hidden = !lista.hidden;
+    d.querySelector('[data-action="desplegar"]').setAttribute('aria-expanded', String(!lista.hidden));
+    if (!lista.hidden) lista.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  },
+  'elegir-opcion': ({ id, v }) => {
+    const input = document.getElementById(id);
+    cerrarDesplegables();
+    if (input.value === v) return;
+    input.value = v;
+    input.dataset.dirty = '1';
+    sincronizarDesplegables();
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  },
+  // Saca una fila: se guarda lo escrito en las demás y se redibuja sin esa (se aplica al Guardar).
+  'agenda-sacar': ({ i }) => {
+    const form = document.querySelector('[data-form="agenda"]');
+    const val = (n, k) => form.querySelectorAll(`[name="${n}"]`)[k]?.value ?? '';
+    const filas = form.querySelectorAll('[name="dia"]').length;
+    const slots = Array.from({ length: filas }, (_, k) => ({ dia: val('dia', k) === '' ? '' : Number(val('dia', k)), hora: val('hora', k), lugar: val('lugarFijo', k) }));
+    slots.splice(Number(i), 1);
+    ui.agendaBorrador = slots;
+    ui.agendaFilas = slots.length;
+    form.querySelectorAll('[data-dirty]').forEach(x => delete x.dataset.dirty);
+    render();
+  },
   'agenda-mas': () => { ui.agendaFilas = Math.min(3, (ui.agendaFilas || D.grupo.agenda?.slots?.length || 1) + 1); render(); },
   'agenda-quitar': () => {
     if (!confirm('¿Desactivar la fecha fija? La fecha cargada queda como está y "Nueva fecha" vuelve a dejarla vacía.')) return;
     ui.agendaFilas = 0;
+    ui.agendaBorrador = null;
     actualizarGrupo(s => { s.agenda = null; }, 'Fecha fija desactivada');
   },
   saltear: ({ fecha }) => {
@@ -4836,7 +4908,7 @@ const formularios = {
     if (!(a >= 0 && b >= 0 && a <= 99 && b <= 99)) return toast('Poné los goles de los dos equipos');
     return guardarResultado(a > b ? 'A' : b > a ? 'B' : 'empate', [a, b]);
   },
-  agenda: f => {
+  agenda: async f => {
     const dias = f.getAll('dia'), horas = f.getAll('hora'), lugares = f.getAll('lugarFijo');
     const slots = [];
     for (let i = 0; i < dias.length; i++) {
@@ -4846,7 +4918,7 @@ const formularios = {
       slots.push({ dia: Number(dias[i]), hora, lugar: (lugares[i] || '').trim() });
     }
     if (!slots.length) return toast('Elegí al menos un día');
-    return actualizarGrupo(s => {
+    const ok = await actualizarGrupo(s => {
       s.agenda = { slots, saltear: (s.agenda?.saltear || []).filter(f => f >= hoyArg()) };
       // Sin fecha cargada (o ya pasada): arranca con la próxima.
       if (!s.partido.fecha || s.partido.fecha < hoyArg()) {
@@ -4854,6 +4926,8 @@ const formularios = {
         if (prox) s.partido = { ...s.partido, fecha: prox.fecha, cuando: prox.hora, lugar: prox.lugar || s.partido.lugar };
       }
     }, '🔁 Fecha fija guardada');
+    if (ok) { ui.agendaBorrador = null; ui.agendaFilas = 0; render(); }
+    return ok;
   },
   olvide: async f => {
     const ok = await act(() => api('olvide', { dato: f.get('dato') }, urlCuenta()));
@@ -5016,6 +5090,7 @@ const formularios = {
 };
 
 document.addEventListener('click', e => {
+  cerrarDesplegables(e.target.closest('[data-desplegable]'));
   const b = e.target.closest('[data-action]');
   if (!b) return;
   if ('fondo' in b.dataset && e.target !== b) return;  // clic dentro del modal: no lo cierra
