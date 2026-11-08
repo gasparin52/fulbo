@@ -1052,6 +1052,11 @@ function resultadoMvp(m) {
   return { conteo, total, max, ganadores };
 }
 
+// Podio: hasta 3 puestos por cantidad de votos (los empatados comparten puesto). Si hay menos
+// cantidades distintas, hay menos puestos: con 5, 5 y 2 votos queda 1° (los dos de 5) y 2°.
+const podioMvp = r => [...new Set(Object.values(r.conteo))].sort((a, b) => b - a).slice(0, 3)
+  .map(votos => ({ votos, ids: Object.keys(r.conteo).filter(id => r.conteo[id] === votos) }));
+
 const nombreCandidato = (m, id) => jugador(id)?.usuario || m.nombres?.[id] || '?';
 const fichaCandidato = (m, id) => jugador(id) || { id, usuario: m.nombres?.[id] || '?', posicion: 'comodin' };
 
@@ -3107,6 +3112,21 @@ function tarjetaMvp() {
            </div>`).join('')}
        </div>
        <p class="text-center text-xs text-slate-400 mt-2">${r.ganadores.length > 1 ? `Empataron con ${r.max} votos cada uno · votaron ${r.total}` : `${r.max} de ${r.total} votos`}</p>
+       <div class="text-center">
+         <button data-action="ver-votos" data-id="${m.id}" aria-expanded="${ui.verVotos === m.id}" class="mt-2 text-xs font-semibold text-slate-300 hover:text-white inline-flex items-center gap-1">
+           ${ui.verVotos === m.id ? 'Ocultar' : 'Ver'} los votos <span class="transition ${ui.verVotos === m.id ? 'rotate-180' : ''}">▾</span>
+         </button>
+       </div>
+       ${ui.verVotos === m.id ? `
+         <ul class="mt-2 rounded-xl border border-amber-500/20 bg-slate-900/60 divide-y divide-slate-800">
+           ${podioMvp(r).map((x, i) => `
+             <li class="flex items-center gap-3 px-3 py-2">
+               <span class="text-xl leading-none">${['🥇', '🥈', '🥉'][i]}</span>
+               <span class="flex -space-x-2 shrink-0">${x.ids.map(id => avatar(fichaCandidato(m, id), 28)).join('')}</span>
+               <span class="flex-1 min-w-0 text-sm font-semibold leading-tight break-words">${x.ids.map(id => esc(nombreCandidato(m, id))).join(' y ')}</span>
+               <span class="text-xs text-slate-400 shrink-0">${x.votos} ${x.votos === 1 ? 'voto' : 'votos'}${x.ids.length > 1 ? ' c/u' : ''}</span>
+             </li>`).join('')}
+         </ul>` : ''}
        <button data-action="mvp-copiar" class="${BTN} w-full mt-3 text-sm bg-green-600 hover:bg-green-500 text-white">${ic('copy')} Copiar resultado para WhatsApp</button>`;
   return `
     <div class="${CARD} border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-slate-900">
@@ -4683,6 +4703,7 @@ const acciones = {
   'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   resultado: ({ ganador }) => guardarResultado(ganador),
   'sin-goles': () => { ui.sinGoles = true; render(); },
+  'ver-votos': ({ id }) => { ui.verVotos = ui.verVotos === id ? null : id; render(); },
   'ver-resultado': ({ fecha }) => { ui.verResultado = ui.verResultado === fecha ? null : fecha; render(); },
   'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
   'modo-resultado': ({ modo }) => actualizarGrupo(s => { s.modoResultado = modo; }, { goles: 'Se van a cargar los goles', goleadores: 'Se van a cargar los goles de cada uno' }[modo] || 'Se va a cargar solo quién ganó'),
