@@ -2464,7 +2464,7 @@ function vistaPrincipal() {
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico(), tarjetaHistorialGrupo()];
+    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -3370,8 +3370,13 @@ function tarjetaMvp() {
       </div>`;
   }
 
-  // Cerrada: el resultado se muestra 3 días.
-  if (Date.now() > m.cierra + 3 * DIA || !m.votos) return '';
+  // Cerrada: se ve grande un día; después queda chica abajo (tarjetaUltimo).
+  if (!m.votos || mvpVieja(m)) return '';
+  return mvpCerrada(m);
+}
+
+const mvpVieja = m => Date.now() >= m.cierra + DIA;
+function mvpCerrada(m) {
   const r = resultadoMvp(m);
   const cuerpo = !r.ganadores.length
     ? `<p class="mt-2 text-sm text-slate-400">Hubo ${r.total} ${r.total === 1 ? 'voto' : 'votos'}: hacen falta al menos ${MIN_VOTOS_MVP}, así que esta vez quedó desierto.</p>`
@@ -3701,17 +3706,48 @@ function tarjetaResultado() {
   }
   // Mostrar el de esta fecha o el del último partido.
   const x = actual || (!termino || !puede ? D.resultados.find(r => r.fecha < (p.fecha || '9999')) : null);
-  if (!x) return '';
+  if (!x || resultadoViejo(x)) return '';
+  return vistaResultado(x, x === actual, x === actual && puede);
+}
+
+const resultadoViejo = x => Date.now() >= Date.parse(`${x.fecha}T00:00:00-03:00`) + 2 * DIA;
+function vistaResultado(x, esActual, corregir) {
   const color = x.ganador === 'A' ? 'from-red-500/20 border-red-500/30' : x.ganador === 'B' ? 'from-sky-500/20 border-sky-500/30' : 'from-slate-700/40 border-slate-600';
   return `
     <div class="rounded-2xl border bg-gradient-to-br ${color} to-slate-900 p-4">
       <div class="flex items-center justify-between gap-2">
-        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">${x === actual ? '🏁 Resultado' : `Último partido · ${esc(fechaLinda(x.fecha))}`}</p>
-        ${x === actual && puede ? '<button data-action="corregir-resultado" class="text-xs text-slate-400 hover:text-slate-200 underline-offset-2">Corregir</button>' : ''}
+        <p class="text-xs font-bold uppercase tracking-wider text-slate-400">${esActual ? '🏁 Resultado' : `Último partido · ${esc(fechaLinda(x.fecha))}`}</p>
+        ${corregir ? '<button data-action="corregir-resultado" class="text-xs text-slate-400 hover:text-slate-200 underline-offset-2">Corregir</button>' : ''}
       </div>
       <p class="text-2xl font-black mt-1">${x.ganador === 'empate' ? '🤝' : '🏆'} ${esc(textoResultado(x))}</p>
       ${lineaGoleadores(x)}
       ${equiposDelResultado(x)}
+    </div>`;
+}
+
+// Pasado un día, el resultado y el jugador del partido quedan en una sola fila chica, abajo,
+// que se despliega tocándola (así no ocupan media pantalla toda la semana).
+function tarjetaUltimo() {
+  const p = D.grupo.partido;
+  const cand = D.resultados.find(r => r.fecha <= (p.fecha || '9999'));
+  const res = cand && resultadoViejo(cand) && !(cand.fecha === p.fecha && ui.corregirResultado) ? cand : null;
+  const m0 = D.mvp;
+  const m = m0 && estadoMvp() === 'cerrada' && m0.votos && mvpVieja(m0) && (!res || m0.id === res.fecha) ? m0 : null;
+  if (!res && !m) return '';
+  const fecha = res?.fecha || m.id;
+  const r = m && resultadoMvp(m);
+  const mejores = r?.ganadores.length ? r.ganadores.map(id => esc(nombreCandidato(m, id))).join(' y ') : '';
+  const abierto = ui.verUltimo === fecha;
+  return `
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70">
+      <button data-action="ver-ultimo" data-fecha="${fecha}" aria-expanded="${abierto}" class="w-full flex items-center gap-3 px-4 py-3 text-left">
+        <span class="flex-1 min-w-0">
+          <span class="block text-[11px] font-bold uppercase tracking-wider text-slate-500">🏁 Último partido · ${esc(fechaLinda(fecha))}</span>
+          <span class="block text-sm font-semibold truncate">${res ? esc(textoResultado(res)) : ''}${res && mejores ? ' · ' : ''}${mejores ? `🏆 ${mejores}` : ''}</span>
+        </span>
+        <span class="text-slate-500 transition ${abierto ? 'rotate-90' : ''}">${ic('chevron-right')}</span>
+      </button>
+      ${abierto ? `<div class="px-3 pb-3 space-y-3">${res ? vistaResultado(res, false, false) : ''}${m ? mvpCerrada(m) : ''}</div>` : ''}
     </div>`;
 }
 
@@ -5042,6 +5078,7 @@ const acciones = {
   'completar-posiciones': () => actualizarGrupo(s => {
     if (s.equipos) s.equipos.pos = posDeLugares(lugaresDe(s.equipos, s.anotados, true));
   }, '✨ Posiciones completadas'),
+  'ver-ultimo': ({ fecha }) => { ui.verUltimo = ui.verUltimo === fecha ? null : fecha; render(); },
   'ver-votos': ({ id }) => { ui.verVotos = ui.verVotos === id ? null : id; render(); },
   'ver-resultado': ({ fecha }) => { ui.verResultado = ui.verResultado === fecha ? null : fecha; render(); },
   'corregir-resultado': () => { ui.corregirResultado = !ui.corregirResultado; ui.sinGoles = false; render(); },
