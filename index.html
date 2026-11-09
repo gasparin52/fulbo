@@ -3042,11 +3042,11 @@ function miEstado(d) {
 function filaJugador(p, etiqueta, clase) {
   // Cada uno se baja con "Me bajo"; sacar a otros de la lista es cosa del admin.
   const puedeBorrar = esAdmin();
-  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaLesion(p.id)}${marcaRoja(p.id)}${marcaAsistencia(p.id)}${marcaHater(p.id)}${marcaScout(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
+  const nombre = `<span class="block font-medium truncate">${esc(p.usuario)}${estrellasDe(p.id) ? ` <span class="text-xs text-amber-300" title="Jugador del partido ${estrellasDe(p.id)} ${estrellasDe(p.id) === 1 ? 'vez' : 'veces'}">⭐${estrellasDe(p.id) > 1 ? estrellasDe(p.id) : ''}</span>` : ''}${marcaRoja(p.id)}${marcaAsistencia(p.id)}${marcaHater(p.id)}${marcaScout(p.id)}${p.id === miUid() ? ' <span class="text-xs text-emerald-400">(vos)</span>' : ''}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>`;
   return `
     <li class="flex items-center gap-3 py-2">
       <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
-      ${avatar(p, 32)}
+      ${fotoLesion(p, avatar(p, 32))}
       <a href="#/jugador/${p.id}" class="flex-1 min-w-0 hover:text-emerald-300">${nombre}
         <span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</span>
       </a>
@@ -3133,9 +3133,9 @@ function equipos(d) {
         <ul class="space-y-2">
           ${js.map(p => `
             <li class="flex items-center gap-2.5">
-              ${avatar(p, 30)}
+              ${fotoLesion(p, avatar(p, 30))}
               <a href="#/jugador/${p.id}" class="flex-1 min-w-0">
-                <span class="block font-semibold truncate">${esc(p.usuario)}${marcaLesion(p)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse" class="text-sky-300">' + ic('arrow-left-right') + '</span>' : ''}</span>
+                <span class="block font-semibold truncate">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse" class="text-sky-300">' + ic('arrow-left-right') + '</span>' : ''}</span>
                 <span class="block text-[11px] text-slate-500">${pos(p).emoji} ${pos(p).corto}</span>
               </a>
               <span class="opacity-70">${chipNota(p.id)}</span>
@@ -3149,8 +3149,8 @@ function equipos(d) {
               ${sups.map(p => `
                 <li class="flex items-center gap-2">
                   <span class="text-[10px] font-bold rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-300 shrink-0">S${d.suplentes.indexOf(p) + 1}</span>
-                  ${avatar(p, 22)}
-                  <a href="#/jugador/${p.id}" class="truncate flex-1">${esc(p.usuario)}${marcaLesion(p)}</a>
+                  ${fotoLesion(p, avatar(p, 22))}
+                  <a href="#/jugador/${p.id}" class="truncate flex-1">${esc(p.usuario)}</a>
                   <span class="text-xs">${pos(p).emoji}</span>
                   <span class="opacity-70">${chipNota(p.id)}</span>
                   ${mover(p, e)}
@@ -3467,8 +3467,8 @@ function tarjetaPendientes() {
     <ul class="divide-y divide-slate-800">
       ${D.pendientes.map(p => `
         <li class="flex items-center gap-3 py-2">
-          ${avatar(p, 36)}
-          <span class="flex-1 min-w-0"><b class="block truncate">${esc(p.usuario)}${marcaLesion(p)}</b><span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</span></span>
+          ${fotoLesion(p, avatar(p, 36))}
+          <span class="flex-1 min-w-0"><b class="block truncate">${esc(p.usuario)}</b><span class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</span></span>
           <button data-action="decidir" data-id="${p.id}" data-si="1" class="${BTN_OK} text-xs px-3 py-1.5">Aceptar</button>
           <button data-action="decidir" data-id="${p.id}" class="${BTN_SEC} text-xs px-3 py-1.5">Rechazar</button>
         </li>`).join('')}
@@ -3549,8 +3549,8 @@ function modalReemplazar() {
     const fila = (p, etiqueta, clase) => `
       <li class="flex items-center gap-3 py-2">
         <span class="w-9 shrink-0 text-center text-xs font-bold rounded-lg py-1 ${clase}">${etiqueta}</span>
-        ${avatar(p, 28)}
-        <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}${marcaLesion(p)}</span>
+        ${fotoLesion(p, avatar(p, 28))}
+        <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}</span>
         <button data-action="reemplazar" data-id="${p.id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 shrink-0">Reemplazar</button>
       </li>`;
     return modal(`
@@ -3578,8 +3578,8 @@ function modalReemplazar() {
             <li>
               <label class="flex items-center gap-3 py-2 cursor-pointer">
                 <input type="radio" id="reemp-${p.id}" name="entra" value="${p.id}" class="w-5 h-5 accent-sky-400">
-                ${avatar(p, 28)}
-                <span class="flex-1 truncate">${esc(p.usuario)}${marcaLesion(p)}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>
+                ${fotoLesion(p, avatar(p, 28))}
+                <span class="flex-1 truncate">${esc(p.usuario)}${p.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}</span>
                 <span class="text-xs text-slate-400">${pos(p).emoji}</span>
               </label>
             </li>`).join('')}
@@ -3649,7 +3649,7 @@ function formGoleadores(actual) {
     if (!j) return '';
     return `
       <li class="flex items-center gap-2 min-w-0">
-        ${avatar(j, 20)}<span class="truncate flex-1 text-sm ${sup ? 'text-slate-400' : ''}">${esc(j.usuario)}${marcaLesion(j)}</span>
+        ${fotoLesion(j, avatar(j, 20))}<span class="truncate flex-1 text-sm ${sup ? 'text-slate-400' : ''}">${esc(j.usuario)}</span>
         <input id="r-g-${id}" name="g_${id}" data-gol="${e}" type="number" inputmode="numeric" min="0" max="30" value="${actual?.goles?.[id] || ''}" placeholder="0" class="${INPUT} !w-12 !px-1 !py-1 text-center font-bold shrink-0">
       </li>`;
   };
@@ -3790,10 +3790,10 @@ function tarjetaPartido() {
   const col = (e, color) => `
     <div class="rounded-xl border ${color} p-2.5">
       <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}</p>
-      <ul class="space-y-1 text-sm">${(eq?.[e] || []).map(jugador).filter(Boolean).map(p => `<li class="flex items-center gap-1.5 min-w-0">${avatar(p, 18)}<span class="truncate flex-1">${esc(p.usuario)}${marcaLesion(p)}</span>${chipNota(p.id)}</li>`).join('')}</ul>
+      <ul class="space-y-1 text-sm">${(eq?.[e] || []).map(jugador).filter(Boolean).map(p => `<li class="flex items-center gap-1.5 min-w-0">${fotoLesion(p, avatar(p, 18))}<span class="truncate flex-1">${esc(p.usuario)}</span>${chipNota(p.id)}</li>`).join('')}</ul>
       ${sups(e).length ? `
         <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
-        <ul class="space-y-1 text-sm text-slate-300">${sups(e).map(p => `<li class="flex items-center gap-1.5 min-w-0"><span class="text-[9px] font-bold rounded px-1 bg-amber-500/15 text-amber-300 shrink-0">S${d.suplentes.indexOf(p) + 1}</span>${avatar(p, 18)}<span class="truncate flex-1">${esc(p.usuario)}${marcaLesion(p)}</span>${chipNota(p.id)}</li>`).join('')}</ul>` : ''}
+        <ul class="space-y-1 text-sm text-slate-300">${sups(e).map(p => `<li class="flex items-center gap-1.5 min-w-0"><span class="text-[9px] font-bold rounded px-1 bg-amber-500/15 text-amber-300 shrink-0">S${d.suplentes.indexOf(p) + 1}</span>${fotoLesion(p, avatar(p, 18))}<span class="truncate flex-1">${esc(p.usuario)}</span>${chipNota(p.id)}</li>`).join('')}</ul>` : ''}
     </div>`;
   const pct = Math.min(100, (Date.now() - t.inicio) / t.dur * 100);
   return `
@@ -3872,9 +3872,9 @@ function modalCalificar() {
     </div>
     ${barra}
     <div class="flex items-center gap-3 mt-4 mb-3">
-      ${avatar(p, 48)}
+      ${fotoLesion(p, avatar(p, 48), true)}
       <div class="min-w-0">
-        <p class="text-lg font-black truncate">${esc(p.usuario)}${marcaLesion(p)}${p.invitado ? ' <span class="text-xs font-normal text-slate-500">(invitado)</span>' : ''}</p>
+        <p class="text-lg font-black truncate">${esc(p.usuario)}${p.invitado ? ' <span class="text-xs font-normal text-slate-500">(invitado)</span>' : ''}</p>
         <p class="text-xs text-slate-400">${pos(p).emoji} ${pos(p).label}</p>
       </div>
     </div>
@@ -4112,9 +4112,9 @@ function modalFicha() {
     <div class="${CARD} relative bg-gradient-to-br from-slate-900 to-slate-950">
       <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-8 !h-8 !absolute top-2 right-2">${ic('x')}</button>
       <div class="flex items-center gap-4 pt-3">
-        ${avatar(p, 80)}
+        ${fotoLesion(p, avatar(p, 80), true)}
         <div class="min-w-0 flex-1">
-          <h2 class="text-2xl font-black truncate">${esc(p.usuario)}${marcaLesion(p)}</h2>
+          <h2 class="text-2xl font-black truncate">${esc(p.usuario)}</h2>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}</p>
           ${CLUBES[p.cuadro] ? `<p class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-800 border border-slate-700 pl-1.5 pr-2.5 py-0.5 text-xs font-semibold text-slate-200">${escudo(p.cuadro, 18)} ${esc(CLUBES[p.cuadro].n)}</p>` : ''}
           ${c.estrellas ? `<p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 text-xs font-bold text-amber-200">${'⭐'.repeat(Math.min(c.estrellas, 5))}${c.estrellas > 5 ? ` ×${c.estrellas}` : ''} Jugador del partido${c.estrellas > 1 ? ` · ${c.estrellas} veces` : ''}</p>` : ''}
@@ -4278,13 +4278,11 @@ function esHater(id) {
   }
   return haterCache.ids.has(id);
 }
-// 🤕 Lesionado: lo marca (y lo saca) solo el propio jugador desde su ficha. Al lado del nombre
-// lleva 🤕. Recibe el jugador o su id.
-const MARCA_LESION = ' <span class="text-xs" title="Lesionado" aria-label="Lesionado">🤕</span>';
+// 🤕 Lesionado: lo marca (y lo saca) solo el propio jugador desde su ficha. Recibe el jugador o su id.
+// Va en la esquina de arriba a la derecha de la foto, la tarjeta o el chip, sobresaliendo
+// (el que lo contiene tiene que ser relative), así no parece parte del nombre.
 const lesionado = x => !!(typeof x === 'string' ? jugador(x) : x)?.lesionado;
-const marcaLesion = x => lesionado(x) ? MARCA_LESION : '';
-// En tarjetas y chips va en la esquina de arriba a la derecha, sobresaliendo (el que lo
-// usa tiene que ser relative), así no parece parte del nombre.
+const fotoLesion = (x, foto, grande = false) => lesionado(x) ? `<span class="relative shrink-0 inline-flex">${foto}${esquinaLesion(x, !grande)}</span>` : foto;
 const esquinaLesion = (x, chico = false) => lesionado(x) ? `<span title="Lesionado" aria-label="Lesionado" class="absolute z-10 grid place-items-center rounded-full bg-slate-900 ring-1 ring-slate-600 shadow-lg ${chico ? '-top-2 -right-2 w-5 h-5 text-[11px]' : '-top-2.5 -right-2.5 w-7 h-7 text-base'}">🤕</span>` : '';
 
 const marcaHater = id => esHater(id)
@@ -4432,9 +4430,9 @@ function vistaFicha(id) {
     <a href="#/" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 w-fit">← Volver</a>
     <div class="${CARD} bg-gradient-to-br from-slate-900 to-slate-950">
       <div class="flex items-center gap-4">
-        ${avatarAmpliable(p, 96)}
+        ${fotoLesion(p, avatarAmpliable(p, 96), true)}
         <div class="min-w-0 flex-1">
-          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${marcaLesion(p)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">' + ic('wrench') + ' armador</span>' : ''}</h1>
+          <h1 class="text-2xl font-black truncate">${esc(p.usuario)}${admin ? ' <span class="text-xs align-middle font-semibold text-sky-300 bg-sky-500/15 rounded px-1.5 py-0.5">admin</span>' : esArmador(id) ? ' <span class="text-xs align-middle font-semibold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5">' + ic('wrench') + ' armador</span>' : ''}</h1>
           <p class="text-slate-400 text-sm">${pos(p).emoji} ${pos(p).label}${p.edad ? ` · ${p.edad} años` : ''}${p.invitado ? ' · invitado (sin cuenta)' : ''}</p>
           ${CLUBES[p.cuadro] ? `
             <p class="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-800 border border-slate-700 pl-1.5 pr-2.5 py-0.5 text-xs font-semibold text-slate-200">${escudo(p.cuadro, 18)} ${esc(CLUBES[p.cuadro].n)}</p>` : ''}
@@ -4614,8 +4612,8 @@ function panelAdmin(d) {
         const r = resumen(j.id);
         return `
           <li class="py-2 flex flex-wrap items-center gap-2">
-            ${avatar(j, 28)}
-            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${marcaLesion(j)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : esArmador(j.id) ? ' <span class="text-xs text-amber-300">' + ic('wrench') + ' armador</span>' : ''}</span>
+            ${fotoLesion(j, avatar(j, 28))}
+            <span class="flex-1 min-w-[7rem] font-medium truncate">${esc(j.usuario)}${j.invitado ? ' <span class="text-xs text-slate-500">(invitado)</span>' : ''}${D.grupo.admins.includes(j.id) ? ' <span class="text-xs text-sky-300">admin</span>' : esArmador(j.id) ? ' <span class="text-xs text-amber-300">' + ic('wrench') + ' armador</span>' : ''}</span>
             <span class="text-xs ${r.n ? 'text-emerald-300' : 'text-slate-500'}" title="Promedio de votos">${r.n ? `★ ${r.general.toFixed(1)} (${r.n})` : 'sin votos'}</span>
             <span title="Nivel si no tiene votos">${stepper(nivelDe(j.id), `data-action="nivel" data-id="${j.id}"`)}</span>
             <button data-action="toggle-anotado" data-id="${j.id}" class="rounded-lg px-2 py-1.5 text-xs font-semibold ${anotados.has(j.id) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'}">${anotados.has(j.id) ? 'Anotado' : 'Anotar'}</button>
