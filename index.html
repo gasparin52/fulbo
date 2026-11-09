@@ -2841,7 +2841,7 @@ function vistaReglas() {
     ])}
     ${seccion(ic('user') + ' Tu cuenta y el grupo', [
       'En <b>Perfil</b> (abajo) está <b>Mi ficha</b>, con tus números de todos los grupos, y en <b>Configuración</b> editás tu foto, edad, posición y de qué cuadro sos.',
-      'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en Perfil → Configuración y te aparece una <b class="text-red-400">cruz roja (+)</b> al lado del nombre en todas las listas. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
+      'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en Perfil → Configuración y te aparece un 🤕 al lado del nombre en todas las listas. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
       '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Para eso tenés que tener el mail cargado y confirmado en <b>Tu cuenta</b>: sin mail no se puede recuperar.',
       'El grupo es privado: para entrar hace falta el link de invitación y que <b>un admin te acepte</b>. No lo compartas fuera del grupo.',
@@ -4278,10 +4278,10 @@ function esHater(id) {
   }
   return haterCache.ids.has(id);
 }
-// Lesionado: lo marca (y lo saca) solo el propio jugador desde su ficha. Al lado del nombre
-// lleva una cruz roja, como en el PES. Recibe el jugador o su id.
-const CRUZ_LESION = '<span title="Lesionado" aria-label="Lesionado" class="inline-grid place-items-center align-[1px] ml-1 w-3.5 h-3.5 rounded-[3px] bg-red-600 text-white text-[11px] font-black leading-none not-italic">+</span>';
-const marcaLesion = x => (typeof x === 'string' ? jugador(x) : x)?.lesionado ? CRUZ_LESION : '';
+// 🤕 Lesionado: lo marca (y lo saca) solo el propio jugador desde su ficha. Al lado del nombre
+// lleva 🤕. Recibe el jugador o su id.
+const MARCA_LESION = ' <span class="text-xs" title="Lesionado" aria-label="Lesionado">🤕</span>';
+const marcaLesion = x => (typeof x === 'string' ? jugador(x) : x)?.lesionado ? MARCA_LESION : '';
 
 const marcaHater = id => esHater(id)
   ? ' <span class="text-[10px] font-bold rounded px-1 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 whitespace-nowrap" title="Califica a todos muy por debajo que el resto">😈 hater</span>' : '';
@@ -4443,7 +4443,7 @@ function vistaFicha(id) {
             </p>
             ${castigado(id) ? '<p class="text-xs text-red-300/80 mt-1">Esta fecha, si se llena la lista, queda de suplente.</p>' : ''}` : ''}
           ${p.lesionado ? `
-            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-orange-500/15 border border-orange-500/30 px-2.5 py-0.5 text-xs font-bold text-orange-200"><span class="inline-grid place-items-center w-3.5 h-3.5 rounded-[3px] bg-red-600 text-white text-[11px] font-black leading-none">+</span> Lesionado</p>` : ''}
+            <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-orange-500/15 border border-orange-500/30 px-2.5 py-0.5 text-xs font-bold text-orange-200">🤕 Lesionado</p>` : ''}
           ${esHater(id) ? `
             <p class="mt-1.5 inline-flex items-center gap-1 rounded-full bg-fuchsia-500/15 border border-fuchsia-500/30 px-2.5 py-0.5 text-xs font-bold text-fuchsia-200">😈 Hater</p>
             <p class="text-xs text-fuchsia-300/80 mt-1">${esYo ? 'Calificás' : 'Califica'} a todos muy por debajo que el resto.${esYo ? ' Si ajustás tus votos, la etiqueta se va sola.' : ''}</p>` : ''}
