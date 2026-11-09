@@ -2576,10 +2576,52 @@ const pasosIphone = () => tira([
 function guia() {
   const ios = esIOS();
   const android = pasosAndroid(), iphone = pasosIphone();
-  const barraApp = (bell = false) => `<div class="flex items-center gap-1.5 px-2 py-2 bg-slate-950/60"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">G</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span><span class="text-amber-300 underline text-[8px]">Ayuda</span>${bell ? toca('<span class="px-0.5">' + ic('bell') + '</span>') : ic('bell')}<span class="text-slate-500 text-[8px]">Salir</span></div>`;
+  // Pantallitas de la app: arriba la barra del grupo, abajo la barra de Inicio · Calendario · Perfil.
+  const barraGrupo = ({ bell = false, admin = false, marcarAdmin = false } = {}) => {
+    const chip = `<span class="rounded bg-emerald-500/20 text-emerald-300 px-1 py-0.5">${ic('settings')}</span>`;
+    return `<div class="flex items-center gap-1 px-1.5 py-1.5 bg-slate-950/60"><span class="text-slate-400">${ic('arrow-left')}</span><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">F</span><span class="flex-1 font-bold truncate">Fulbo del jueves</span>${admin ? (marcarAdmin ? toca(chip) : chip) : ''}${bell ? toca(`<span class="px-0.5">${ic('bell')}</span>`) : ic('bell')}</div>`;
+  };
+  const tabsG = (activa, marcar) => `<div class="grid grid-cols-3 gap-0.5 mx-1.5 mt-1 rounded-lg bg-slate-800 p-0.5 text-center text-[8px] font-semibold">${[['partido', 'Partido'], ['equipos', 'Equipos'], ['jugadores', 'Jugadores']].map(([k, t]) => {
+    const b = `<span class="block rounded py-0.5 ${k === activa ? 'bg-emerald-500 text-slate-950' : 'text-slate-400'}">${t}</span>`;
+    return k === marcar ? toca(b, 'block') : b;
+  }).join('')}</div>`;
+  const navAbajo = (activa, marcar) => `<div class="mt-auto grid grid-cols-3 border-t border-slate-800 bg-slate-950 py-1 text-center text-[8px]">${[['inicio', 'house', 'Inicio'], ['calendario', 'calendar', 'Calendario'], ['perfil', 'user', 'Perfil']].map(([k, i, t]) => {
+    const b = `<span class="flex flex-col items-center ${k === activa ? 'text-emerald-400' : 'text-slate-400'}">${ic(i)}${t}</span>`;
+    return k === marcar ? `<span class="grid place-items-center">${toca(b)}</span>` : b;
+  }).join('')}</div>`;
+  const grupoMini = toca('<span class="flex items-center gap-1.5 rounded-lg bg-slate-800 p-1.5 w-[124px]"><span class="w-5 h-5 rounded-full bg-emerald-700 grid place-items-center text-[8px] font-bold">F</span><span class="flex-1 font-semibold truncate">Fulbo del jueves</span>›</span>');
+  // La cancha chiquita: jugadores (pelota) y lugares libres (punteados) en x/y de 0 a 100.
+  const pelota = (l, c = 'bg-amber-700') => `<span class="w-5 h-5 rounded-full ${c} ring-2 ring-red-400 grid place-items-center text-[8px] font-bold text-white">${l}</span>`;
+  const libre = (rol, mio = true) => `<span class="w-5 h-5 rounded-full border border-dashed grid place-items-center text-[6px] font-black ${mio ? 'border-amber-300 bg-amber-300/20 text-amber-200' : 'border-white/50 text-white/70'}">${rol}</span>`;
+  const en = (x, y, html) => `<span class="absolute -translate-x-1/2 -translate-y-1/2" style="left:${x}%;top:${y}%">${html}</span>`;
+  const cancha = cont => `<div class="relative flex-1 m-1.5 rounded-lg overflow-hidden border border-emerald-500/30" style="background:repeating-linear-gradient(180deg,#052e22 0 12%,#063a2b 12% 24%)"><div class="absolute inset-x-0 top-1/2 border-t border-emerald-300/25"></div><div class="absolute left-1/2 top-1/2 w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-300/25"></div>${cont}</div>`;
+  const tarjeta = html => `<div class="rounded-lg bg-slate-800 p-2">${html}</div>`;
+
+  const moverse = tira([
+    [`<div class="flex-1 p-2 space-y-1.5"><p class="text-slate-400">Hola,</p><b class="text-[11px]">juanp</b><div class="rounded-lg bg-emerald-600/30 border border-emerald-500/40 p-1.5"><b class="text-emerald-300">HOY</b> · 20:00 · Fulbo del jueves</div><p class="font-bold pt-1">Mis grupos</p>${grupoMini}</div>${navAbajo('inicio')}`, 'En <b>Inicio</b> ves el partido de hoy (o el próximo) y tus grupos. Tocá un grupo para entrar.', true],
+    [`${barraGrupo()}${tabsG('partido', 'equipos')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-12 rounded-lg bg-slate-800"></div><div class="h-6 rounded-lg bg-emerald-600/70"></div><div class="h-14 rounded-lg bg-slate-800"></div></div>`, 'Adentro del grupo hay 3 pestañas: <b>Partido</b> (la lista), <b>Equipos</b> y <b>Jugadores</b>. Con la <b>flecha</b> de arriba volvés a Inicio.', true],
+    [`<div class="flex-1 p-2 space-y-1.5"><b class="text-[11px]">Mi perfil</b><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="rounded bg-slate-700 py-1">⚽ Mi ficha</span><span class="py-1 text-slate-400">${ic('settings')} Configuración</span></div><div class="h-10 rounded-lg bg-slate-800"></div><div class="h-10 rounded-lg bg-slate-800"></div></div>${navAbajo('perfil', 'perfil')}`, 'En <b>Perfil</b> está <b>Mi ficha</b> (tus números de todos los grupos) y <b>Configuración</b>. En <b>Calendario</b> ves todas tus fechas.', true],
+  ]);
+  const cuenta = tira([
+    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••••</div><p class="text-slate-500 text-[8px]">8 o más, con letras y números</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. Después cargá tu <b>mail</b>: es la única forma de recuperarla si te la olvidás.'],
+    [`<div class="flex-1 p-2 space-y-1.5"><b class="text-[11px]">Mi perfil</b><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1 text-slate-400">⚽ Mi ficha</span>${toca(`<span class="block rounded bg-slate-700 py-1 px-1">${ic('settings')} Configuración</span>`)}</div><div class="rounded-lg bg-slate-800 divide-y divide-slate-700"><p class="px-1.5 py-1">📷 Foto</p><p class="px-1.5 py-1">Edad · 30</p><p class="px-1.5 py-1">Posición · ⚽</p><p class="px-1.5 py-1">Cuadro · Boca</p></div></div>${navAbajo('perfil')}`, 'Tu ficha (foto, edad, posición y cuadro) la cambiás en <b>Perfil → Configuración</b>.', true],
+    [`${barraGrupo()}${tabsG('jugadores', 'jugadores')}<div class="flex-1 p-1.5 space-y-1.5 pt-3">${toca(`<span class="block w-[124px] rounded bg-amber-400 text-slate-950 font-bold text-center py-1">${ic('zap')} Calificar rápido (4)</span>`)}<div class="grid grid-cols-3 gap-1 pt-1">${['B', 'J', 'P'].map(l => `<span class="rounded bg-slate-700/60 py-2 text-center font-bold">${l}</span>`).join('')}</div></div>`, 'En <b>Jugadores</b>, calificá a tus compañeros con <b>⚡ Calificar rápido</b>. Sirve solo para armar equipos parejos; nadie ve lo que pusiste.', true],
+  ]);
+  const meAnoto = `<span class="block w-[112px] rounded-lg bg-emerald-500 text-slate-950 font-bold text-center py-1.5 text-[10px]">⚽ ¡Me anoto!</span>`;
+  const tribuna = `<span class="rounded bg-slate-700 px-1 py-0.5">${ic('megaphone')} Voy a la tribuna</span>`;
+  const anotarse = tira([
+    [`${barraGrupo()}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-10 rounded-lg bg-slate-800"></div>${tarjeta(`<p class="text-slate-400 mb-1.5">No estás anotado</p>${toca(meAnoto)}<p class="mt-2 text-center text-slate-500">${ic('megaphone')} Voy a la tribuna</p>`)}</div>`, 'En la pestaña <b>Partido</b>, tocá <b>¡Me anoto!</b>. Si ya está lleno, entrás de suplente.', true],
+    [`${barraGrupo()}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-10 rounded-lg bg-slate-800"></div>${tarjeta(`<p class="text-emerald-400 mb-1.5">${ic('circle-check')} Estás anotado · titular #3</p>${toca('<span class="block w-[112px] rounded-lg bg-slate-700 text-red-300 font-bold text-center py-1.5 text-[10px]">Me bajo 😢</span>')}`)}</div>`, 'Si no podés ir, tocá <b>Me bajo</b> lo antes posible y confirmá. Avisando con tiempo no pasa nada.', true],
+    [`${barraGrupo()}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-10 rounded-lg bg-slate-800"></div>${tarjeta(`<p class="text-slate-400 mb-1.5">No estás anotado</p>${meAnoto}<p class="mt-2 text-center">${toca(tribuna)}</p>`)}</div>`, 'Si no jugás pero vas a ir a ver, tocá <b>Voy a la tribuna</b>, justo abajo de Me anoto.', true],
+  ]);
+  const posiciones = tira([
+    [`${barraGrupo()}${tabsG('equipos', 'equipos')}<div class="flex-1 p-1.5 space-y-2 pt-3"><div class="grid grid-cols-2 gap-1"><div class="h-16 rounded-lg bg-red-500/15 border border-red-500/30"></div><div class="h-16 rounded-lg bg-sky-500/15 border border-sky-500/30"></div></div>${toca('<span class="block w-[124px] rounded-lg bg-emerald-500 text-slate-950 font-bold text-center py-1.5">📍 Elegí tu posición</span>')}</div>`, 'Con los equipos armados, entrá a <b>Equipos</b> y tocá <b>Elegí tu posición en la cancha</b>.', true],
+    [cancha(`${en(50, 12, libre('ARQ'))}${en(28, 30, pelota('P'))}${en(72, 30, libre('DEF'))}${en(50, 22, `<span class="block rounded-full ring-2 ring-white shadow-xl scale-125">${pelota('J', 'bg-emerald-700')}</span>`)}${en(53, 31, '<span class="text-sm">👆</span>')}${en(62, 26, '<span class="text-emerald-300 font-black">→</span>')}${en(50, 62, libre('VOL', false))}${en(50, 88, libre('ARQ', false))}`), '<b>Arrastrá tu foto</b> a un lugar libre de tu equipo (los amarillos), o tocá el lugar. El primero que lo elige se lo queda.', true],
+    [cancha(`${en(50, 12, pelota('T'))}${en(28, 30, pelota('P'))}${en(72, 30, pelota('J', 'bg-emerald-700'))}${en(50, 62, libre('VOL', false))}${en(50, 88, libre('ARQ', false))}<span class="absolute inset-x-1 bottom-1 rounded bg-black/60 px-1 py-0.5 text-center text-[7px] text-amber-200">🔒 Se cierran 1 h antes</span>`), 'Una hora antes se cierran y los que no eligieron se acomodan solos. Los admins mueven a cualquiera (soltándolo afuera de la cancha, lo sacan).', true],
+  ]);
   const notis = tira([
-    [`${barraApp(true)}${fondoApp()}`, 'Tocá la <b>campanita</b> ' + ic('bell') + ' de arriba.', true],
-    [`${barraApp()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-6 rounded-xl bg-slate-800 border border-slate-600 p-2 space-y-1.5">
+    [`${barraGrupo({ bell: true })}${tabsG('partido')}${fondoApp()}`, 'Tocá la <b>campanita</b> ' + ic('bell') + ' de arriba a la derecha (está en Inicio y adentro de cada grupo).', true],
+    [`${barraGrupo()}<div class="relative flex-1">${fondoApp('h-full')}<div class="absolute inset-x-1.5 top-2 rounded-xl bg-slate-800 border border-slate-600 p-2 space-y-1.5">
       <p class="font-bold text-[10px]">${ic('bell')} Avisos</p><p class="text-slate-400">😢 Pepe se bajó</p>
       <div class="rounded-lg bg-slate-700/60 p-1.5 flex items-center gap-1"><span class="flex-1">Avisame al celu</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-0.5">Activar</span>')}</div>
     </div></div>`, 'Tocá <b>Activar</b>.', true],
@@ -2588,20 +2630,10 @@ function guia() {
       <div class="flex justify-end gap-2 text-blue-600 font-semibold"><span>Bloquear</span>${toca('<span class="px-1">Permitir</span>')}</div>
     </div></div>`, 'Cuando el celu pregunta, tocá <b>Permitir</b>. Te va a avisar si alguien se baja, si faltan jugadores o si se suspende.'],
   ]);
-  const anotarse = tira([
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-slate-400 mb-2">No estás anotado para este partido</p>${toca('<span class="block w-[112px] rounded-lg bg-emerald-500 text-slate-950 font-bold text-center py-1.5 text-[10px]">⚽ ¡Me anoto!</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Para jugar, tocá <b>¡Me anoto!</b>. Si ya está lleno, entrás de suplente.', true],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2"><p class="text-emerald-400 mb-2">${ic('circle-check')} Estás anotado · titular #3</p>${toca('<span class="block w-[112px] rounded-lg bg-slate-700 text-red-300 font-bold text-center py-1.5 text-[10px]">Me bajo 😢</span>')}</div><div class="h-16 rounded-lg bg-slate-800"></div></div>`, 'Si no podés ir, tocá <b>Me bajo</b> lo antes posible y confirmá. Avisando con tiempo no pasa nada.', true],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="h-14 rounded-lg bg-slate-800"></div><div class="rounded-lg bg-slate-800 p-2"><div class="flex items-center justify-between mb-1.5"><b>${ic('megaphone')} Tribuna</b>${toca('<span class="rounded bg-slate-700 px-1 py-0.5">' + ic('megaphone') + ' Voy a la tribuna</span>')}</div><p class="text-slate-500">¿No jugás pero vas a ir a alentar?</p></div></div>`, 'Si no jugás pero vas a ir a ver, sumate a la <b>Tribuna</b> (abajo de los equipos).', true],
-  ]);
   const link = tira([
-    [`${barraApp()}<div class="flex-1 p-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>${ic('settings')} Panel admin</b><p class="text-slate-400">${ic('ticket')} Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div></div></div>`, 'El <b>admin</b> baja hasta el <b>Panel admin</b> y toca <b>Copiar</b> en el link de invitación.', true],
-    [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp (mantené apretado el cuadro de texto → <b>Pegar</b>) y lo manda.'],
-    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5 text-center"><div class="text-2xl mt-2">⚽</div><b class="text-[11px]">Fulbo</b><p class="rounded bg-emerald-500/15 text-emerald-300 p-1">🎟️ Te invitaron a un grupo</p><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5"><span class="py-1">Entrar</span>${toca('<span class="block rounded bg-slate-950 py-1 px-1">Crear cuenta</span>')}</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Nombre de usuario</div><div class="h-5 rounded bg-slate-800 text-left px-1.5 py-1 text-slate-500">Contraseña</div></div>`, 'El que lo abre toca <b>Crear cuenta</b> (o <b>Entrar</b> si ya tiene) y le llega al admin el pedido para <b>aceptarlo</b>.'],
-  ]);
-  const cuenta = tira([
-    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••</div><p class="text-slate-500 text-[8px]">Anotá la contraseña en algún lado</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. <b>Anotala</b>: si te la olvidás, el admin te pone una nueva.'],
-    [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="flex items-center gap-2">${toca('<span class="w-8 h-8 rounded-full bg-emerald-700 grid place-items-center font-bold">J</span>')}<span class="rounded bg-slate-800 px-1.5 py-1">📷 Subir foto</span></div><p class="text-slate-400 pt-1">Edad</p><div class="w-10 rounded bg-slate-800 px-1.5 py-1">30</div><p class="text-slate-400">Posición</p><div class="flex gap-0.5">${['🃏', '🧤', '🛡️', '⚙️', '⚽'].map((e, i) => `<span class="flex-1 rounded py-1 text-center ${i === 4 ? 'bg-emerald-500/20 ring-1 ring-emerald-500' : 'bg-slate-800'}">${e}</span>`).join('')}</div><p class="text-slate-400">¿De qué cuadro sos?</p><div class="rounded bg-slate-800 px-1.5 py-1">Boca Juniors ▾</div></div>`, 'Completá tu ficha: foto, edad, posición y tu cuadro. Después la cambiás tocando tu foto, arriba a la izquierda.'],
-    [`${barraApp()}<div class="flex-1 p-2 space-y-2"><div class="rounded-lg bg-slate-800 p-2 space-y-1.5"><b>${ic('users')} Jugadores</b>${toca('<span class="block w-[112px] rounded bg-amber-400 text-slate-950 font-bold text-center py-1">' + ic('zap') + ' Calificar rápido (4)</span>')}<div class="grid grid-cols-3 gap-1 pt-1">${'BJPT'.slice(0, 3).split('').map(l => `<span class="rounded bg-slate-700/60 py-2 text-center font-bold">${l}</span>`).join('')}</div></div></div>`, 'Calificá a tus compañeros con <b>⚡ Calificar rápido</b>. Sirve solo para armar equipos parejos; nadie ve lo que pusiste.', true],
+    [`${barraGrupo({ admin: true, marcarAdmin: true })}${tabsG('partido')}${fondoApp()}`, 'El <b>admin</b> toca ' + ic('settings') + ' <b>Administrar</b>, arriba a la derecha.', true],
+    [`${barraGrupo({ admin: true })}<div class="grid grid-cols-2 gap-0.5 mx-1.5 mt-1 rounded-lg bg-slate-800 p-0.5 text-center text-[8px] font-semibold"><span class="py-0.5 text-slate-400">Partido</span><span class="rounded py-0.5 bg-emerald-500 text-slate-950">Grupo</span></div><div class="flex-1 p-1.5">${tarjeta(`<p class="text-slate-300 font-semibold mb-1.5">${ic('ticket')} Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div>`)}</div>`, 'En la pestaña <b>Grupo</b>, toca <b>Copiar</b> en el link de invitación.', true],
+    [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp y lo manda. El que entra crea su cuenta y al admin le llega el pedido para <b>aceptarlo</b>.'],
   ]);
   const paso = (titulo, cuerpo, abierto = false) => `
     <details class="group rounded-xl border border-slate-800 bg-slate-900/40" ${abierto ? 'open' : ''}>
@@ -2615,10 +2647,12 @@ function guia() {
     <div class="space-y-2">
       ${paso(ic('smartphone') + (ios ? ' Instalar la app (iPhone)' : ' Instalar la app (Android)'), (ios ? iphone : android) + nota('No hace falta ninguna tienda: se instala desde el navegador y ocupa casi nada.'), true)}
       ${paso(ios ? '🤖 ¿Tenés Android?' : '🍎 ¿Tenés iPhone?', ios ? android : iphone)}
-      ${paso(ic('user') + ' Crear tu cuenta, tu ficha y calificar', cuenta)}
+      ${paso('🧭 Moverte por la app', moverse)}
+      ${paso(ic('user') + ' Tu cuenta, tu ficha y calificar', cuenta)}
       ${paso('⚽ Anotarte, bajarte o ir a la tribuna', anotarse)}
+      ${paso('📍 Elegir tu posición en la cancha', posiciones)}
       ${paso(ic('bell') + ' Recibir avisos en el celu', notis + nota('En iPhone primero tenés que instalarla (paso de instalar) y abrirla desde el ícono.'))}
-      ${paso(ic('link') + ' Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede entrar.'))}
+      ${paso(ic('link') + ' Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede pedir entrar.'))}
     </div>`);
 }
 
@@ -2744,7 +2778,7 @@ function vistaReglas() {
     ${guia()}
     <h2 class="text-xl font-black pt-2">${ic('book-open', 'text-emerald-400')} Reglas</h2>
     ${seccion('⚽ Anotarse', [
-      'Tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido.',
+      'En la pestaña <b>Partido</b> de tu grupo, tocá <b>¡Me anoto!</b> para entrar en la lista del próximo partido. Si no jugás pero vas a ir a ver, tocá <b>Voy a la tribuna</b>.',
       'Cada grupo puede jugar <b>fútbol 5, 6, 7, 8, 9 u 11</b> (u otra cantidad): lo elige el admin en <b>Modalidad</b>, y el cupo de titulares es el doble de los que juegan por equipo.',
       'Los primeros en anotarse hasta llenar el cupo son <b>titulares</b>. Los que llegan después quedan de <b>suplentes</b> (S1, S2…), en orden de llegada.',
       'Si no podés ir, tocá <b>Me bajo</b> lo antes posible: entra automáticamente el S1. <b>Bajarse avisando no cuenta como falta.</b>',
@@ -2761,12 +2795,20 @@ function vistaReglas() {
       'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
+    ${seccion('📍 Posiciones en la cancha', [
+      'Con los equipos armados, en <b>Equipos</b> tocá <b>Elegí tu posición en la cancha</b>. La cancha muestra todos los puestos de la modalidad (en fútbol 5, cinco por lado).',
+      '<b>Arrastrá tu foto</b> a un lugar libre de tu equipo, o tocá el lugar. El primero que lo elige se lo queda; te podés cambiar mientras estén abiertas.',
+      'Se cierran <b>una hora antes</b> del partido. Los que no eligieron se acomodan solos, según la posición de su perfil.',
+      'Los admins y armadores mueven a cualquiera, aunque estén cerradas: si lo sueltan sobre otro, se intercambian; si lo sueltan afuera de la cancha, queda sin lugar.',
+      'Si un titular se baja, el suplente que entra ocupa su lugar.',
+    ])}
     ${seccion(ic('timer') + ' El día del partido', [
       'El admin carga la <b>duración</b> del partido (hasta 2 h).',
       'Si el grupo tiene <b>fecha fija</b> (por ejemplo, todos los viernes a las 20), cuando termina el partido la lista se vacía sola y se abre la fecha siguiente. Si un día cambia, el admin elige si el cambio es <b>solo para esa fecha</b> o <b>para todas las siguientes</b>, y puede saltear una semana (feriados).',
       '<b>Media hora antes</b> se cierran los equipos: ya no se rearman solos ni se pueden pedir cambios.',
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
+      'Al terminar, un admin o armador carga <b>¿Cómo salió?</b>: quién ganó y, si el grupo lo eligió, los goles (del equipo o de cada uno). Lo ven todos.',
     ])}
     ${seccion(ic('chart-column') + ' Calificaciones', [
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
@@ -2798,12 +2840,12 @@ function vistaReglas() {
       'Con menos de 70% aparece un <b>⏰</b> al lado del nombre.',
     ])}
     ${seccion(ic('user') + ' Tu cuenta y el grupo', [
-      'Tocá tu foto (arriba a la izquierda) para ver y editar tu ficha: edad, posición, foto y de qué cuadro sos.',
-      'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en tu ficha y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
+      'En <b>Perfil</b> (abajo) está <b>Mi ficha</b>, con tus números de todos los grupos, y en <b>Configuración</b> editás tu foto, edad, posición y de qué cuadro sos.',
+      'Si te lesionaste, tocá <b>🤕 Estoy lesionado</b> en Perfil → Configuración y te aparece la etiqueta 🤕 en la lista. Solo vos la podés poner y sacar (con <b>Ya me recuperé</b>).',
       'La sesión dura 30 días; después te pide entrar de nuevo.',
       '¿Te olvidaste la contraseña? En la pantalla de entrar tocá <b>¿Te olvidaste la contraseña?</b> y te mandamos un link a tu mail. Para eso tenés que tener el mail cargado y confirmado en <b>Tu cuenta</b>: sin mail no se puede recuperar.',
       'El grupo es privado: para entrar hace falta el link de invitación y que <b>un admin te acepte</b>. No lo compartas fuera del grupo.',
-      'Si estás en varios grupos, en <b>Mis partidos</b> (arriba a la izquierda) ves el próximo partido de cada uno ordenado por fecha, si estás anotado, si se te pisan dos horarios, y lo podés <b>agendar</b> en tu calendario.',
+      'En <b>Inicio</b> ves el partido de hoy (o el próximo) y tus grupos; tocá uno para entrar y volvé con la flecha de arriba. En <b>Calendario</b> ves las fechas de todos tus grupos por mes o semana, si se te pisan dos horarios, y las podés <b>agendar</b> en el calendario del celu.',
     ])}
     ${pie()}`;
 }
