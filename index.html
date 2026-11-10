@@ -61,6 +61,8 @@ const CONFIG = {
   // AdSense: un banner abajo de todo, solo en fulbo5.com. Vacío = sin anuncios.
   // cliente = "ca-pub-…" (AdSense → Cuenta); bloque = el número del bloque de anuncios.
   adsense: { cliente: '', bloque: '' },
+  // Google Analytics: el "ID de medición" (G-…) de Firebase → Analytics. Vacío = sin analíticas.
+  analytics: '',
 };
 // =============================================================
 
@@ -83,6 +85,32 @@ const STATS = [
 const CAMPO = STATS.filter(s => s.k !== 'arquero').map(s => s.k);
 const NIVEL_DEFAULT = 5;
 const LS = 'f5_';
+
+// ---------------- Analíticas (Google Analytics) ----------------
+// Cuántos entran, a qué pantallas van y qué hacen (registrarse, crear grupo, anotarse).
+// No se manda nada personal: ni nombres, ni ids, ni links de invitación; de la dirección
+// solo va la pantalla ("#/inicio", "#/unirse"…). En la compu no se mide.
+const conAnaliticas = () => !!CONFIG.analytics && !['localhost', '127.0.0.1', ''].includes(location.hostname);
+const pantalla = () => (location.hash.match(/^#\/[a-z]+/) || ['#/'])[0];
+const direccionLimpia = () => location.origin + location.pathname + pantalla();
+if (conAnaliticas()) {
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = function () { dataLayer.push(arguments); };
+  gtag('js', new Date());
+  gtag('config', CONFIG.analytics, { send_page_view: false, page_location: direccionLimpia() });
+  const s = document.createElement('script');
+  s.async = true;
+  s.src = `https://www.googletagmanager.com/gtag/js?id=${CONFIG.analytics}`;
+  document.head.append(s);
+}
+const evento = (nombre, datos = {}) => { if (conAnaliticas()) gtag('event', nombre, { page_location: direccionLimpia(), ...datos }); };
+let ultimaPantalla = null;
+function contarPantalla() {
+  const p = pantalla();
+  if (p === ultimaPantalla) return;
+  ultimaPantalla = p;
+  evento('page_view', { page_title: p.slice(2) || 'grupo' });
+}
 
 // ---------------- Firebase ----------------
 const V = '10.12.2';
@@ -798,7 +826,7 @@ const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 // (lo más rápido). Si no llega (iPhone, otro navegador, ya instalada), se muestran los pasos.
 let pedidoInstalar = null;
 addEventListener('beforeinstallprompt', e => { e.preventDefault(); pedidoInstalar = e; render(); });
-addEventListener('appinstalled', () => { pedidoInstalar = null; toast('📲 ¡Listo! Abrí Fulbo desde el ícono'); render(); });
+addEventListener('appinstalled', () => { pedidoInstalar = null; evento('instalar'); toast('📲 ¡Listo! Abrí Fulbo desde el ícono'); render(); });
 const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const pushPosible = () => !!CONFIG.vapid && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator;
 // El token de este celu queda en todos mis grupos (antes se guardaba por grupo).
@@ -1200,6 +1228,7 @@ function crearGrupo(nombre) {
     guardado.set(LS + 'gid', gid);
     await F.updateDoc(refUsuario(uid), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre }] });
     location.hash = '';
+    evento('crear_grupo');
   }, '⚽ Grupo creado. Compartí el link de invitación desde el panel de admin.');
 }
 
@@ -2744,6 +2773,7 @@ function vistaPrivacidad() {
     ['Cookies y publicidad', [
       'La página guarda en tu navegador tu sesión y algunas preferencias (por ejemplo, el último grupo que abriste).',
       'Si se muestra publicidad de Google, Google puede usar cookies para elegir los anuncios. Más info en <a href="https://policies.google.com/technologies/ads?hl=es" target="_blank" rel="noopener" class="underline">policies.google.com/technologies/ads</a>. Podés desactivar los anuncios personalizados en <a href="https://adssettings.google.com" target="_blank" rel="noopener" class="underline">adssettings.google.com</a>.',
+      'Usamos Google Analytics para saber cuánta gente usa la página y qué pantallas mira, sin tu nombre, tu mail ni tus grupos. Google guarda una cookie para contar visitas. Más info en <a href="https://policies.google.com/technologies/partner-sites?hl=es" target="_blank" rel="noopener" class="underline">policies.google.com/technologies/partner-sites</a>.',
     ]],
     ['Cuánto tiempo', [
       'Mientras tengas la cuenta. Si la borrás, se borran tu ficha, tu mail, tus calificaciones y tu lugar en los grupos. Pueden quedar copias de seguridad por un tiempo limitado.',
@@ -4736,6 +4766,7 @@ function anuncio() {
 }
 
 function render() {
+  contarPantalla();
   historialModal();
   renderVistas();
   pintar($('#nav'), navInferior());
@@ -4904,7 +4935,7 @@ const acciones = {
   anotarme: () => listaBloqueada() ? toast('El partido ya empezó: la lista está cerrada') : actualizarGrupo(s => {
     if (!s.anotados.includes(miUid())) s.anotados.push(miUid());
     s.publico = s.publico.filter(x => x !== miUid());  // si juega, ya no es público
-  }, '⚽ ¡Anotado!'),
+  }, '⚽ ¡Anotado!').then(ok => ok && evento('anotarse')),
   'publico-si': () => actualizarGrupo(s => { if (!s.publico.includes(miUid())) s.publico.push(miUid()); }, '📣 ¡Te esperamos en la tribuna!'),
   'publico-no': () => actualizarGrupo(s => { s.publico = s.publico.filter(x => x !== miUid()); }, 'Listo'),
   bajar: ({ id }) => {
@@ -4981,7 +5012,7 @@ const acciones = {
     return actualizarGrupo(s => {
       if (!s.anotados.includes(miUid())) s.anotados.push(miUid());
       s.publico = s.publico.filter(x => x !== miUid());
-    }, `⚽ ¡Anotado en ${g.nombre}!`, gid);
+    }, `⚽ ¡Anotado en ${g.nombre}!`, gid).then(ok => ok && evento('anotarse'));
   },
   desplegar: ({ id }) => {
     const d = document.getElementById(id).closest('[data-desplegable]');
@@ -5284,6 +5315,7 @@ const formularios = {
       await F.setDoc(refUsuario(cred.user.uid), datos);
       // Si falla el mail, se vuelve a pedir en "Actualizá tu cuenta".
       if (mail) await api('mail', { mail }, urlCuenta()).catch(e => console.error(e));
+      evento('sign_up');
     }, `¡Bienvenido, ${usuario}! ⚽`);
     D.registrando = false;
     if (ok) ui.foto = null;

@@ -4,6 +4,9 @@
     "ignore": [
       "firebase.json",
       "**/.*",
+      ".git/**",
+      ".github/**",
+      ".claude/**",
       "**/node_modules/**",
       "api/**",
       "scripts/**",
