@@ -21,6 +21,28 @@
     /* Jugadores que se arrastran en la cancha: sin el arrastre ni el menú propios del navegador. */
     [data-arrastra] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     [data-arrastra] img { pointer-events: none; -webkit-user-drag: none; }
+    /* Landing: lo que aparece al deslizar (animarPortada le pone .visto) y lo que se mueve solo. */
+    .aparece { opacity: 0; translate: 0 2rem; transition: opacity .7s ease, translate .8s cubic-bezier(.2,.7,.2,1), scale .6s cubic-bezier(.3,1.6,.5,1); }
+    .aparece.desde-izq { translate: -2.5rem 0; }
+    .aparece.desde-der { translate: 2.5rem 0; }
+    .aparece.pop { translate: none; scale: .5; }
+    .aparece.visto { opacity: 1; translate: none; scale: none; }
+    @keyframes entra { from { opacity: 0; translate: 0 1.5rem; } }
+    @keyframes entra-izq { from { opacity: 0; translate: -5rem 3rem; } }
+    @keyframes entra-der { from { opacity: 0; translate: 5rem 3rem; } }
+    @keyframes flota { 50% { translate: 0 -.7rem; } }
+    @keyframes brillo { to { background-position: 200% center; } }
+    @keyframes late { 50% { opacity: .4; scale: 1.08; } }
+    .entra { animation: entra .8s cubic-bezier(.2,.7,.2,1) both; }
+    .entra-izq { animation: entra-izq 1.1s cubic-bezier(.2,.7,.2,1) both; }
+    .entra-der { animation: entra-der 1.1s cubic-bezier(.2,.7,.2,1) both; }
+    .flota { animation: flota 5s ease-in-out infinite; }
+    .brillo { background-size: 200% auto; animation: brillo 5s linear infinite; }
+    .late { animation: late 7s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .aparece { opacity: 1; translate: none; scale: none; transition: none; }
+      .entra, .entra-izq, .entra-der, .flota, .brillo, .late { animation: none; }
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
@@ -1789,30 +1811,34 @@ function vistaPortada() {
     <div class="rounded-[2.2rem] border-[6px] border-slate-800 bg-slate-950 shadow-2xl shadow-black/60 overflow-hidden ${extra}">
       <img src="capturas/${img}.jpg" alt="${alt}" loading="lazy" class="block w-full aspect-[390/800] object-cover object-top">
     </div>`;
+  // Retraso de la animación, para que las cosas de una misma fila no entren todas juntas.
+  const tarde = (ms, que = 'transition') => `style="${que}-delay:${ms}ms"`;
   const botones = `
     <div class="flex flex-col sm:flex-row gap-2 justify-center">
-      <button data-action="ir-login" data-tab="registro" class="${BTN_OK} text-base px-7 py-3.5 shadow-lg shadow-emerald-500/25">Crear cuenta gratis</button>
-      <button data-action="ir-login" data-tab="entrar" class="${BTN_SEC} text-base px-7 py-3.5">Ya tengo cuenta</button>
+      <button data-action="ir-login" data-tab="registro" class="${BTN_OK} text-base px-7 py-3.5 shadow-lg shadow-emerald-500/25 transition hover:-translate-y-0.5 hover:shadow-emerald-500/40">Crear cuenta gratis</button>
+      <button data-action="ir-login" data-tab="entrar" class="${BTN_SEC} text-base px-7 py-3.5 transition hover:-translate-y-0.5">Ya tengo cuenta</button>
     </div>`;
   // Una función: la captura a un costado y el texto al otro (en el celu, una abajo de la otra).
   const bloque = (img, alt, icono, titulo, texto, derecha = false, imagen = null) => `
     <section class="grid sm:grid-cols-2 gap-6 sm:gap-10 items-center">
-      <div class="${derecha ? 'sm:order-2' : ''} w-56 sm:w-64 mx-auto">${imagen || celu(img, alt)}</div>
+      <div class="aparece ${derecha ? 'desde-der sm:order-2' : 'desde-izq'} w-56 sm:w-64 mx-auto">
+        <div class="transition duration-300 hover:-translate-y-1 ${derecha ? 'hover:-rotate-1' : 'hover:rotate-1'}">${imagen || celu(img, alt)}</div>
+      </div>
       <div class="text-center sm:text-left">
-        <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">${ic(icono, '!w-6 !h-6')}</div>
-        <h2 class="text-2xl sm:text-3xl font-black mt-2 leading-tight">${titulo}</h2>
-        <p class="text-slate-400 mt-2 text-base">${texto}</p>
+        <div class="aparece pop inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300" ${tarde(150)}>${ic(icono, '!w-6 !h-6')}</div>
+        <h2 class="aparece text-2xl sm:text-3xl font-black mt-2 leading-tight" ${tarde(250)}>${titulo}</h2>
+        <p class="aparece text-slate-400 mt-2 text-base" ${tarde(350)}>${texto}</p>
       </div>
     </section>`;
   const paso = (n, icono, texto) => `
-    <div class="rounded-2xl bg-slate-900/60 border border-slate-800 p-3 sm:p-4 text-center">
+    <div class="aparece rounded-2xl bg-slate-900/60 border border-slate-800 p-3 sm:p-4 text-center" ${tarde(n * 150)}>
       <div class="text-emerald-400">${ic(icono, '!w-7 !h-7')}</div>
       <p class="text-[10px] sm:text-xs font-bold text-emerald-400 mt-2">PASO ${n}</p>
       <p class="text-sm sm:text-base font-semibold mt-0.5 leading-snug">${texto}</p>
     </div>`;
-  const chip = (icono, texto) => `<span class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 border border-slate-800 px-3 py-1.5 text-sm">${ic(icono, 'text-emerald-400')} ${texto}</span>`;
+  const chip = (icono, texto, n) => `<span class="aparece inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 border border-slate-800 px-3 py-1.5 text-sm" ${tarde(n * 100)}>${ic(icono, 'text-emerald-400')} ${texto}</span>`;
   const pregunta = (p, r) => `
-    <details class="group rounded-xl border border-slate-800 bg-slate-900/40">
+    <details class="aparece group rounded-xl border border-slate-800 bg-slate-900/40">
       <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-4 py-3 font-semibold"><span>${p}</span><span class="text-slate-500 transition group-open:rotate-180">${ic('chevron-down')}</span></summary>
       <p class="px-4 pb-4 text-sm text-slate-400 leading-relaxed">${r}</p>
     </details>`;
@@ -1820,26 +1846,26 @@ function vistaPortada() {
   return `
     <section class="relative isolate -mx-4 -mt-6 px-4 pt-10 pb-14 overflow-hidden">
       <div class="absolute inset-0 -z-10 [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" style="background:radial-gradient(60% 50% at 50% 0%,rgba(16,185,129,.35),transparent 70%),repeating-linear-gradient(180deg,rgba(6,58,43,.35) 0 56px,rgba(5,46,34,.15) 56px 112px)"></div>
-      <div class="absolute left-1/2 top-[22rem] w-[34rem] h-[34rem] -translate-x-1/2 rounded-full border-2 border-emerald-400/10 -z-10"></div>
+      <div class="late absolute left-1/2 top-[22rem] w-[34rem] h-[34rem] -translate-x-1/2 rounded-full border-2 border-emerald-400/10 -z-10"></div>
       <div class="text-center">
-        <span class="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 border border-emerald-400/30 px-3 py-1 text-sm font-semibold text-emerald-300">⚽ Fulbo</span>
-        <h1 class="text-[2.6rem] sm:text-6xl font-black leading-[1.05] mt-5 tracking-tight">Armá el fulbo<br><span class="bg-gradient-to-r from-emerald-300 to-lime-300 bg-clip-text text-transparent">en un toque</span></h1>
-        <p class="text-lg text-slate-300 mt-4 max-w-sm mx-auto">Se anotan solos, los equipos salen parejos y votan al mejor.</p>
-        <div class="mt-7">${botones}</div>
-        <p class="text-xs text-slate-500 mt-3">Gratis · Sin descargar nada</p>
+        <span class="entra inline-flex items-center gap-2 rounded-full bg-emerald-500/15 border border-emerald-400/30 px-3 py-1 text-sm font-semibold text-emerald-300">⚽ Fulbo</span>
+        <h1 class="entra text-[2.6rem] sm:text-6xl font-black leading-[1.05] mt-5 tracking-tight" ${tarde(100, 'animation')}>Armá el fulbo<br><span class="brillo bg-gradient-to-r from-emerald-300 via-lime-300 to-emerald-300 bg-clip-text text-transparent">en un toque</span></h1>
+        <p class="entra text-lg text-slate-300 mt-4 max-w-sm mx-auto" ${tarde(250, 'animation')}>Se anotan solos, los equipos salen parejos y votan al mejor.</p>
+        <div class="entra mt-7" ${tarde(400, 'animation')}>${botones}</div>
+        <p class="entra text-xs text-slate-500 mt-3" ${tarde(500, 'animation')}>Gratis · Sin descargar nada</p>
       </div>
       <div class="relative mt-12 h-[27rem] sm:h-[31rem] max-w-md mx-auto">
-        ${celu('cancha', 'Las posiciones en la cancha', 'absolute w-48 sm:w-56 left-0 sm:-left-6 top-10 -rotate-6 opacity-90')}
-        ${celu('equipos', 'Los equipos', 'absolute w-48 sm:w-56 right-0 sm:-right-6 top-10 rotate-6 opacity-90')}
-        ${celu('partido', 'La lista del partido', 'absolute w-52 sm:w-60 left-1/2 -translate-x-1/2 top-0 z-10 ring-1 ring-emerald-400/30')}
+        <div class="entra-izq absolute w-48 sm:w-56 left-0 sm:-left-6 top-10 -rotate-6 opacity-90" ${tarde(700, 'animation')}>${celu('cancha', 'Las posiciones en la cancha', 'flota [animation-delay:-2s]')}</div>
+        <div class="entra-der absolute w-48 sm:w-56 right-0 sm:-right-6 top-10 rotate-6 opacity-90" ${tarde(800, 'animation')}>${celu('equipos', 'Los equipos', 'flota [animation-delay:-3.5s]')}</div>
+        <div class="entra absolute w-52 sm:w-60 left-1/2 -translate-x-1/2 top-0 z-10" ${tarde(550, 'animation')}>${celu('partido', 'La lista del partido', 'flota ring-1 ring-emerald-400/30')}</div>
       </div>
     </section>
 
     <div class="flex flex-wrap justify-center gap-2 -mt-4">
-      ${chip('clipboard-list', 'Lista con suplentes')}${chip('scale', 'Equipos parejos')}${chip('bell', 'Avisos al celu')}${chip('repeat', 'Fecha fija')}
+      ${chip('clipboard-list', 'Lista con suplentes', 0)}${chip('scale', 'Equipos parejos', 1)}${chip('bell', 'Avisos al celu', 2)}${chip('repeat', 'Fecha fija', 3)}
     </div>
 
-    <div class="space-y-16 sm:space-y-20 py-8">
+    <div class="space-y-16 sm:space-y-20 py-8 overflow-x-clip">
       ${bloque('partido', 'La lista del partido', 'clipboard-list', 'Chau al "¿quién viene?"', 'Cada uno se anota o se baja solo. Si se llena, entran los suplentes.')}
       ${bloque('equipos', 'Los equipos', 'scale', 'Equipos parejos', 'Se califican entre ellos en secreto y Fulbo arma los equipos equilibrados.', true)}
       ${bloque('cancha', 'Las posiciones en la cancha', 'map-pin', 'Cada uno elige su lugar', 'El que llega primero elige dónde juega. Una hora antes se cierra.')}
@@ -1850,7 +1876,7 @@ function vistaPortada() {
     </div>
 
     <section>
-      <h2 class="text-2xl sm:text-3xl font-black text-center mb-4">Empezar es fácil</h2>
+      <h2 class="aparece text-2xl sm:text-3xl font-black text-center mb-4">Empezar es fácil</h2>
       <div class="grid grid-cols-3 gap-2 sm:gap-3">
         ${paso(1, 'user-plus', 'Uno crea el grupo')}
         ${paso(2, 'share-2', 'Pasa el link al grupo')}
@@ -1858,14 +1884,14 @@ function vistaPortada() {
       </div>
     </section>
 
-    <section class="rounded-3xl border border-slate-800 bg-slate-900/50 p-5 grid sm:grid-cols-3 gap-4 text-center text-sm">
+    <section class="aparece rounded-3xl border border-slate-800 bg-slate-900/50 p-5 grid sm:grid-cols-3 gap-4 text-center text-sm">
       <div>${ic('lock', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Grupos cerrados</p><p class="text-slate-400">Entra solo quien invita el admin.</p></div>
       <div>${ic('shield-check', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Pocos datos</p><p class="text-slate-400">Ni teléfono ni documento.</p></div>
       <div>${ic('users', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Sin chat</p><p class="text-slate-400">La charla sigue en WhatsApp.</p></div>
     </section>
 
     <section class="space-y-2">
-      <h2 class="text-2xl font-black text-center mb-3">Preguntas</h2>
+      <h2 class="aparece text-2xl font-black text-center mb-3">Preguntas</h2>
       ${pregunta('¿Cuesta algo?', 'No. Fulbo es gratis. Se mantiene con un poco de publicidad.')}
       ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
       ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
@@ -1873,11 +1899,21 @@ function vistaPortada() {
     </section>
 
     <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
-      <div class="absolute inset-0 -z-10" style="background:radial-gradient(60% 70% at 50% 100%,rgba(16,185,129,.28),transparent 70%)"></div>
-      <h2 class="text-3xl sm:text-4xl font-black">¿Arrancamos?</h2>
-      <div class="mt-5">${botones}</div>
+      <div class="late absolute inset-0 -z-10" style="background:radial-gradient(60% 70% at 50% 100%,rgba(16,185,129,.28),transparent 70%)"></div>
+      <h2 class="aparece pop text-3xl sm:text-4xl font-black">¿Arrancamos?</h2>
+      <div class="aparece mt-5" ${tarde(200)}>${botones}</div>
     </section>
     ${pie()}`;
+}
+
+// Lo de la landing que tiene .aparece entra recién cuando llega a la pantalla.
+function animarPortada() {
+  const els = $('#app').querySelectorAll('.aparece:not(.visto)');
+  if (!els.length) return;
+  const obs = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visto'); obs.unobserve(e.target); }
+  }), { rootMargin: '0px 0px -8% 0px' });
+  els.forEach(x => obs.observe(x));
 }
 
 function vistaLogin() {
@@ -4900,7 +4936,7 @@ function renderVistas() {
   if (location.hash === '#/privacidad') return pintar(el, vistaPrivacidad());
   const link = location.hash.match(/^#\/(clave|verificar)\/([A-Za-z0-9_-]+)$/);
   if (link) return pintar(el, link[1] === 'clave' ? vistaNuevaClave(link[2]) : vistaVerificar(link[2]));
-  if (!D.user && verPortada()) return pintar(el, vistaPortada());
+  if (!D.user && verPortada()) return pintar(el, vistaPortada()), animarPortada();
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
