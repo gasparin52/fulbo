@@ -611,7 +611,6 @@ A.onAuthStateChanged(auth, user => {
       // La app arranca en el Inicio (partidos y grupos de cada uno).
       if (D.perfil && !ui.arranco) {
         ui.arranco = true;
-        guardado.set(LS + 'conocido', '1');
         if (!location.hash || ['#/', '#/entrar', '#/fulbo'].includes(location.hash)) location.replace('#/inicio');
       }
       elegirGrupo();
@@ -1801,10 +1800,11 @@ function actualizarAvisoUsuario() {
 }
 
 // ---------------- Vistas ----------------
-// Portada para el que llega sin cuenta: qué es Fulbo, unas pantallas dibujadas y los botones
-// para entrar. El que ya entró alguna vez en este celu, o viene con invitación, va directo al login.
+// Portada para el que no tiene la sesión abierta: qué es Fulbo, capturas de la app y los botones
+// para entrar. Cualquier página lleva acá, salvo el login (#/entrar); el que viene con invitación
+// va directo al login.
 const verPortada = () => location.hash === '#/fulbo'
-  || (['', '#/'].includes(location.hash) && !guardado.get(LS + 'conocido') && !guardado.get(LS + 'inv'));
+  || (location.hash !== '#/entrar' && !guardado.get(LS + 'inv'));
 function vistaPortada() {
   // Capturas reales de la app (carpeta capturas/), con datos de ejemplo.
   const celu = (img, alt, extra = '') => `
