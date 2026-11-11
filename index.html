@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Fulbo ⚽ Anotate</title>
+  <meta name="description" content="Organizá el fútbol 5 de todas las semanas: cada uno se anota, los equipos salen parejos, elegís tu posición y votan al mejor del partido. Gratis y sin descargar nada.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -324,6 +325,7 @@ const ICONOS = {
   calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
   'chart-column': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
   'circle-alert': '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
   'circle-check': '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
   'circle-help': '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
@@ -358,6 +360,7 @@ const ICONOS = {
   smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   swords: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" x2="9" y1="14" y2="18"/><line x1="7" x2="4" y1="17" y2="20"/><line x1="3" x2="5" y1="19" y2="21"/>',
   ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>',
+  trophy: '<path d="M10 14.66v1.626a2 2 0 0 1-.976 1.696A5 5 0 0 0 7 21.978"/><path d="M14 14.66v1.626a2 2 0 0 0 .976 1.696A5 5 0 0 1 17 21.978"/><path d="M18 9h1.5a1 1 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z"/><path d="M6 9H4.5a1 1 0 0 1 0-5H6"/>',
   timer: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
   'trash-2': '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
   'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
@@ -586,7 +589,8 @@ A.onAuthStateChanged(auth, user => {
       // La app arranca en el Inicio (partidos y grupos de cada uno).
       if (D.perfil && !ui.arranco) {
         ui.arranco = true;
-        if (!location.hash) location.replace('#/inicio');
+        guardado.set(LS + 'conocido', '1');
+        if (!location.hash || ['#/', '#/entrar', '#/fulbo'].includes(location.hash)) location.replace('#/inicio');
       }
       elegirGrupo();
       procesarInvitacion();
@@ -1775,6 +1779,107 @@ function actualizarAvisoUsuario() {
 }
 
 // ---------------- Vistas ----------------
+// Portada para el que llega sin cuenta: qué es Fulbo, unas pantallas dibujadas y los botones
+// para entrar. El que ya entró alguna vez en este celu, o viene con invitación, va directo al login.
+const verPortada = () => location.hash === '#/fulbo'
+  || (['', '#/'].includes(location.hash) && !guardado.get(LS + 'conocido') && !guardado.get(LS + 'inv'));
+function vistaPortada() {
+  // Capturas reales de la app (carpeta capturas/), con datos de ejemplo.
+  const celu = (img, alt, extra = '') => `
+    <div class="rounded-[2.2rem] border-[6px] border-slate-800 bg-slate-950 shadow-2xl shadow-black/60 overflow-hidden ${extra}">
+      <img src="capturas/${img}.jpg" alt="${alt}" loading="lazy" class="block w-full aspect-[390/800] object-cover object-top">
+    </div>`;
+  const botones = `
+    <div class="flex flex-col sm:flex-row gap-2 justify-center">
+      <button data-action="ir-login" data-tab="registro" class="${BTN_OK} text-base px-7 py-3.5 shadow-lg shadow-emerald-500/25">Crear cuenta gratis</button>
+      <button data-action="ir-login" data-tab="entrar" class="${BTN_SEC} text-base px-7 py-3.5">Ya tengo cuenta</button>
+    </div>`;
+  // Una función: la captura a un costado y el texto al otro (en el celu, una abajo de la otra).
+  const bloque = (img, alt, icono, titulo, texto, derecha = false, imagen = null) => `
+    <section class="grid sm:grid-cols-2 gap-6 sm:gap-10 items-center">
+      <div class="${derecha ? 'sm:order-2' : ''} w-56 sm:w-64 mx-auto">${imagen || celu(img, alt)}</div>
+      <div class="text-center sm:text-left">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">${ic(icono, '!w-6 !h-6')}</div>
+        <h2 class="text-2xl sm:text-3xl font-black mt-2 leading-tight">${titulo}</h2>
+        <p class="text-slate-400 mt-2 text-base">${texto}</p>
+      </div>
+    </section>`;
+  const paso = (n, icono, texto) => `
+    <div class="rounded-2xl bg-slate-900/60 border border-slate-800 p-3 sm:p-4 text-center">
+      <div class="text-emerald-400">${ic(icono, '!w-7 !h-7')}</div>
+      <p class="text-[10px] sm:text-xs font-bold text-emerald-400 mt-2">PASO ${n}</p>
+      <p class="text-sm sm:text-base font-semibold mt-0.5 leading-snug">${texto}</p>
+    </div>`;
+  const chip = (icono, texto) => `<span class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 border border-slate-800 px-3 py-1.5 text-sm">${ic(icono, 'text-emerald-400')} ${texto}</span>`;
+  const pregunta = (p, r) => `
+    <details class="group rounded-xl border border-slate-800 bg-slate-900/40">
+      <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-4 py-3 font-semibold"><span>${p}</span><span class="text-slate-500 transition group-open:rotate-180">${ic('chevron-down')}</span></summary>
+      <p class="px-4 pb-4 text-sm text-slate-400 leading-relaxed">${r}</p>
+    </details>`;
+
+  return `
+    <section class="relative isolate -mx-4 -mt-6 px-4 pt-10 pb-14 overflow-hidden">
+      <div class="absolute inset-0 -z-10 [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" style="background:radial-gradient(60% 50% at 50% 0%,rgba(16,185,129,.35),transparent 70%),repeating-linear-gradient(180deg,rgba(6,58,43,.35) 0 56px,rgba(5,46,34,.15) 56px 112px)"></div>
+      <div class="absolute left-1/2 top-[22rem] w-[34rem] h-[34rem] -translate-x-1/2 rounded-full border-2 border-emerald-400/10 -z-10"></div>
+      <div class="text-center">
+        <span class="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 border border-emerald-400/30 px-3 py-1 text-sm font-semibold text-emerald-300">⚽ Fulbo</span>
+        <h1 class="text-[2.6rem] sm:text-6xl font-black leading-[1.05] mt-5 tracking-tight">Armá el fulbo<br><span class="bg-gradient-to-r from-emerald-300 to-lime-300 bg-clip-text text-transparent">en un toque</span></h1>
+        <p class="text-lg text-slate-300 mt-4 max-w-sm mx-auto">Se anotan solos, los equipos salen parejos y votan al mejor.</p>
+        <div class="mt-7">${botones}</div>
+        <p class="text-xs text-slate-500 mt-3">Gratis · Sin descargar nada</p>
+      </div>
+      <div class="relative mt-12 h-[27rem] sm:h-[31rem] max-w-md mx-auto">
+        ${celu('cancha', 'Las posiciones en la cancha', 'absolute w-48 sm:w-56 left-0 sm:-left-6 top-10 -rotate-6 opacity-90')}
+        ${celu('equipos', 'Los equipos', 'absolute w-48 sm:w-56 right-0 sm:-right-6 top-10 rotate-6 opacity-90')}
+        ${celu('partido', 'La lista del partido', 'absolute w-52 sm:w-60 left-1/2 -translate-x-1/2 top-0 z-10 ring-1 ring-emerald-400/30')}
+      </div>
+    </section>
+
+    <div class="flex flex-wrap justify-center gap-2 -mt-4">
+      ${chip('clipboard-list', 'Lista con suplentes')}${chip('scale', 'Equipos parejos')}${chip('bell', 'Avisos al celu')}${chip('repeat', 'Fecha fija')}
+    </div>
+
+    <div class="space-y-16 sm:space-y-20 py-8">
+      ${bloque('partido', 'La lista del partido', 'clipboard-list', 'Chau al "¿quién viene?"', 'Cada uno se anota o se baja solo. Si se llena, entran los suplentes.')}
+      ${bloque('equipos', 'Los equipos', 'scale', 'Equipos parejos', 'Se califican entre ellos en secreto y Fulbo arma los equipos equilibrados.', true)}
+      ${bloque('cancha', 'Las posiciones en la cancha', 'map-pin', 'Cada uno elige su lugar', 'El que llega primero elige dónde juega. Una hora antes se cierra.')}
+      ${bloque('mvp', 'El jugador del partido', 'trophy', 'Votan al mejor', 'Después del partido se vota al figura y queda en su ficha.', true,
+        `<img src="capturas/mvp.jpg" alt="El jugador del partido" loading="lazy" class="block w-full rounded-3xl shadow-2xl shadow-amber-900/30 ring-1 ring-amber-400/30">`)}
+      ${bloque('ficha', 'La ficha de un jugador', 'chart-column', 'Tu ficha de jugador', 'Tus números según lo que votan tus compañeros, partidos ganados y premios.')}
+      ${bloque('calendario', 'El calendario', 'calendar', 'Todos tus partidos', 'Si jugás en varios grupos, los ves juntos. Con fecha fija se arma solo cada semana.', true)}
+    </div>
+
+    <section>
+      <h2 class="text-2xl sm:text-3xl font-black text-center mb-4">Empezar es fácil</h2>
+      <div class="grid grid-cols-3 gap-2 sm:gap-3">
+        ${paso(1, 'user-plus', 'Uno crea el grupo')}
+        ${paso(2, 'share-2', 'Pasa el link al grupo')}
+        ${paso(3, 'circle-check', 'Cada uno se anota')}
+      </div>
+    </section>
+
+    <section class="rounded-3xl border border-slate-800 bg-slate-900/50 p-5 grid sm:grid-cols-3 gap-4 text-center text-sm">
+      <div>${ic('lock', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Grupos cerrados</p><p class="text-slate-400">Entra solo quien invita el admin.</p></div>
+      <div>${ic('shield-check', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Pocos datos</p><p class="text-slate-400">Ni teléfono ni documento.</p></div>
+      <div>${ic('users', 'text-emerald-400 !w-6 !h-6')}<p class="font-bold mt-1">Sin chat</p><p class="text-slate-400">La charla sigue en WhatsApp.</p></div>
+    </section>
+
+    <section class="space-y-2">
+      <h2 class="text-2xl font-black text-center mb-3">Preguntas</h2>
+      ${pregunta('¿Cuesta algo?', 'No. Fulbo es gratis. Se mantiene con un poco de publicidad.')}
+      ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
+      ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
+      ${pregunta('¿Puedo estar en más de un grupo?', 'Sí. Ves todos tus partidos juntos en el calendario.')}
+    </section>
+
+    <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
+      <div class="absolute inset-0 -z-10" style="background:radial-gradient(60% 70% at 50% 100%,rgba(16,185,129,.28),transparent 70%)"></div>
+      <h2 class="text-3xl sm:text-4xl font-black">¿Arrancamos?</h2>
+      <div class="mt-5">${botones}</div>
+    </section>
+    ${pie()}`;
+}
+
 function vistaLogin() {
   if (ui.tab === 'olvide') return vistaOlvide();
   const reg = ui.tab === 'registro';
@@ -1812,7 +1917,7 @@ function vistaLogin() {
       </form>
       ${!reg ? '<div class="text-center mt-3"><button data-action="tab" data-tab="olvide" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400 hover:text-slate-200">¿Te olvidaste la contraseña?</button></div>' : ''}
     `)}
-    <a href="#/ayuda" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 !flex mx-auto w-fit !text-amber-300">${ic('circle-help')} ¿Primera vez? Mirá cómo se usa</a>
+    <a href="#/fulbo" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 !flex mx-auto w-fit !text-amber-300">${ic('circle-help')} ¿Primera vez? Mirá qué es Fulbo</a>
     ${pie()}`;
 }
 
@@ -4795,6 +4900,7 @@ function renderVistas() {
   if (location.hash === '#/privacidad') return pintar(el, vistaPrivacidad());
   const link = location.hash.match(/^#\/(clave|verificar)\/([A-Za-z0-9_-]+)$/);
   if (link) return pintar(el, link[1] === 'clave' ? vistaNuevaClave(link[2]) : vistaVerificar(link[2]));
+  if (!D.user && verPortada()) return pintar(el, vistaPortada());
   if (!D.user) return pintar(el, vistaLogin()), actualizarAvisoUsuario();
   if (D.perfil === undefined || (D.registrando && !D.perfil)) return pintar(el, cargando(D.registrando ? 'Creando tu cuenta…' : undefined));
   if (!D.perfil) return pintar(el, vistaCompletar());
@@ -4872,6 +4978,7 @@ function sacarDeLugar(id) {
 
 const acciones = {
   tab: ({ tab }) => { ui.tab = tab; ui.foto = null; render(); },
+  'ir-login': ({ tab }) => { ui.tab = tab; ui.foto = null; location.hash = '#/entrar'; },
   'ver-pass': () => { ui.verPass = !ui.verPass; render(); },
   'mvp-votar': () => { ui.modal = 'mvp-votar'; render(); },
   'mvp-editar': () => { ui.modal = 'mvp-editar'; render(); },
