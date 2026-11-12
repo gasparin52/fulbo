@@ -147,6 +147,109 @@ service cloud.firestore {
       }
     }
 
+    // Torneos entre grupos: como los amistosos, se comparte el torneo y no los grupos. Lo arma un admin de un grupo
+    // (los admins de ese grupo lo organizan) e invita a otros grupos; el admin de cada grupo invitado acepta (su grupo
+    // pasa a ser un equipo y él, su capitán) o dice que no. Se lee con el id, no se puede listar.
+    function torneoG(a) { return get(/databases/$(database)/documents/torneos/$(a)).data; }
+    function datosTorneoG(d) {
+      return d.keys().hasOnly(['nombre', 'creado', 'creador', 'org', 'admins', 'invitados', 'nombresInv', 'rechazados', 'gids', 'equipos',
+          'estado', 'formato', 'vueltas', 'cant', 'cuando', 'arbitro', 'arbitroNombre', 'partidos', 'llave', 'res', 'modo', 'empezo', 'termino'])
+        && textoCorto(d.nombre, 40) && d.creado is int
+        && d.org.keys().hasOnly(['gid', 'nombre']) && d.org.gid is string && textoCorto(d.org.nombre, 60)
+        && d.admins is list && d.admins.size() <= 12
+        && d.invitados is list && d.invitados.size() <= 16 && d.nombresInv is map
+        && d.get('rechazados', []) is list && d.get('rechazados', []).size() <= 40
+        && d.gids is list && d.gids.size() <= 16 && d.equipos is list && d.equipos.size() == d.gids.size()
+        && d.org.gid in d.gids
+        && d.estado in ['armando', 'jugando', 'terminado']
+        && d.partidos is list && d.partidos.size() <= 300;
+    }
+    function aceptaTorneo() {
+      let g = request.resource.data.gids[request.resource.data.gids.size() - 1];
+      let e = request.resource.data.equipos[request.resource.data.equipos.size() - 1];
+      return resource.data.estado == 'armando'
+        && cambia().hasOnly(['invitados', 'gids', 'equipos'])
+        && g in resource.data.invitados && esAdmin(g)
+        && request.resource.data.invitados == resource.data.invitados.removeAll([g])
+        && request.resource.data.gids == resource.data.gids.concat([g])
+        && request.resource.data.equipos == resource.data.equipos.concat([e])
+        && e.keys().hasOnly(['gid', 'nombre', 'colores', 'diseno', 'capitan'])
+        && e.gid == g && e.capitan == uid() && textoCorto(e.nombre, 20);
+    }
+    function rechazaTorneo() {
+      let lista = request.resource.data.get('rechazados', []);
+      let g = lista[lista.size() - 1];
+      return cambia().hasOnly(['invitados', 'rechazados'])
+        && g in resource.data.invitados && esAdmin(g)
+        && request.resource.data.invitados == resource.data.invitados.removeAll([g])
+        && lista == resource.data.get('rechazados', []).concat([g]);
+    }
+    match /torneos/{a} {
+      allow get: if logueado();
+      allow create: if logueado() && datosTorneoG(request.resource.data)
+        && request.resource.data.creador == uid() && uid() in request.resource.data.admins
+        && esAdmin(request.resource.data.org.gid)
+        && request.resource.data.gids == [request.resource.data.org.gid]
+        && request.resource.data.invitados.size() == 0
+        && request.resource.data.estado == 'armando';
+      // Los que organizan cambian todo menos quiénes organizan; de los grupos que aceptaron solo pueden sacar.
+      allow update: if logueado() && datosTorneoG(request.resource.data) && (
+          (uid() in resource.data.admins
+            && request.resource.data.admins == resource.data.admins
+            && request.resource.data.org == resource.data.org
+            && request.resource.data.creador == resource.data.creador
+            && request.resource.data.creado == resource.data.creado
+            && resource.data.gids.hasAll(request.resource.data.gids))
+          || aceptaTorneo()
+          || rechazaTorneo());
+      allow delete: if logueado() && uid() in resource.data.admins;
+
+      // Jugadores de cada equipo: cada uno se anota con el equipo de su grupo. Los que organizan y el admin
+      // de cada grupo anotan a gente sin cuenta (inv_...) y sacan a cualquiera de su equipo.
+      match /jugadores/{u} {
+        allow read: if logueado();
+        allow create: if logueado()
+          && request.resource.data.e in torneoG(a).gids
+          && request.resource.data.ts is int
+          && (
+            (u == uid()
+              && request.resource.data.keys().hasOnly(['e', 'usuario', 'foto', 'posicion', 'ts'])
+              && esMiembro(request.resource.data.e)
+              && request.resource.data.usuario.lower() + '@fulbo.app' == request.auth.token.email
+              && request.resource.data.foto is string && request.resource.data.foto.size() < 200000
+              && request.resource.data.posicion in ['comodin', 'arquero', 'defensor', 'medio', 'delantero'])
+            || (u.matches('inv_[A-Za-z0-9]+')
+              && (uid() in torneoG(a).admins || esAdmin(request.resource.data.e))
+              && request.resource.data.keys().hasOnly(['e', 'usuario', 'inv', 'por', 'ts'])
+              && textoCorto(request.resource.data.usuario, 30) && request.resource.data.usuario.size() > 0
+              && request.resource.data.inv == true && request.resource.data.por == uid()));
+        allow delete: if logueado() && (u == uid() || uid() in torneoG(a).admins || esAdmin(resource.data.e));
+      }
+
+      // Resultados (como en el torneo interno): los cargan los que organizan, los capitanes de los dos equipos o el árbitro.
+      match /resultados/{k} {
+        allow read: if logueado();
+        allow create, update: if logueado()
+          && (uid() in torneoG(a).admins
+            || torneoG(a).equipos[request.resource.data.a].get('capitan', '') == uid()
+            || torneoG(a).equipos[request.resource.data.b].get('capitan', '') == uid()
+            || torneoG(a).get('arbitro', '') == uid())
+          && torneoG(a).estado == 'jugando'
+          && request.resource.data.keys().hasOnly(['torneo', 'a', 'b', 'ga', 'gb', 'gana', 'por', 'ts', 'eventos', 'vivo'])
+          && request.resource.data.torneo == torneoG(a).creado
+          && request.resource.data.por == uid()
+          && request.resource.data.a is int && request.resource.data.b is int
+          && (!k.matches('^[0-9]+$') || (torneoG(a).partidos[int(k)].a == request.resource.data.a
+            && torneoG(a).partidos[int(k)].b == request.resource.data.b))
+          && (request.resource.data.ga == null || (request.resource.data.ga is int && request.resource.data.ga >= 0 && request.resource.data.ga <= 99))
+          && (request.resource.data.gb == null || (request.resource.data.gb is int && request.resource.data.gb >= 0 && request.resource.data.gb <= 99))
+          && request.resource.data.gana in [null, 'a', 'b']
+          && (!('eventos' in request.resource.data) || (request.resource.data.eventos is list && request.resource.data.eventos.size() <= 150))
+          && request.resource.data.get('vivo', false) is bool;
+        allow delete: if logueado() && uid() in torneoG(a).admins;
+      }
+    }
+
     // Código de cada grupo para desafiarlo a un amistoso (UADE4821 → el grupo). Se busca por el código exacto:
     // no se pueden listar. Lo crea y lo cambia un admin de ese grupo.
     match /codigos/{c} {
@@ -384,7 +487,9 @@ service cloud.firestore {
             || grupo(g).torneo.equipos[request.resource.data.b].get('capitan', '') == uid()
             || grupo(g).torneo.get('arbitro', '') == uid())
           && grupo(g).torneo.estado == 'jugando'
-          && request.resource.data.keys().hasOnly(['torneo', 'a', 'b', 'ga', 'gb', 'gana', 'por', 'ts'])
+          && request.resource.data.keys().hasOnly(['torneo', 'a', 'b', 'ga', 'gb', 'gana', 'por', 'ts', 'eventos', 'vivo'])
+          && (!('eventos' in request.resource.data) || (request.resource.data.eventos is list && request.resource.data.eventos.size() <= 150))
+          && request.resource.data.get('vivo', false) is bool
           && request.resource.data.torneo == grupo(g).torneo.creado
           && request.resource.data.por == uid()
           && request.resource.data.a is int && request.resource.data.b is int
@@ -407,6 +512,20 @@ service cloud.firestore {
           && textoCorto(request.resource.data.nombre, 60)
           && amistoso(a).local.gid == request.resource.data.desde
           && amistoso(a).rival.gid == g;
+        allow delete: if esAdmin(g) || esAdmin(resource.data.desde);
+      }
+
+      // Invitaciones a torneos entre grupos que le llegaron a este grupo (el id es el del torneo). Las ven sus
+      // admins; las manda uno de los que organizan, para un torneo que ya lo tiene invitado.
+      match /torneosInv/{a} {
+        allow read: if esAdmin(g);
+        allow create: if logueado()
+          && request.resource.data.keys().hasOnly(['desde', 'nombre', 'por', 'ts'])
+          && esAdmin(request.resource.data.desde)
+          && request.resource.data.por == uid()
+          && textoCorto(request.resource.data.nombre, 60)
+          && torneoG(a).org.gid == request.resource.data.desde
+          && g in torneoG(a).invitados;
         allow delete: if esAdmin(g) || esAdmin(resource.data.desde);
       }
 

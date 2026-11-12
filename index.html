@@ -17,6 +17,8 @@
   <style>
     body { -webkit-tap-highlight-color: transparent; }
     select, input { color-scheme: dark; }
+    @keyframes tarjeta-sale { from { transform: scale(.3) translateY(40%); opacity: 0; } to { transform: none; opacity: 1; } }
+    .tarjeta-sale { animation: tarjeta-sale .28s cubic-bezier(.2,1.4,.4,1) both; }
     input[type=range] { accent-color: #10b981; }
     /* Jugadores que se arrastran en la cancha: sin el arrastre ni el menú propios del navegador. */
     [data-arrastra] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -333,6 +335,7 @@ const D = {
   registrando: false,
   vs: {},              // amistosos que sigo: id -> datos (null si no existe)
   vsAnot: {},          // id -> anotados, en orden de llegada
+  tg: {}, tgT: {}, tgJug: {}, tgRes: {},  // torneos entre grupos: datos, como se muestran, jugadores y resultados
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
 const ui = { tab: 'entrar', foto: null };  // foto: null = sin cambios, '' = quitar, dataURL = nueva
@@ -631,8 +634,11 @@ A.onAuthStateChanged(auth, user => {
   Object.values(subsVs).forEach(f => f());
   subsVs = {};
   D.vs = {}; D.vsAnot = {};
+  Object.values(subsTG).forEach(f => f());
+  subsTG = {};
+  Object.assign(D, { tg: {}, tgT: {}, tgJug: {}, tgRes: {} });
   nivelesDe = mvpDe = pendientesDe = desafiosDe = null;
-  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [] });
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [], torneosInv: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -686,13 +692,14 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = pendientesDe = desafiosDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [] });
+  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [], torneosInv: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
     if (!s.exists()) return olvidarGrupo(gid, 'Ese grupo ya no existe');
     D.grupo = normGrupo(s.data());
     rivales().forEach(x => seguirVs(x.id));
+    torneosDelGrupo().forEach(x => seguirTG(x.id));
     suscribirNiveles();
     suscribirPendientes();
     suscribirDesafios();
@@ -1248,6 +1255,11 @@ function suscribirDesafios() {
   subsGrupo.push(F.onSnapshot(F.collection(db, 'grupos', D.gid, 'desafios'), qs => {
     D.desafios = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
     D.desafios.forEach(x => seguirVs(x.id));
+    render();
+  }, e => console.warn(e.code)));
+  subsGrupo.push(F.onSnapshot(F.collection(db, 'grupos', D.gid, 'torneosInv'), qs => {
+    D.torneosInv = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+    D.torneosInv.forEach(x => seguirTG(x.id));
     render();
   }, e => console.warn(e.code)));
 }
@@ -2067,7 +2079,7 @@ function vistaPortada() {
       ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
       ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
       ${pregunta('¿Puedo estar en más de un grupo?', 'Sí. Ves todos tus partidos juntos en el calendario.')}
-      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o desafía a otro grupo a un amistoso con el código de ese grupo. Si lo aceptan, los dos ven la lista del partido y cada uno se anota de su lado. Nadie entra al grupo del otro.')}
+      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo o con otros grupos (liga, copa o las dos, con modo árbitro para anotar goles y tarjetas), o desafía a otro grupo a un amistoso con el código de ese grupo. Si lo aceptan, los dos ven la lista del partido y cada uno se anota de su lado. Nadie entra al grupo del otro.')}
     </section>
 
     <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
@@ -2806,11 +2818,12 @@ function vistaPrincipal() {
   const sinEquipos = card(`
     <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
     <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos ${D.grupo.amistoso ? '(cada grupo de un lado)' : 'y equilibrados'} cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
-  const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
+  const contenido = idTG() ? [cartelera(), vistaTG(idTG())]
+    : t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
     : t === 'torneo' ? [cartelera(), vistaTorneo()]
     : t === 'amistoso' ? [cartelera(), vistaAmistoso()]
-    : [cartelera(), tarjetaDesafios(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
+    : [cartelera(), tarjetaDesafios(), tarjetasInvTG(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -3192,6 +3205,19 @@ function vistaReglas() {
       'Los <b>resultados</b> los cargan los capitanes de los dos equipos que jugaron, el árbitro del torneo o un admin. Queda a la vista quién lo cargó; si está mal, se corrige.',
       '<b>' + tarjetaAmarilla(12) + ' Árbitro del torneo</b>: sin árbitro, el equipo que queda libre en cada fecha, o alguien fijo del grupo.',
       'Al final aparecen el <b>campeón</b> y el podio, y el torneo queda en <b>Campeones anteriores</b>. Con <b>Copiar para WhatsApp</b> mandás la tabla y los resultados.',
+    ])}
+    ${seccion(tarjetaAmarilla(14) + ' Modo árbitro', [
+      'En cada partido del torneo, el que dirige (o un admin, o un capitán) toca <b>Modo árbitro</b>. Tiene un <b>reloj</b> y la lista de los jugadores de los dos equipos.',
+      'Toca a un jugador y le anota un <b>gol</b>, una <b>amarilla</b> o una <b>roja</b>, con el minuto del reloj. La tarjeta aparece <b>a pantalla completa</b> para mostrársela al jugador. Dos amarillas son roja.',
+      'Los botones <b>Mostrar</b> sacan la tarjeta sin anotarla. El árbitro del partido del grupo también los tiene, al lado de su nombre.',
+      'Todo se guarda al toque: los demás ven el partido <b>en vivo</b> en el fixture. Al terminar se confirma el resultado (en la copa, si empatan, quién ganó por penales).',
+      'Con lo que anotan los árbitros, el torneo muestra los <b>goleadores</b> y las <b>tarjetas</b>. Es opcional: también se puede cargar solo el resultado.',
+    ])}
+    ${seccion('🏆 Torneos con otros grupos', [
+      'Un admin lo arma desde <b>Torneo → Armar un torneo con otros grupos</b> e invita a cada grupo con su <b>código</b>, como en los amistosos. Su grupo es el que organiza.',
+      'Al admin de cada grupo le llega la invitación arriba de Partido: si la <b>acepta</b>, su grupo juega como un equipo y él es el capitán. Los jugadores de cada grupo se anotan desde su grupo.',
+      'Como en el torneo entre ustedes: liga, copa o las dos, un día fijo o a coordinar, y un árbitro (mejor alguien neutral). Los resultados los cargan los que organizan, los capitanes o el árbitro.',
+      '<b>Nadie entra al grupo del otro</b>: se comparte solo el torneo (equipos, partidos y tabla).',
     ])}
     ${seccion('⚔️ Amistosos contra otros grupos', [
       'Sirven para jugar contra otro grupo, o cuando no llegan al cupo. Un admin toca <b>Sumale algo al grupo → Amistoso</b>, pone el <b>código del otro grupo</b>, la fecha y la cancha, y toca <b>Mandar desafío</b>.',
@@ -4361,6 +4387,9 @@ function tarjetaArbitro() {
     <div class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5">
       ${tarjetaAmarilla(22)}
       <p class="flex-1 min-w-0 text-sm truncate">Dirige <b>${esc(a.nombre)}</b></p>
+      ${a.id === miUid() || esAdmin() ? `
+        <button data-action="arb-mostrar" data-c="am" title="Mostrar amarilla" aria-label="Mostrar amarilla" class="w-9 h-9 grid place-items-center rounded-lg bg-yellow-300/90 hover:bg-yellow-300">${tarjetaAmarilla(16)}</button>
+        <button data-action="arb-mostrar" data-c="roja" title="Mostrar roja" aria-label="Mostrar roja" class="w-9 h-9 grid place-items-center rounded-lg bg-red-600 hover:bg-red-500"><span class="inline-block w-[11px] h-4 rounded-[2px] bg-red-300 border border-white/60" style="rotate:12deg"></span></button>` : ''}
       ${esAdmin() ? `<button data-action="arbitro" class="${BTN_CHIP}">${ic('pencil')} Cambiar</button>` : ''}
     </div>`;
 }
@@ -4387,7 +4416,7 @@ function tarjetaModos() {
   if (!esAdmin() || D.grupo.amistoso) return '';
   const enAdmin = location.hash === '#/admin';
   if (!enAdmin && guardado.get(LS + 'modosOcultos')) return '';
-  const t = D.grupo.torneo, a = rivales().length > 0;
+  const t = D.grupo.torneo || torneosDelGrupo().length, a = rivales().length > 0;
   const modo = (activo, attrs, dibujo, titulo, txt) => {
     const tag = attrs.startsWith('href') ? 'a' : 'button';
     return `
@@ -4416,7 +4445,7 @@ function tarjetaModos() {
 // Arriba de Partido: el partido del grupo y lo que haya además (torneo, amistoso). Si no hay nada más, no se ve.
 function cartelera() {
   if (D.grupo.amistoso) return '';
-  const t = D.grupo.torneo, tab = tabGrupo(), p = D.grupo.partido;
+  const t = D.grupo.torneo, tab = idTG() ? `tg:${idTG()}` : tabGrupo(), p = D.grupo.partido;
   const prox = rivales().map(x => D.vs[x.id] ? { id: x.id, a: D.vs[x.id] } : null)
     .filter(x => x && !vsJugado(x.a) && !x.a.suspendido && estadoVs(x.a) !== 'rechazado' && (!x.a.fecha || x.a.fecha >= hoyArg()))
     .sort((x, y) => (x.a.fecha || '9').localeCompare(y.a.fecha || '9'))[0];
@@ -4428,9 +4457,13 @@ function cartelera() {
     const otro = rivales().find(x => x.id === prox.id)?.rival || prox.a.rival.nombre;
     items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), `vs ${otro}`, `${prox.a.fecha ? fechaCorta(prox.a.fecha) + ' · ' : ''}${estadoVs(prox.a) === 'pendiente' ? '⏳ esperando' : yo ? '✅ anotado' : falta ? `faltan ${falta}` : 'completo'}`]);
   } else if (rivales().length) items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), 'Amistosos', 'Historial']);
+  for (const x of torneosDelGrupo()) {
+    const tg = D.tgT[x.id];
+    if (tg) items.push([`tg:${x.id}`, `#/tg/${x.id}`, `<span class="text-sky-300">${ic('trophy', '!w-6 !h-6')}</span>`, tg.nombre, estadoTorneo(tg)]);
+  }
   if (items.length < 2) return '';
   return `
-    <div class="grid ${items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2">
+    <div class="grid ${items.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2">
       ${items.map(([k, h, dibujo, tit, sub]) => `
         <a href="${h}" class="min-w-0 flex flex-col items-center text-center gap-1 rounded-2xl border-2 px-1.5 py-2 transition ${tab === k ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/70 hover:border-slate-600'}">
           <span class="h-7 grid place-items-center">${dibujo}</span>
@@ -4457,8 +4490,25 @@ const CATALOGO_COLORES = {
 };
 const COLOR_INICIAL = ['rojo', 'azul', 'verde', 'amarillo', 'violeta', 'naranja', 'blanco', 'celeste'];
 // Colores del equipo i del torneo actual (los que eligió su capitán, o los de arranque).
-const coloresT = i => { const c = D.grupo?.torneo?.equipos?.[i]?.colores; return c?.length ? c : [COLOR_INICIAL[i % COLOR_INICIAL.length]]; };
+const coloresT = i => { const c = ctxT().t?.equipos?.[i]?.colores; return c?.length ? c : [COLOR_INICIAL[i % COLOR_INICIAL.length]]; };
 const colorT = i => CATALOGO_COLORES[coloresT(i)[0]];
+// ---- El torneo que se está mirando ----
+// El interno del grupo (grupos/{gid}.torneo) o uno entre grupos (torneos/{id}, en #/tg/{id}). Las pantallas
+// y las acciones del torneo usan ctxT(), así sirven para los dos.
+const idTG = () => location.hash.match(/^#\/tg\/([A-Za-z0-9]+)/)?.[1] || null;
+function ctxT() {
+  const id = idTG();
+  if (id) return ctxEntreGrupos(id);
+  return {
+    tipo: 'grupo', id: null, t: D.grupo?.torneo, admin: esAdmin(), base: '#/torneo',
+    cambiar: (mut, msg) => actualizarGrupo(s => mut(s.torneo, s), msg),
+    refRes: k => F.doc(colTorneoResultados(D.gid), String(k)),
+    ficha: id => jugador(id),
+    nombre: id => jugador(id)?.usuario || '',
+  };
+}
+const keyT = k => String(k).includes('-') ? String(k) : Number(k);
+
 const nombreT = (t, i) => `${colorT(i)[0]} ${t.equipos[i].nombre}`;
 const camisetaT = (t, i, px) => {
   if (!definido(i)) return camiseta(SIN_EQUIPO, px);
@@ -4466,7 +4516,7 @@ const camisetaT = (t, i, px) => {
   return camiseta(c1, px, inicial(t.equipos[i].nombre), c2, t.equipos[i].diseno);
 };
 const esCapitan = (t, i) => !!t.equipos?.[i]?.capitan && t.equipos[i].capitan === miUid();
-const puedeEditarEquipo = (t, i) => t.estado !== 'terminado' && (esAdmin() || esCapitan(t, i));
+const puedeEditarEquipo = (t, i) => t.estado !== 'terminado' && (ctxT().admin || (ctxT().tipo === 'grupo' && esCapitan(t, i)));
 // Encima de los datos del torneo: el nombre, los colores y el diseño que eligió cada capitán (torneoEquipos)
 // y los resultados cargados (torneoResultados: el número del partido en la liga, 'ronda-lugar' en la copa).
 // Cuando la final de la copa tiene ganador, el torneo terminó.
@@ -4477,19 +4527,11 @@ function aplicarIdentidades() {
     const x = D.torneoEquipos?.[i];
     if (x && x.torneo === t.creado) Object.assign(e, { nombre: x.nombre, colores: x.colores, diseno: x.diseno });
   });
-  for (const [k, x] of Object.entries(D.torneoResultados || {})) {
-    if (x.torneo !== t.creado) continue;
-    if (k.includes('-')) t.res = { ...(t.res || {}), [k]: { a: x.a, b: x.b, ga: x.ga, gb: x.gb, gana: x.gana ?? null, por: x.por } };
-    else if (t.partidos?.[k]?.a === x.a && t.partidos[k].b === x.b) Object.assign(t.partidos[k], { ga: x.ga, gb: x.gb, por: x.por });
-  }
-  if (t.estado === 'jugando' && t.llave) {
-    const R = rondasCopa(t);
-    if (definido(ganadorLlave(R[R.length - 1][0]))) t.estado = 'terminado';
-  }
+  mezclarResultados(t, D.torneoResultados);
 }
 // Cargan el resultado de un partido: un admin, los capitanes de los dos equipos o el árbitro del torneo.
 const puedeCargar = (t, x) => t?.estado === 'jugando' && !!x && definido(x.a) && definido(x.b)
-  && (esAdmin() || esCapitan(t, x.a) || esCapitan(t, x.b) || (!!t.arbitro && t.arbitro === miUid()));
+  && (ctxT().admin || esCapitan(t, x.a) || esCapitan(t, x.b) || (!!t.arbitro && t.arbitro === miUid()));
 // Si el equipo i chocaría de colores con otro, el porqué.
 function choqueColores(t, i, colores) {
   const clave = cs => [...cs].sort().join('+');
@@ -4592,7 +4634,7 @@ function rondasCopa(t) {
     ronda = ronda.map((x, s) => {
       const res = t.res?.[`${r}-${s}`];
       const vale = res && res.a === x.a && res.b === x.b;
-      return { ...x, key: `${r}-${s}`, f: base + r + 1, n: ronda.length, ga: vale ? res.ga : null, gb: vale ? res.gb : null, gana: vale ? res.gana : null, por: vale ? res.por : null };
+      return { ...x, key: `${r}-${s}`, f: base + r + 1, n: ronda.length, ga: vale ? res.ga : null, gb: vale ? res.gb : null, gana: vale ? res.gana : null, por: vale ? res.por : null, eventos: vale ? res.eventos : [], vivo: vale && !!res.vivo };
     });
     R.push(ronda);
     if (ronda.length === 1) break;
@@ -4621,13 +4663,14 @@ const totalPartidosTorneo = t => partidosTorneo(t).length + (t.formato === 'liga
 // Día de una fecha que falta jugar: cae en el partido del grupo o en el día fijo del torneo.
 function diaFechaTorneo(t, f) {
   const c = t.cuando || { tipo: 'grupo' }, prox = proximoTorneo(t);
+  if (c.tipo === 'libre') return '';
   const sumar = (iso, dias) => new Date(Date.parse(`${iso}T12:00:00Z`) + dias * DIA).toISOString().slice(0, 10);
   if (c.tipo === 'grupo') return prox && f >= prox.f && D.grupo.partido.fecha ? sumar(D.grupo.partido.fecha, 7 * (f - prox.f)) : '';
   const base = new Date((t.empezo || Date.now()) - 3 * 3600e3).toISOString().slice(0, 10);
   return sumar(base, ((c.dia - new Date(`${base}T12:00:00Z`).getUTCDay() + 7) % 7) + 7 * (f - 1));
 }
 function cuandoFechaTorneo(t, f) {
-  const dia = diaFechaTorneo(t, f), hora = t.cuando?.tipo === 'propio' ? t.cuando.hora : D.grupo.partido.cuando;
+  const dia = diaFechaTorneo(t, f), hora = t.cuando?.tipo === 'propio' ? t.cuando.hora : D.grupo?.partido.cuando;
   return dia ? `${fechaCorta(dia)}${hora ? ' · ' + hora : ''}` : '';
 }
 const libreEn = (t, f) => {
@@ -4636,7 +4679,7 @@ const libreEn = (t, f) => {
 };
 function arbitroTorneo(t, f) {
   if (t.arbitro === 'libre') { const l = libreEn(t, f); return l != null ? t.equipos[l].nombre : ''; }
-  return t.arbitro && t.arbitro !== 'nadie' ? jugador(t.arbitro)?.usuario || '' : '';
+  return t.arbitro && t.arbitro !== 'nadie' ? ctxT().nombre(t.arbitro) || t.arbitroNombre || '' : '';
 }
 function estadoTorneo(t) {
   if (t.estado === 'armando') return 'Armándose';
@@ -4663,6 +4706,33 @@ function mensajeTorneo(t) {
 
 // ---- Pantallas ----
 function vistaTorneo() {
+  return tarjetasInvTG() + vistaTorneoInterno() + tarjetaTorneosGrupos();
+}
+// Los torneos con otros grupos de este grupo, y armar uno (admin).
+let limpiandoTG = '';
+function tarjetaTorneosGrupos() {
+  const lista = torneosDelGrupo().filter(x => D.tgT[x.id]);
+  const borrados = torneosDelGrupo().filter(x => D.tg[x.id] === null).map(x => x.id).join();
+  if (esAdmin() && borrados && limpiandoTG !== borrados) {
+    limpiandoTG = borrados;
+    setTimeout(() => actualizarGrupo(s => { s.torneosG = (s.torneosG || []).filter(x => D.tg[x.id] !== null); }));
+  }
+  if (!lista.length && !esAdmin()) return '';
+  return card(`
+    <h2 class="text-lg font-black">${ic('trophy', 'text-sky-300')} Torneos con otros grupos</h2>
+    <p class="text-sm text-slate-400 mt-0.5">Cada grupo es un equipo. Se invitan con el código del grupo, como los amistosos.</p>
+    ${lista.length ? `<div class="space-y-2 mt-3">${lista.map(x => {
+      const tg = D.tgT[x.id];
+      return `
+        <a href="#/tg/${x.id}" class="flex items-center gap-3 rounded-2xl bg-slate-800/50 hover:bg-slate-800 px-3 py-2.5 transition">
+          <span class="flex -space-x-2">${tg.equipos.slice(0, 4).map((e, i) => camiseta(CATALOGO_COLORES[e.colores?.[0]]?.[2] || '#64748b', 28, inicial(e.nombre))).join('')}</span>
+          <span class="flex-1 min-w-0"><b class="block truncate">${esc(tg.nombre)}</b><span class="text-xs text-slate-400">${tg.equipos.length} grupos · ${estadoTorneo(tg)}</span></span>
+          ${ic('chevron-right', 'text-slate-500')}
+        </a>`;
+    }).join('')}</div>` : ''}
+    ${esAdmin() ? `<button data-action="tg-nuevo" class="${BTN_SEC} w-full mt-3">${ic('plus')} Armar un torneo con otros grupos</button>` : ''}`);
+}
+function vistaTorneoInterno() {
   const t = D.grupo.torneo;
   if (t?.estado === 'armando') return esAdmin() ? armandoTorneo(t) : esperandoTorneo(t);
   if (t) return jugandoTorneo(t);
@@ -4672,7 +4742,7 @@ function vistaTorneo() {
         <div class="flex items-end justify-center">
           ${[0, 1, 2, 3].map(i => `<span class="inline-block -mx-1" style="rotate:${[-10, -3, 4, 11][i]}deg">${camiseta(colorT(i)[2], 44)}</span>`).join('')}
         </div>
-        <h2 class="text-2xl font-black text-white mt-3">Torneo interno</h2>
+        <h2 class="text-2xl font-black text-white mt-3">Torneo entre ustedes</h2>
         <p class="text-sm text-white/85 mt-1">Varios equipos fijos con los del grupo. Liga, copa o las dos.</p>
       </div>`)}
     ${card(`
@@ -4728,15 +4798,15 @@ function equiposTorneo(t, editar) {
             ${editar ? `<span class="text-[11px] text-slate-300 shrink-0 text-center leading-tight">nivel<br><b class="text-base text-white">${prom(e).toFixed(1)}</b></span>` : `<span class="text-xs text-slate-400 shrink-0">${e.ids.length} jug.</span>`}
           </div>
           <div class="flex flex-wrap items-center gap-2 px-3 pt-2.5 text-xs">
-            ${esAdmin() && t.estado !== 'terminado' ? `
+            ${ctxT().admin && ctxT().tipo === 'grupo' && t.estado !== 'terminado' ? `
               <div class="flex items-center gap-1.5 min-w-0 flex-1 basis-48">${insignia}
                 ${desplegable({ id: `tc-${i}`, cambio: 'torneo-capitan', clase: 'flex-1 min-w-0', valor: e.capitan || '', opciones: [{ v: '', t: 'Capitán: el admin' }, ...e.ids.map(id => ({ v: id, t: `Capitán: ${jugador(id)?.usuario || '?'}` }))] })}
               </div>`
-              : `<span class="flex items-center gap-1.5 text-slate-300">${insignia} Capitán: <b>${e.capitan && jugador(e.capitan) ? esc(jugador(e.capitan).usuario) : 'el admin'}</b></span>`}
+              : `<span class="flex items-center gap-1.5 text-slate-300">${insignia} Capitán: <b>${e.capitan && ctxT().nombre(e.capitan) ? esc(ctxT().nombre(e.capitan)) : 'el admin'}</b></span>`}
             ${puedeEditarEquipo(t, i) ? `<button data-action="equipo-editar" data-i="${i}" class="ml-auto ${BTN_CHIP} !text-amber-200">${ic('palette')} Nombre y colores</button>` : ''}
           </div>
           <ul class="space-y-1.5 p-3 pt-2">
-            ${e.ids.map(id => jugador(id) || { id, usuario: 'Ex jugador' }).map(p => {
+            ${e.ids.map(id => ctxT().ficha(id) || { id, usuario: 'Ex jugador' }).map(p => {
               // Con dos equipos, el botón lo pasa al otro; con más, muestra a cuál.
               const otros = t.equipos.map((x, j) => j).filter(j => j !== i), abierto = ui.torneoMover === p.id;
               return `
@@ -4762,6 +4832,7 @@ function equiposTorneo(t, editar) {
 
 // Al capitán que todavía no eligió: que elija nombre y colores.
 function avisoCapitan(t) {
+  if (ctxT().tipo !== 'grupo') return '';
   const i = t.equipos.findIndex(e => e.capitan === miUid());
   if (i < 0 || t.estado === 'terminado' || D.torneoEquipos?.[i]?.torneo === t.creado) return '';
   return card(`
@@ -4777,7 +4848,7 @@ function avisoCapitan(t) {
 
 // Nombre, colores y diseño de un equipo (capitán o admin).
 function modalEquipo() {
-  const t = D.grupo.torneo, i = ui.eqI, d = ui.eqDraft;
+  const t = ctxT().t, i = ui.eqI, d = ui.eqDraft;
   const [c1, c2] = d.colores.map(c => CATALOGO_COLORES[c][2]);
   const duenoPrincipal = c => t.equipos.findIndex((e, j) => j !== i && coloresT(j)[0] === c);
   const choque = choqueColores(t, i, d.colores);
@@ -4827,6 +4898,16 @@ function modalEquipo() {
 // Un partido de la liga como marcador: camiseta, nombre, resultado. Si el admin lo puede tocar, carga el resultado.
 function partidoTorneo(t, x) {
   const hecho = x.ga != null, cargar = x.key != null && puedeCargar(t, x);
+  // Mientras el árbitro lo está cargando: en vivo, y se puede mirar.
+  if (!hecho && x.vivo && x.key != null) {
+    const [ga, gb] = golesEventos(x.eventos);
+    return `
+      <a href="${ctxT().base}/arbitro/${x.key}" class="w-full flex items-center gap-2 rounded-2xl px-2.5 py-2 bg-red-500/10 border border-red-500/40 hover:bg-red-500/15 transition">
+        <span class="flex-1 min-w-0 flex items-center gap-2">${camisetaT(t, x.a, 30)}<span class="min-w-0 truncate text-sm font-semibold">${esc(t.equipos[x.a].nombre)}</span></span>
+        <span class="shrink-0 min-w-[4.25rem] text-center rounded-lg px-2 py-0.5 bg-slate-950 border border-red-500/50 font-mono font-black text-lg text-white"><span class="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse align-middle mr-1"></span>${ga}-${gb}</span>
+        <span class="flex-1 min-w-0 flex flex-row-reverse items-center gap-2 text-right">${camisetaT(t, x.b, 30)}<span class="min-w-0 truncate text-sm font-semibold">${esc(t.equipos[x.b].nombre)}</span></span>
+      </a>`;
+  }
   const mio = t.equipos.findIndex(e => e.ids.includes(miUid()));
   const lado = (i, g, r, der) => `
     <span class="flex-1 min-w-0 flex items-center gap-2 ${der ? 'flex-row-reverse text-right' : ''}">
@@ -4891,6 +4972,434 @@ function llaveTorneo(t) {
         </div>
       </div>
     </div>`;
+}
+
+// ---- Torneo entre grupos ----
+// Como los amistosos: un admin arma el torneo desde su grupo e invita a otros grupos con su código; el admin de
+// cada grupo acepta o dice que no. Cada grupo es un equipo, y sus jugadores se anotan desde su grupo. Nadie
+// entra al grupo del otro: lo que se comparte es el torneo (torneos/{id}).
+// { nombre, creado, creador, org: { gid, nombre }, admins (los que organizan), invitados: [gid], nombresInv: { gid: nombre },
+//   rechazados: [gid], gids: [gid de cada equipo], equipos: [{ gid, nombre, colores, diseno, capitan }],
+//   + lo mismo que el interno: estado, formato, vueltas, cant, cuando, arbitro, arbitroNombre, partidos, llave, res, empezo, termino }.
+// Jugadores en torneos/{id}/jugadores/{uid} ({ e: gid de su equipo, usuario, foto, posicion, ts }) y resultados en torneos/{id}/resultados/{k}.
+const refTG = id => F.doc(db, 'torneos', id);
+const colTGJug = id => F.collection(db, 'torneos', id, 'jugadores');
+const colTGRes = id => F.collection(db, 'torneos', id, 'resultados');
+const torneosDelGrupo = () => (D.grupo?.torneosG || []);
+
+let subsTG = {};  // id -> cortar las tres suscripciones
+function seguirTG(id) {
+  if (subsTG[id]) return;
+  const docu = F.onSnapshot(refTG(id), s => { D.tg[id] = s.exists() ? s.data() : null; prepararTG(id); render(); },
+    e => { console.warn(e.code); D.tg[id] = null; prepararTG(id); render(); });
+  const jug = F.onSnapshot(colTGJug(id), qs => { D.tgJug[id] = Object.fromEntries(qs.docs.map(d => [d.id, d.data()])); prepararTG(id); render(); }, e => console.warn(e.code));
+  const res = F.onSnapshot(colTGRes(id), qs => { D.tgRes[id] = Object.fromEntries(qs.docs.map(d => [d.id, d.data()])); prepararTG(id); render(); }, e => console.warn(e.code));
+  subsTG[id] = () => { docu(); jug(); res(); };
+}
+
+// Los resultados cargados encima de los partidos (como en el interno). Cuando la final de la copa tiene ganador, terminó.
+function mezclarResultados(t, resultados) {
+  for (const [k, x] of Object.entries(resultados || {})) {
+    if (x.torneo !== t.creado) continue;
+    const datos = { ga: x.ga, gb: x.gb, por: x.por, eventos: x.eventos || [], vivo: !!x.vivo };
+    if (k.includes('-')) t.res = { ...(t.res || {}), [k]: { a: x.a, b: x.b, gana: x.gana ?? null, ...datos } };
+    else if (t.partidos?.[k]?.a === x.a && t.partidos[k].b === x.b) Object.assign(t.partidos[k], datos);
+  }
+  if (t.estado === 'jugando' && t.llave) {
+    const R = rondasCopa(t);
+    if (definido(ganadorLlave(R[R.length - 1][0]))) t.estado = 'terminado';
+  }
+}
+// El torneo como lo usan las pantallas: cada equipo con sus jugadores anotados y los resultados encima.
+function prepararTG(id) {
+  const d = D.tg[id];
+  if (!d) { D.tgT[id] = d; return; }
+  const jug = Object.entries(D.tgJug[id] || {}).sort((a, b) => a[1].ts - b[1].ts);
+  const t = structuredClone(d);
+  t.equipos = (d.equipos || []).map(e => ({ ...e, ids: jug.filter(([, j]) => j.e === e.gid).map(([u]) => u) }));
+  t.cant = t.equipos.length;
+  mezclarResultados(t, D.tgRes[id]);
+  D.tgT[id] = t;
+}
+
+function ctxEntreGrupos(id) {
+  const d = D.tg[id], jug = D.tgJug[id] || {};
+  return {
+    tipo: 'tg', id, t: D.tgT[id] || null, admin: !!d?.admins?.includes(miUid()), base: `#/tg/${id}`,
+    // Los organizadores cambian el torneo con una transacción; se ve al toque.
+    cambiar: (mut, msg) => act(async () => {
+      let nuevo;
+      await F.runTransaction(db, async tx => {
+        const s = (await tx.get(refTG(id))).data();
+        mut(s);
+        nuevo = s;
+        tx.set(refTG(id), s);
+      });
+      D.tg[id] = nuevo;
+      prepararTG(id);
+      render();
+    }, msg),
+    refRes: k => F.doc(colTGRes(id), String(k)),
+    ficha: u => jug[u] && { id: u, usuario: jug[u].usuario, foto: jug[u].foto || '', posicion: jug[u].posicion || 'comodin', invitado: !!jug[u].inv },
+    nombre: u => jug[u]?.usuario || (u && u === d?.arbitro ? d.arbitroNombre : '') || jugador(u)?.usuario || '',
+  };
+}
+
+// Mi equipo en el torneo: el de un grupo mío que juega (el que estoy mirando, si juega).
+function miEquipoTG(d) {
+  const mios = (D.perfil?.grupos || []).map(g => g.id);
+  return (d.gids || []).includes(D.gid) ? D.gid : (d.gids || []).find(g => mios.includes(g)) || null;
+}
+
+async function armarTG() {
+  const id = genId(20), ts = Date.now(), g = D.grupo, uid = miUid();
+  const mes = new Date(Date.now() - 3 * 3600e3).toLocaleDateString('es-AR', { month: 'long', timeZone: 'UTC' });
+  const datos = {
+    nombre: `Copa de ${mes}`, creado: ts, creador: uid, org: { gid: D.gid, nombre: g.nombre.slice(0, 60) },
+    admins: [uid, ...g.admins.filter(x => x !== uid)].slice(0, 6),
+    invitados: [], nombresInv: {}, rechazados: [], gids: [D.gid],
+    equipos: [{ gid: D.gid, nombre: g.nombre.slice(0, 20), colores: ['rojo'], diseno: 'lisa', capitan: uid }],
+    estado: 'armando', formato: 'liga', vueltas: 1, cant: 1, cuando: { tipo: 'libre', dia: 6, hora: '' },
+    arbitro: 'nadie', arbitroNombre: '', partidos: [], llave: null, res: {},
+  };
+  const ok = await act(async () => {
+    await F.setDoc(refTG(id), datos);
+    await F.updateDoc(refGrupo(D.gid), { torneosG: [...torneosDelGrupo(), { id, ts }].slice(-10) });
+    evento('crear_torneo_grupos');
+  }, '🏆 Torneo armado. Ahora invitá a los otros grupos con su código');
+  if (ok) { seguirTG(id); location.hash = `#/tg/${id}`; }
+}
+
+// Invitar a un grupo (por su código o porque ya jugaron): le llega al admin, que acepta o no.
+async function invitarTG(id, gid, nombre) {
+  const d = D.tg[id];
+  if (!d) return;
+  if (gid === d.org.gid || d.gids.includes(gid)) return toast(`${nombre} ya está en el torneo`);
+  if (d.invitados.includes(gid)) return toast(`Ya invitaste a ${nombre}: falta que acepte`);
+  if (d.gids.length + d.invitados.length >= 16) return toast('Hasta 16 equipos por torneo');
+  const ok = await ctxEntreGrupos(id).cambiar(t => {
+    t.invitados = [...t.invitados, gid];
+    t.nombresInv = { ...(t.nombresInv || {}), [gid]: nombre.slice(0, 60) };
+    t.rechazados = (t.rechazados || []).filter(x => x !== gid);
+  });
+  if (ok) await act(() => F.setDoc(F.doc(db, 'grupos', gid, 'torneosInv', id), { desde: d.org.gid, nombre: d.org.nombre, por: miUid(), ts: Date.now() }), `🏆 Invitación enviada a ${nombre}`);
+}
+
+const mensajeInvTG = id => {
+  const d = D.tg[id];
+  return [`🏆 Los invitamos al torneo *${d.nombre}* en Fulbo (organiza ${d.org.nombre}).`, '', 'El admin lo acepta entrando al grupo en Fulbo: aparece arriba de todo en Partido.'].join('\n');
+};
+
+async function borrarTG(id) {
+  const d = D.tg[id];
+  const ok = await act(async () => {
+    await Promise.allSettled([...Object.keys(D.tgJug[id] || {}).map(u => F.deleteDoc(F.doc(colTGJug(id), u))),
+      ...Object.keys(D.tgRes[id] || {}).map(k => F.deleteDoc(F.doc(colTGRes(id), k))),
+      ...(d?.invitados || []).map(g => F.deleteDoc(F.doc(db, 'grupos', g, 'torneosInv', id)))]);
+    await F.deleteDoc(refTG(id));
+    if (torneosDelGrupo().some(x => x.id === id)) await F.updateDoc(refGrupo(D.gid), { torneosG: torneosDelGrupo().filter(x => x.id !== id) });
+  }, 'Torneo borrado');
+  if (ok) location.hash = '#/torneo';
+}
+
+// Invitaciones a torneos que le llegaron a este grupo (para la tarjeta de arriba de Partido).
+let limpiandoInvTG = '';
+function tarjetasInvTG() {
+  if (!esAdmin()) return '';
+  const vigente = x => D.tg[x.id]?.estado === 'armando' && D.tg[x.id].invitados.includes(D.gid);
+  const viejos = (D.torneosInv || []).filter(x => D.tg[x.id] === null || (D.tg[x.id] && !vigente(x))).map(x => x.id);
+  if (viejos.length && limpiandoInvTG !== viejos.join()) {
+    limpiandoInvTG = viejos.join();
+    setTimeout(() => viejos.forEach(id => F.deleteDoc(F.doc(db, 'grupos', D.gid, 'torneosInv', id)).catch(() => {})));
+  }
+  return (D.torneosInv || []).filter(vigente).map(x => {
+    const d = D.tg[x.id];
+    return cancha(`
+      <p class="text-center text-[11px] font-black uppercase tracking-[.25em] text-amber-200">🏆 ¡Los invitan a un torneo!</p>
+      <h2 class="text-center text-2xl font-black text-white mt-2">${esc(d.nombre)}</h2>
+      <p class="text-center text-sm text-white/85 mt-1">Organiza <b>${esc(d.org.nombre)}</b> · ${d.gids.length} ${d.gids.length === 1 ? 'grupo' : 'grupos'} adentro</p>
+      <div class="flex justify-center -space-x-2 mt-3">${d.equipos.map(e => camiseta(CATALOGO_COLORES[e.colores?.[0]]?.[2] || '#64748b', 34, inicial(e.nombre))).join('')}${camiseta('#334155', 34, '?')}</div>
+      <div class="grid grid-cols-2 gap-2 mt-4">
+        <button data-action="tg-rechazar" data-id="${x.id}" class="${BTN} bg-slate-950/60 hover:bg-slate-950/80 text-white">No, gracias</button>
+        <button data-action="tg-aceptar" data-id="${x.id}" class="${BTN_BLANCO}">${ic('check')} Aceptar</button>
+      </div>
+      <p class="text-xs text-white/80 text-center mt-2">Tu grupo juega como un equipo y los tuyos se anotan desde acá. No ven nada más de tu grupo.</p>`);
+  }).join('');
+}
+
+// La pantalla del torneo entre grupos (#/tg/id), adentro del grupo.
+function vistaTG(id) {
+  seguirTG(id);
+  const d = D.tg[id], t = D.tgT[id], c = ctxEntreGrupos(id);
+  if (d === null) return card('<p class="text-center text-sm text-slate-400 py-4">Este torneo ya no existe. Capaz lo borraron.</p>');
+  if (!t) return card('<p class="text-sm text-slate-400">Cargando el torneo…</p>');
+  const mio = miEquipoTG(d), anotado = !!D.tgJug[id]?.[miUid()];
+  const cabeza = `
+    <div class="flex items-center justify-between gap-2 text-xs text-slate-400">
+      <span class="inline-flex items-center gap-1.5">${ic('trophy', 'text-sky-300')} Torneo entre grupos · organiza <b class="text-slate-200">${esc(d.org.nombre)}</b></span>
+    </div>`;
+  const misJugadores = mio ? (() => {
+    const i = t.equipos.findIndex(e => e.gid === mio), e = t.equipos[i];
+    return card(`
+      <div class="flex items-center gap-3">
+        ${camisetaT(t, i, 40)}
+        <div class="flex-1 min-w-0">
+          <p class="text-[11px] font-black uppercase tracking-widest text-slate-500">Tu equipo</p>
+          <p class="font-black truncate">${esc(e.nombre)} <span class="font-normal text-sm text-slate-400">· ${e.ids.length} ${e.ids.length === 1 ? 'anotado' : 'anotados'}</span></p>
+        </div>
+      </div>
+      ${e.ids.length ? `<p class="text-sm text-slate-300 mt-2">${e.ids.map(u => esc(c.nombre(u))).join(' · ')}</p>` : ''}
+      ${anotado ? `<button data-action="tg-bajarme" data-id="${id}" class="${BTN_SEC} w-full mt-3">Me bajo del torneo</button>`
+        : `<button data-action="tg-anotarme" data-id="${id}" data-e="${mio}" class="${BTN_OK} w-full mt-3 py-3">${ic('user-plus')} Juego el torneo con ${esc(e.nombre)}</button>`}`);
+  })() : '';
+  if (t.estado !== 'armando') return `${cabeza}${misJugadores && !anotado && t.estado === 'jugando' ? misJugadores : ''}${jugandoTorneo(t)}`;
+  return `${cabeza}${armandoTG(id, d, t, c)}${misJugadores}`;
+}
+
+function armandoTG(id, d, t, c) {
+  const admin = c.admin;
+  const equipos = t.equipos.map((e, i) => `
+    <li class="flex items-center gap-2.5 rounded-2xl bg-slate-800/50 px-3 py-2">
+      ${camisetaT(t, i, 34)}
+      <span class="flex-1 min-w-0"><b class="block truncate">${esc(e.nombre)}</b><span class="text-xs text-slate-400">${e.ids.length} ${e.ids.length === 1 ? 'jugador anotado' : 'jugadores anotados'}${e.gid === d.org.gid ? ' · organiza' : ''}</span></span>
+      ${admin ? `<button data-action="equipo-editar" data-i="${i}" aria-label="Nombre y colores" class="${BTN_CHIP} !text-amber-200">${ic('palette')}</button>` : ''}
+      ${admin && e.gid !== d.org.gid ? `<button data-action="tg-quitar" data-id="${id}" data-gid="${e.gid}" aria-label="Sacar del torneo" class="${BTN_CHIP} hover:!text-red-300">${ic('x')}</button>` : ''}
+    </li>`).join('');
+  const esperando = d.invitados.map(g => `
+    <li class="flex items-center gap-2.5 rounded-2xl border border-dashed border-slate-700 px-3 py-2 text-sm">
+      ${camiseta('#334155', 30, '?')}
+      <span class="flex-1 min-w-0"><b class="block truncate">${esc(d.nombresInv?.[g] || 'Grupo')}</b><span class="text-xs text-amber-200">⏳ Esperando que acepte</span></span>
+      ${admin ? `<button data-action="tg-copiar-inv" data-id="${id}" aria-label="Copiar aviso para su admin" class="${BTN_CHIP}">${ic('copy')}</button>
+        <button data-action="tg-cancelar-inv" data-id="${id}" data-gid="${g}" aria-label="Cancelar la invitación" class="${BTN_CHIP} hover:!text-red-300">${ic('x')}</button>` : ''}
+    </li>`).join('');
+  const rechazos = (d.rechazados || []).map(g => `<li class="text-xs text-slate-500 px-1">✖ ${esc(d.nombresInv?.[g] || 'Un grupo')} no puede esta vez</li>`).join('');
+  const antes = admin ? rivalesConGrupo().filter(x => !d.gids.includes(x.gid) && !d.invitados.includes(x.gid)) : [];
+  const f = t.formato || 'liga', cu = t.cuando || { tipo: 'libre' }, arb = t.arbitro || 'nadie';
+  const chip = (attrs, si, html) => `<button ${attrs} class="rounded-xl border-2 px-3 py-2 text-sm font-bold inline-flex items-center gap-1.5 transition ${si ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-700 text-slate-400 hover:border-slate-500'}">${html}</button>`;
+  const puedoElegirArbitro = admin && D.gid === d.org.gid;
+  const n = t.equipos.length, liga = n >= 2 ? fixtureTorneo(n, t.vueltas).length : 0, k = n >= 4 ? 4 : 2;
+  return `
+    ${cancha(`
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[11px] font-black uppercase tracking-widest text-amber-200">${ic('trophy', '!w-4 !h-4')} Nuevo torneo</p>
+        ${admin ? `<button data-action="torneo-borrar" class="${BTN_CHIP} !bg-slate-950/50">Cancelar</button>` : ''}
+      </div>
+      ${admin ? `<input id="tg-nombre" value="${esc(t.nombre)}" maxlength="40" data-change="torneo-titulo" aria-label="Nombre del torneo" class="w-full mt-2 bg-transparent text-2xl font-black text-white border-b-2 border-dashed border-white/40 focus:outline-none focus:border-white py-1">
+        <p class="text-xs text-white/80 mt-1.5">${ic('pencil')} Tocá el nombre para cambiarlo</p>`
+        : `<h2 class="text-2xl font-black text-white mt-2">${esc(t.nombre)}</h2><p class="text-sm text-white/85 mt-1">Se está armando. Cuando empiece, acá van a ver los partidos y la tabla.</p>`}`)}
+    ${card(`
+      <h2 class="text-xl font-black">Los equipos <span class="text-base font-bold text-slate-500">(${n})</span></h2>
+      <p class="text-sm text-slate-400 mt-0.5">Cada grupo es un equipo. Sus jugadores se anotan desde su grupo.</p>
+      <ul class="space-y-2 mt-3">${equipos}${esperando}${rechazos}</ul>`)}
+    ${admin ? card(`
+      <h2 class="text-xl font-black">Sumar un grupo</h2>
+      ${antes.length ? `
+        <p class="text-xs font-semibold text-slate-400 mt-2">Con los que ya jugaron</p>
+        <div class="flex flex-wrap gap-1.5 mt-1.5">
+          ${antes.map(x => `<button data-action="tg-invitar-gid" data-id="${id}" data-gid="${esc(x.gid)}" data-nombre="${esc(x.nombre)}" class="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 hover:border-sky-400 px-3 py-1.5 text-sm font-semibold">${ic('plus')} ${esc(x.nombre)}</button>`).join('')}
+        </div>` : ''}
+      <form data-form="tg-invitar" data-id="${id}" class="mt-3">
+        <div class="flex items-center justify-between gap-2">
+          <label for="tg-codigo" class="text-sm text-slate-400">Código del otro grupo</label>
+          <button type="button" data-action="vs-ayuda-codigo" aria-label="¿Qué es el código del grupo?" aria-expanded="${!!ui.vsAyuda}" class="w-7 h-7 rounded-full ${ui.vsAyuda ? 'bg-sky-400 text-slate-950' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'} text-sm font-black grid place-items-center">?</button>
+        </div>
+        ${ui.vsAyuda ? ayudaCodigo() : ''}
+        <div class="flex gap-2 mt-1">
+          <input id="tg-codigo" name="codigo" required maxlength="14" placeholder="Ej: UADE-4821" autocapitalize="characters" autocomplete="off" class="${INPUT} font-mono uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal placeholder:font-sans">
+          <button class="${BTN_OK} shrink-0">Invitar</button>
+        </div>
+      </form>
+      <p class="text-xs text-slate-500 mt-2">A su admin le llega la invitación en Fulbo. Con el código no se ve nada de su grupo.</p>`) : ''}
+    ${admin ? card(`
+      <h2 class="text-xl font-black">¿Cómo se juega?</h2>
+      <div class="space-y-2 mt-3">
+        ${opcionGrande('data-action="torneo-formato" data-f="liga"', f === 'liga', DIBUJO_LIGA, 'Liga', `Todos contra todos. Gana el que suma más puntos.${liga ? ` ${liga} ${liga === 1 ? 'partido' : 'partidos'}.` : ''}`)}
+        ${opcionGrande('data-action="torneo-formato" data-f="copa"', f === 'copa', DIBUJO_COPA, 'Copa', 'Eliminación directa: el que pierde se va, hasta la final.')}
+        ${opcionGrande('data-action="torneo-formato" data-f="ligacopa"', f === 'ligacopa', `<span class="flex items-center -space-x-1 scale-[.8]">${DIBUJO_LIGA}${DIBUJO_COPA}</span>`, 'Liga + Copa', `Primero todos contra todos y los ${k} mejores juegan ${k === 4 ? 'semis y final' : 'la final'}.`)}
+      </div>
+      ${f !== 'copa' ? `
+        <div class="flex gap-2 mt-3">
+          ${[[1, 'arrow-right', 'Solo ida'], [2, 'arrow-left-right', 'Ida y vuelta']].map(([v, i, x]) => `<button data-action="torneo-vueltas" data-n="${v}" class="flex-1 rounded-xl border-2 px-3 py-2 text-sm font-bold inline-flex items-center justify-center gap-1.5 transition ${t.vueltas === v ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-700 text-slate-400'}">${ic(i)} ${x}</button>`).join('')}
+        </div>` : ''}
+
+      <h2 class="text-xl font-black mt-6">¿Cuándo se juega?</h2>
+      <div class="space-y-2 mt-3">
+        ${opcionGrande('data-action="torneo-cuando" data-tipo="propio"', cu.tipo === 'propio', ic('calendar', '!w-7 !h-7'), 'Un día fijo', 'Todas las fechas el mismo día y hora.')}
+        ${opcionGrande('data-action="torneo-cuando" data-tipo="libre"', cu.tipo !== 'propio', '<span class="text-3xl">🤝</span>', 'A coordinar', 'Cada partido lo arreglan los equipos.')}
+      </div>
+      ${cu.tipo === 'propio' ? `
+        <div class="grid grid-cols-7 gap-1.5 mt-3">
+          ${[1, 2, 3, 4, 5, 6, 0].map(x => `<button data-action="torneo-dia" data-d="${x}" class="h-11 rounded-xl text-xs font-black uppercase transition ${cu.dia === x ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">${DIAS[x].slice(0, 3)}</button>`).join('')}
+        </div>
+        <label class="flex items-center gap-3 mt-2 text-sm text-slate-400">${ic('clock')} Hora
+          <input id="t-hora" value="${esc(cu.hora || '')}" data-change="torneo-hora" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} !w-28 !py-2">
+        </label>` : ''}
+
+      <h2 class="text-xl font-black mt-6 flex items-center gap-2">${tarjetaAmarilla(20)} ¿Quién dirige?</h2>
+      <p class="text-sm text-slate-400 mt-0.5">Mejor alguien neutral, así nadie dice que hubo trampa. El árbitro anota goles y tarjetas en el partido.</p>
+      <div class="flex flex-wrap gap-2 mt-3">
+        ${chip('data-action="torneo-arbitro" data-a="nadie"', arb === 'nadie', 'Sin árbitro')}
+        ${chip('data-action="torneo-arbitro" data-a="uno"', arb !== 'nadie', puedoElegirArbitro ? `Alguien de ${esc(d.org.nombre)}` : 'Yo')}
+      </div>
+      ${arb !== 'nadie' && puedoElegirArbitro ? desplegable({ id: 'ta-id', cambio: 'torneo-arbitro-id', clase: 'mt-2', valor: arb, opciones: jugadoresDelGrupo().map(p => ({ v: p.id, t: p.usuario })) }) : ''}
+      ${arb !== 'nadie' && !puedoElegirArbitro ? `<p class="text-sm text-slate-300 mt-2">${tarjetaAmarilla(14)} Dirige <b>${esc(t.arbitroNombre || c.nombre(arb))}</b></p>` : ''}`) : ''}
+    ${admin ? `
+      <button data-action="torneo-empezar" ${n >= 2 ? '' : 'disabled'} class="${BTN_OK} w-full py-4 text-base">${ic('flag')} ${n >= 2 ? '¡Que ruede la pelota!' : 'Hacen falta al menos 2 equipos'}</button>
+      ${d.invitados.length && n >= 2 ? `<p class="text-xs text-slate-500 text-center -mt-1">Si empezás ahora, los que no aceptaron quedan afuera.</p>` : ''}` : ''}`;
+}
+
+// ---- Modo árbitro ----
+// Durante el partido, el que dirige (o un admin, o un capitán) anota los goles y las tarjetas de cada jugador,
+// con el minuto del reloj. Se guarda al toque en el resultado del partido (eventos, y vivo mientras se juega),
+// así los demás lo miran en vivo. Al terminar, se confirma el resultado. Las tarjetas se muestran a pantalla completa.
+// Cada evento: { t: 'gol' | 'am' | 'roja', l: 'a' | 'b' (el equipo), j: id del jugador o null, n: su nombre, m: minuto }.
+const golesEventos = ev => ['a', 'b'].map(l => (ev || []).filter(e => e.t === 'gol' && e.l === l).length);
+const claveReloj = k => `${LS}reloj:${ctxT().id || D.gid}:${ctxT().t?.creado}:${k}`;
+const leerReloj = clave => { try { return JSON.parse(localStorage.getItem(clave)) || { desde: null, acum: 0 }; } catch { return { desde: null, acum: 0 }; } };
+const msReloj = r => r.acum + (r.desde ? Date.now() - r.desde : 0);
+const textoReloj = ms => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+// Minuto del partido (el que corre: a los 0:30 es el 1'). Si el reloj no arrancó, sin minuto.
+const minutoReloj = clave => { const r = leerReloj(clave), ms = msReloj(r); return r.desde || ms ? Math.floor(ms / 60000) + 1 : null; };
+setInterval(() => document.querySelectorAll('[data-reloj]').forEach(el => { el.textContent = textoReloj(msReloj(leerReloj(el.dataset.reloj))); }), 1000);
+
+// Que no se apague la pantalla mientras dirige.
+let pantallaPrendida = null;
+function mantenerPantalla(si) {
+  if (si && !pantallaPrendida && navigator.wakeLock) navigator.wakeLock.request('screen').then(x => { pantallaPrendida = x; }).catch(() => {});
+  if (!si && pantallaPrendida) { pantallaPrendida.release().catch(() => {}); pantallaPrendida = null; }
+}
+
+// La tarjeta a pantalla completa, para mostrársela al jugador. Va aparte del render.
+function mostrarTarjeta(tipo, info = {}) {
+  const roja = tipo === 'roja', el = document.createElement('div');
+  el.className = `fixed inset-0 z-[70] flex flex-col items-center justify-center p-6 text-center select-none ${roja ? 'bg-red-700' : 'bg-amber-500'}`;
+  el.innerHTML = `
+    <div class="tarjeta-sale w-[min(52vw,15rem)] aspect-[2/3] rounded-2xl border-4 border-white/80 shadow-2xl shadow-black/50 ${roja ? 'bg-red-500' : 'bg-yellow-300'}" style="rotate:-8deg"></div>
+    ${info.nombre ? `<p class="mt-10 text-4xl font-black ${roja ? 'text-white' : 'text-slate-950'} break-words max-w-full">${esc(info.nombre)}</p>` : ''}
+    ${info.doble || info.m ? `<p class="mt-2 text-xl font-bold ${roja ? 'text-white/85' : 'text-slate-900/80'}">${info.doble ? 'Doble amarilla' : ''}${info.doble && info.m ? ' · ' : ''}${info.m ? `${info.m}'` : ''}</p>` : ''}
+    <p class="absolute bottom-8 inset-x-0 text-sm font-semibold ${roja ? 'text-white/70' : 'text-slate-900/60'}">Tocá para cerrar</p>`;
+  el.addEventListener('click', e => {
+    e.stopPropagation();
+    el.remove();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  });
+  document.body.append(el);
+  try { navigator.vibrate?.(roja ? [120, 60, 120] : 150); } catch {}
+  document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+// Guarda lo que anotó el árbitro. Si el partido ya tenía resultado, lo deja; si no, queda en vivo.
+function guardarEventos(k, eventos) {
+  const c = ctxT(), x = partidoK(c.t, k);
+  if (!x) return;
+  const vivo = x.ga == null;
+  // Se ve al toque, sin esperar a la base de datos.
+  if (typeof k === 'string') c.t.res = { ...(c.t.res || {}), [k]: { ...(c.t.res?.[k] || { a: x.a, b: x.b, ga: null, gb: null, gana: null }), eventos, vivo } };
+  else Object.assign(c.t.partidos[k], { eventos, vivo });
+  render();
+  return act(() => F.setDoc(c.refRes(k), { torneo: c.t.creado, a: x.a, b: x.b, ga: x.ga ?? null, gb: x.gb ?? null, gana: x.gana ?? null, eventos, vivo, por: miUid(), ts: Date.now() }));
+}
+
+function vistaArbitro(kTexto) {
+  const c = ctxT(), t = c.t, k = keyT(kTexto), x = t && partidoK(t, k);
+  const volver = `<a href="${c.base}" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm">${ic('arrow-left')} Torneo</a>`;
+  if (!x) return `${volver}${card('<p class="text-sm text-slate-400 text-center py-4">Ese partido no está en el torneo.</p>')}`;
+  const edita = puedeCargar(t, x) && x.ga == null || (puedeCargar(t, x) && ui.arbCorregir === `${c.id}|${k}`);
+  mantenerPantalla(edita);
+  const ev = x.eventos || [], [ga, gb] = golesEventos(ev), clave = claveReloj(k), reloj = leerReloj(clave);
+  const marcas = id => {
+    const xs = ev.filter(e => e.j === id);
+    return `${'⚽'.repeat(xs.filter(e => e.t === 'gol').length)}${xs.some(e => e.t === 'am') ? tarjetaAmarilla(12) : ''}${xs.some(e => e.t === 'roja') ? '<span class="inline-block w-[9px] h-[13px] rounded-[2px] bg-red-500" style="rotate:12deg"></span>' : ''}`;
+  };
+  const expulsado = id => ev.some(e => e.j === id && e.t === 'roja');
+  const columna = l => {
+    const i = l === 'a' ? x.a : x.b, e = t.equipos[i];
+    return `
+      <div class="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+        <div class="flex items-center gap-1.5 px-2 py-2" style="background:linear-gradient(90deg,${colorT(i)[2]}40,transparent)">
+          ${camisetaT(t, i, 24)}<p class="flex-1 min-w-0 truncate text-sm font-black">${esc(e.nombre)}</p>
+        </div>
+        <ul class="p-1.5 space-y-1">
+          ${e.ids.map(id => c.ficha(id) || { id, usuario: c.nombre(id) || '?' }).map(p => {
+            const sel = ui.arbSel === p.id;
+            return `
+              <li>
+                <button ${edita ? `data-action="arb-jugador" data-id="${p.id}"` : 'disabled'} class="w-full flex items-center gap-1.5 rounded-xl px-1.5 py-1.5 text-left ${sel ? 'bg-emerald-500/20 ring-2 ring-emerald-500' : edita ? 'hover:bg-slate-800' : ''} ${expulsado(p.id) ? 'opacity-50' : ''}">
+                  ${avatar(p, 26)}
+                  <span class="flex-1 min-w-0 truncate text-sm font-semibold ${expulsado(p.id) ? 'line-through' : ''}">${esc(p.usuario)}</span>
+                  <span class="shrink-0 flex items-center gap-0.5 text-xs">${marcas(p.id)}</span>
+                </button>
+                ${sel ? `
+                  <div class="grid grid-cols-3 gap-1 mt-1 mb-1.5">
+                    <button data-action="arb-evento" data-k="${k}" data-t="gol" data-l="${l}" data-id="${p.id}" class="rounded-xl bg-emerald-500 text-slate-950 font-black py-2.5 text-sm">⚽ Gol</button>
+                    <button data-action="arb-evento" data-k="${k}" data-t="am" data-l="${l}" data-id="${p.id}" class="rounded-xl bg-yellow-300 text-slate-950 font-black py-2.5 text-sm">Amarilla</button>
+                    <button data-action="arb-evento" data-k="${k}" data-t="roja" data-l="${l}" data-id="${p.id}" class="rounded-xl bg-red-600 text-white font-black py-2.5 text-sm">Roja</button>
+                  </div>` : ''}
+              </li>`;
+          }).join('')}
+        </ul>
+        ${edita ? `<button data-action="arb-evento" data-k="${k}" data-t="gol" data-l="${l}" class="w-full border-t border-slate-800 py-2 text-xs font-bold text-slate-400 hover:text-emerald-300">⚽ Gol (no sé de quién)</button>` : ''}
+      </div>`;
+  };
+  const linea = (e, n) => `
+    <li class="flex items-center gap-2 rounded-xl bg-slate-800/50 px-3 py-2 text-sm">
+      <span class="w-9 shrink-0 font-mono font-black text-slate-400">${e.m != null ? `${e.m}'` : '–'}</span>
+      <span class="shrink-0">${e.t === 'gol' ? '⚽' : e.t === 'am' ? tarjetaAmarilla(14) : '<span class="inline-block w-[10px] h-[14px] rounded-[2px] bg-red-500" style="rotate:12deg"></span>'}</span>
+      <span class="flex-1 min-w-0 truncate"><b>${esc(e.n || 'Gol')}</b> <span class="text-slate-400">· ${esc(t.equipos[e.l === 'a' ? x.a : x.b].nombre)}</span></span>
+      ${edita ? `<button data-action="arb-borrar" data-k="${k}" data-n="${n}" aria-label="Borrar" class="text-slate-500 hover:text-red-300">${ic('x')}</button>` : ''}
+    </li>`;
+  const jugado = x.ga != null;
+  return `
+    <div class="flex items-center gap-2">
+      ${volver}
+      <p class="flex-1 text-right text-[11px] font-black uppercase tracking-widest text-amber-300 inline-flex items-center justify-end gap-1.5">${tarjetaAmarilla(14)} ${edita ? 'Modo árbitro' : jugado ? 'Final' : 'En vivo'}</p>
+    </div>
+    <div class="rounded-3xl border border-slate-700 bg-slate-950 p-4">
+      <p class="text-center text-[11px] font-black uppercase tracking-widest text-slate-500">${typeof k === 'string' ? nombreRonda(x.n) : `Fecha ${x.f}`} · ${esc(t.nombre)}</p>
+      <div class="flex items-center gap-2 mt-3">
+        <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${camisetaT(t, x.a, 52)}<span class="text-sm font-black truncate max-w-full">${esc(t.equipos[x.a].nombre)}</span></div>
+        <div class="shrink-0 font-mono text-5xl font-black text-amber-300 tabular-nums">${jugado ? x.ga : ga}<span class="text-slate-600 mx-1">-</span>${jugado ? x.gb : gb}</div>
+        <div class="flex-1 min-w-0 flex flex-col items-center gap-1">${camisetaT(t, x.b, 52)}<span class="text-sm font-black truncate max-w-full">${esc(t.equipos[x.b].nombre)}</span></div>
+      </div>
+      ${edita ? `
+        <div class="flex items-center justify-center gap-2 mt-4">
+          <span data-reloj="${clave}" class="font-mono text-3xl font-black tabular-nums ${reloj.desde ? 'text-white' : 'text-slate-400'}">${textoReloj(msReloj(reloj))}</span>
+          <button data-action="arb-reloj" data-clave="${clave}" class="${BTN} !px-3 !py-2 ${reloj.desde ? 'bg-slate-800 text-white' : 'bg-emerald-500 text-slate-950'} text-sm">${reloj.desde ? '⏸ Pausa' : msReloj(reloj) ? '▶ Seguir' : '▶ Arrancar'}</button>
+          ${msReloj(reloj) ? `<button data-action="arb-reloj-cero" data-clave="${clave}" aria-label="Reloj a cero" class="${BTN_ICONO} !w-9 !h-9">${ic('repeat')}</button>` : ''}
+        </div>` : !jugado && x.vivo ? '<p class="text-center mt-3 text-xs font-bold text-red-300"><span class="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse mr-1"></span>Se está jugando</p>' : ''}
+    </div>
+    ${edita ? `
+      <div class="grid grid-cols-2 gap-2">
+        <button data-action="arb-mostrar" data-c="am" class="rounded-2xl bg-yellow-300 text-slate-950 font-black py-4 text-base inline-flex items-center justify-center gap-2 active:scale-95 transition">${tarjetaAmarilla(18)} Mostrar</button>
+        <button data-action="arb-mostrar" data-c="roja" class="rounded-2xl bg-red-600 text-white font-black py-4 text-base inline-flex items-center justify-center gap-2 active:scale-95 transition"><span class="inline-block w-[13px] h-[18px] rounded-[3px] bg-red-400 border border-white/60" style="rotate:12deg"></span> Mostrar</button>
+      </div>
+      <p class="text-xs text-slate-400 text-center -mt-1">Tocá a un jugador para anotarle un gol o una tarjeta. Se guarda al toque.</p>` : ''}
+    <div class="grid grid-cols-2 gap-2">${columna('a')}${columna('b')}</div>
+    ${card(`
+      <h2 class="font-black">${ic('clipboard-list', 'text-emerald-400')} Lo que pasó</h2>
+      ${ev.length ? `<ul class="space-y-1.5 mt-2">${ev.map((e, n) => [e, n]).reverse().map(([e, n]) => linea(e, n)).join('')}</ul>`
+        : '<p class="text-sm text-slate-400 mt-1">Todavía nada. Cada gol y cada tarjeta aparece acá.</p>'}`)}
+    ${edita && !jugado ? `<button data-action="arb-terminar" data-k="${k}" class="${BTN_OK} w-full py-4 text-base">${ic('flag')} Terminar el partido</button>` : ''}
+    ${!edita && jugado && puedeCargar(t, x) ? `<button data-action="arb-corregir" data-k="${k}" class="${BTN_SEC} w-full">${ic('pencil')} Corregir goles y tarjetas</button>` : ''}`;
+}
+
+// Goleadores y tarjetas del torneo (de lo que anotaron los árbitros).
+function estadisticasTorneo(t) {
+  const goles = {}, tarjetas = {};
+  for (const x of partidosTorneo(t)) for (const e of x.eventos || []) {
+    if (!e.j) continue;
+    const eq = e.l === 'a' ? x.a : x.b;
+    if (e.t === 'gol') (goles[e.j] ||= { n: e.n, eq, c: 0 }).c++;
+    else (tarjetas[e.j] ||= { n: e.n, eq, am: 0, roja: 0 })[e.t]++;
+  }
+  const gs = Object.values(goles).sort((a, b) => b.c - a.c).slice(0, 5), ts = Object.values(tarjetas).sort((a, b) => b.roja - a.roja || b.am - a.am).slice(0, 5);
+  if (!gs.length && !ts.length) return '';
+  const fila = (x, der) => `<li class="flex items-center gap-2 text-sm">${camisetaT(t, x.eq, 22)}<span class="flex-1 min-w-0 truncate font-semibold">${esc(x.n || '?')}</span>${der}</li>`;
+  return card(`
+    <div class="grid ${gs.length && ts.length ? 'sm:grid-cols-2' : ''} gap-4">
+      ${gs.length ? `<div><h2 class="font-black">⚽ Goleadores</h2><ul class="space-y-1.5 mt-2">${gs.map((x, n) => fila(x, `<b class="font-mono text-lg ${n ? 'text-slate-200' : 'text-amber-300'}">${x.c}</b>`)).join('')}</ul></div>` : ''}
+      ${ts.length ? `<div><h2 class="font-black inline-flex items-center gap-1.5">${tarjetaAmarilla(14)} Tarjetas</h2><ul class="space-y-1.5 mt-2">${ts.map(x => fila(x, `<span class="text-xs font-bold">${x.am ? `${tarjetaAmarilla(11)} ${x.am}` : ''} ${x.roja ? `<span class="text-red-300">● ${x.roja}</span>` : ''}</span>`)).join('')}</ul></div>` : ''}
+    </div>`);
 }
 
 // ---- Armado (solo admin): Jugadores → Equipos → Formato → Fechas ----
@@ -5025,7 +5534,7 @@ function torneoPaso4(t) {
           ${[1, 2, 3, 4, 5, 6, 0].map(d => `<button data-action="torneo-dia" data-d="${d}" class="h-11 rounded-xl text-xs font-black uppercase transition ${c.dia === d ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">${DIAS[d].slice(0, 3)}</button>`).join('')}
         </div>
         <label class="flex items-center gap-3 mt-2 text-sm text-slate-400">${ic('clock')} Hora
-          <input type="time" value="${esc(c.hora || '')}" data-change="torneo-hora" class="${INPUT} !w-auto !py-2">
+          <input id="t-hora" value="${esc(c.hora || '')}" data-change="torneo-hora" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} !w-28 !py-2">
         </label>` : ''}
 
       <h2 class="text-xl font-black mt-6 flex items-center gap-2">${tarjetaAmarilla(20)} ¿Quién dirige?</h2>
@@ -5059,7 +5568,7 @@ const confeti = () => `<div class="confeti" aria-hidden="true">${Array.from({ le
   `<i style="left:${(k * 37) % 100}%;background:${['#fbbf24', '#34d399', '#f87171', '#60a5fa', '#fff'][k % 5]};animation-delay:${(k * 0.37) % 3}s;animation-duration:${2.6 + (k % 4) * .5}s"></i>`).join('')}</div>`;
 
 function jugandoTorneo(t) {
-  const admin = esAdmin(), terminado = t.estado === 'terminado';
+  const c = ctxT(), admin = c.admin, terminado = t.estado === 'terminado';
   const mio = t.equipos.findIndex(e => e.ids.includes(miUid()));
   const conLiga = (t.partidos || []).length > 0, enCopa = !!t.llave;
   const tabla = conLiga ? tablaTorneo(t) : [], podio = podioTorneo(t);
@@ -5082,7 +5591,7 @@ function jugandoTorneo(t) {
         <p class="relative text-xs font-black uppercase tracking-[.3em] text-amber-300">¡Campeón!</p>
         <div class="relative flex justify-center mt-2">${camisetaT(t, podio[0], 96)}</div>
         <p class="relative text-3xl font-black mt-1">${nom(podio[0])}</p>
-        <p class="relative text-sm text-amber-100/80 mt-1">${t.equipos[podio[0]].ids.map(id => jugador(id)?.usuario).filter(Boolean).map(esc).join(' · ')}</p>
+        <p class="relative text-sm text-amber-100/80 mt-1">${t.equipos[podio[0]].ids.map(id => c.nombre(id)).filter(Boolean).map(esc).join(' · ')}</p>
         <div class="relative flex items-end justify-center gap-2 mt-5">
           ${[1, 0, 2].filter(n => podio[n] != null).map(n => `
             <div class="flex flex-col items-center w-24 min-w-0">
@@ -5111,7 +5620,12 @@ function jugandoTorneo(t) {
       ${cuandoFechaTorneo(t, prox.f) ? `<p class="text-sm text-slate-300 mt-0.5">${ic('calendar', 'text-slate-500')} ${cuandoFechaTorneo(t, prox.f)}</p>` : ''}
       <div class="rounded-2xl bg-slate-950/50 py-4 mt-3">${versus({ camiseta: camisetaT(t, prox.a, 60), nombre: t.equipos[prox.a].nombre }, { camiseta: camisetaT(t, prox.b, 60), nombre: t.equipos[prox.b].nombre }, 60)}</div>
       ${arbitroTorneo(t, prox.f) ? `<p class="flex items-center justify-center gap-2 text-sm text-slate-300 mt-2">${tarjetaAmarilla(16)} Dirige <b>${esc(arbitroTorneo(t, prox.f))}</b></p>` : ''}
-      ${puedeCargar(t, prox) ? `<button data-action="torneo-res" data-k="${prox.key}" class="${BTN_OK} w-full mt-3 py-3">${ic('pencil')} Cargar resultado</button>` : ''}`) : ''}
+      ${puedeCargar(t, prox) ? `
+        <div class="grid grid-cols-2 gap-2 mt-3">
+          <a href="${c.base}/arbitro/${prox.key}" class="${BTN} bg-amber-400 hover:bg-amber-300 text-slate-950 py-3 inline-flex items-center justify-center gap-2">${tarjetaAmarilla(16)} Modo árbitro</a>
+          <button data-action="torneo-res" data-k="${prox.key}" class="${BTN_OK} py-3">${ic('pencil')} Cargar resultado</button>
+        </div>` : prox.vivo ? `<a href="${c.base}/arbitro/${prox.key}" class="${BTN_SEC} w-full mt-3 inline-flex items-center justify-center gap-2"><span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Ver en vivo</a>` : ''}`) : ''}
+    ${estadisticasTorneo(t)}
 
     ${enCopa ? card(`
       <h2 class="text-lg font-black">${ic('trophy', 'text-amber-300')} La llave</h2>
@@ -5170,19 +5684,22 @@ function jugandoTorneo(t) {
 
     ${admin ? `
       <div class="flex flex-col gap-2">
-        ${terminado ? `<button data-action="torneo-nuevo" class="${BTN_OK} w-full py-3">${ic('plus')} Armar otro torneo</button>`
+        ${terminado ? (c.tipo === 'grupo' ? `<button data-action="torneo-nuevo" class="${BTN_OK} w-full py-3">${ic('plus')} Armar otro torneo</button>` : '')
           : t.formato === 'ligacopa' && !enCopa ? `<button data-action="torneo-copa" class="${BTN_OK} w-full py-3">${ic('trophy')} Terminar la liga y pasar a la copa</button>`
           : !enCopa ? `<button data-action="torneo-terminar" class="${BTN_OK} w-full py-3">${ic('flag')} Terminar el torneo</button>` : ''}
         <button data-action="torneo-borrar" class="${BTN_CHIP} self-center hover:!text-red-300">${ic('trash-2')} Borrar torneo</button>
       </div>` : ''}
-    ${torneosViejos()}`;
+    ${c.tipo === 'grupo' ? torneosViejos() : ''}`;
 }
 
-const guardarResultadoTorneo = (k, datos, okMsg) => act(() => F.setDoc(F.doc(colTorneoResultados(D.gid), String(k)), { torneo: D.grupo.torneo.creado, ...datos, por: miUid(), ts: Date.now() }), okMsg);
+const guardarResultadoTorneo = (k, datos, okMsg) => {
+  const c = ctxT(), x = partidoK(c.t, k);
+  return act(() => F.setDoc(c.refRes(k), { torneo: c.t.creado, eventos: x?.eventos || [], vivo: false, ...datos, por: miUid(), ts: Date.now() }), okMsg);
+};
 
 // Cargar el resultado de un partido del torneo, como un tablero. En la copa, si empatan, se elige quién ganó por penales.
 function modalTorneoResultado() {
-  const t = D.grupo.torneo, x = partidoK(t, ui.torneoK);
+  const c = ctxT(), t = c.t, x = partidoK(t, ui.torneoK);
   const copa = typeof ui.torneoK === 'string', empate = ui.goles[0] === ui.goles[1];
   const lado = (i, k) => `
     <div class="flex-1 min-w-0 flex flex-col items-center gap-2">
@@ -5197,7 +5714,8 @@ function modalTorneoResultado() {
   return modal(`
     <p class="text-center text-[11px] font-black uppercase tracking-widest text-slate-500">${copa ? nombreRonda(x.n) : `Fecha ${x.f}`} · ${esc(t.nombre)}</p>
     <h2 class="text-center text-xl font-black mb-4">¿Cómo salió?</h2>
-    ${x.ga != null && x.por ? `<p class="text-center text-xs text-slate-500 -mt-3 mb-3">Lo cargó ${esc(jugador(x.por)?.usuario || 'alguien')}. Si está mal, corregilo.</p>` : ''}
+    ${x.ga != null && x.por ? `<p class="text-center text-xs text-slate-500 -mt-3 mb-3">Lo cargó ${esc(c.nombre(x.por) || 'alguien')}. Si está mal, corregilo.</p>` : ''}
+    ${(x.eventos || []).length ? `<p class="text-center text-xs text-amber-200 -mt-2 mb-3">${tarjetaAmarilla(11)} El árbitro anotó ${golesEventos(x.eventos).join('-')}. Si querés, ajustalo.</p>` : ''}
     <div class="flex items-start gap-1">${lado(x.a, 0)}<span class="mt-[7.4rem] text-3xl font-black text-slate-600">-</span>${lado(x.b, 1)}</div>
     ${copa && empate ? `
       <div class="mt-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3">
@@ -5210,7 +5728,8 @@ function modalTorneoResultado() {
       ${x.ga != null ? `<button data-action="torneo-borrar-res" class="${BTN_SEC} text-sm" aria-label="Borrar resultado">${ic('trash-2')}</button>` : ''}
       <button data-action="cerrar-modal" class="${BTN_SEC} text-sm flex-1">Cancelar</button>
       <button data-action="torneo-guardar-res" class="${BTN_OK} text-sm flex-1">${ic('save')} Guardar</button>
-    </div>`);
+    </div>
+    <a href="${c.base}/arbitro/${ui.torneoK}" data-action="cerrar-modal" class="block text-center text-sm text-amber-200 hover:text-amber-100 mt-3">${tarjetaAmarilla(12)} Abrir el modo árbitro (goles y tarjetas en el partido)</a>`);
 }
 
 // Pantalla de administración del grupo (solo admins).
@@ -6156,7 +6675,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(vs|jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil|grupos|calendario)/.test(location.hash);
+  const enPrincipal = !/^#\/(vs|tg|torneo\/arbitro|jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil|grupos|calendario)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -6168,9 +6687,9 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'cancha' && !D.grupo.equipos) ui.modal = null;
   if (ui.modal === 'fecha' && !esAdmin()) ui.modal = null;
-  if (ui.modal === 'torneo-res' && !puedeCargar(D.grupo.torneo, partidoK(D.grupo.torneo, ui.torneoK))) ui.modal = null;
+  if (ui.modal === 'torneo-res' && !puedeCargar(ctxT().t, partidoK(ctxT().t, ui.torneoK))) ui.modal = null;
   if (ui.modal === 'arbitro' && !esAdmin()) ui.modal = null;
-  if (ui.modal === 'equipo' && !(D.grupo?.torneo?.equipos?.[ui.eqI] && puedeEditarEquipo(D.grupo.torneo, ui.eqI))) ui.modal = null;
+  if (ui.modal === 'equipo' && !(ctxT().t?.equipos?.[ui.eqI] && puedeEditarEquipo(ctxT().t, ui.eqI))) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
     : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : ui.modal === 'fecha' ? modalFecha() : ui.modal === 'torneo-res' ? modalTorneoResultado() : ui.modal === 'arbitro' ? modalArbitro() : ui.modal === 'equipo' ? modalEquipo() : '';
@@ -6573,12 +7092,17 @@ function renderVistas() {
   if (['#/inicio', '#/perfil', '#/grupos', '#/calendario'].includes(location.hash) || !D.gid) return pintar(el, vistaInicio());
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   if (location.hash === '#/admin' && esAdmin()) return pintar(el, vistaAdmin());
+  const arb = location.hash.match(/^#\/torneo\/arbitro\/([0-9]+(?:-[0-9]+)?)$/);
+  if (arb && D.grupo.torneo) return pintar(el, vistaArbitro(arb[1]));
+  const arbTG = location.hash.match(/^#\/tg\/([A-Za-z0-9]+)\/arbitro\/([0-9]+(?:-[0-9]+)?)$/);
+  if (arbTG) { seguirTG(arbTG[1]); return pintar(el, D.tgT[arbTG[1]] ? vistaArbitro(arbTG[2]) : cargando()); }
   const m = location.hash.match(/^#\/jugador\/(.+)$/);
   if (m && jugador(m[1])) return pintar(el, vistaFicha(m[1]));
   pintar(el, vistaPrincipal());
 }
 
 window.addEventListener('hashchange', () => {
+  if (!/\/arbitro\//.test(location.hash)) { mantenerPantalla(false); ui.arbSel = null; ui.arbCorregir = null; }
   leerInvitacion();
   procesarInvitacion();
   ui.foto = null;
@@ -6723,7 +7247,7 @@ const acciones = {
   },
   copiar: () => copiar(mensajeWsp()),
   'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
-  'copiar-torneo': () => copiar(mensajeTorneo(D.grupo.torneo), '📋 Tabla copiada. Pegala en el grupo'),
+  'copiar-torneo': () => copiar(mensajeTorneo(ctxT().t), '📋 Tabla copiada. Pegala en el grupo'),
   // ---- Amistosos ----
   'vs-copiar': ({ id }) => D.vs[id] && copiar(mensajeVs(id), '📋 Invitación copiada. Pegala en los dos grupos'),
   'vs-anotarme': ({ id }) => {
@@ -6825,6 +7349,107 @@ const acciones = {
     if (ok) location.hash = '#/inicio';
     else borrandoGrupo = null;
   },
+  // ---- Torneo entre grupos ----
+  'tg-nuevo': () => armarTG(),
+  'tg-invitar-gid': ({ id, gid, nombre }) => invitarTG(id, gid, nombre),
+  'tg-copiar-inv': ({ id }) => D.tg[id] && copiar(mensajeInvTG(id), '📋 Aviso copiado. Mandáselo a su admin'),
+  'tg-cancelar-inv': async ({ id, gid }) => {
+    if (!await confirmar(`¿Cancelar la invitación a ${D.tg[id]?.nombresInv?.[gid] || 'ese grupo'}?`)) return;
+    const ok = await ctxEntreGrupos(id).cambiar(t => { t.invitados = t.invitados.filter(x => x !== gid); });
+    if (ok) F.deleteDoc(F.doc(db, 'grupos', gid, 'torneosInv', id)).catch(() => {});
+  },
+  'tg-quitar': async ({ id, gid }) => {
+    const e = D.tg[id]?.equipos.find(x => x.gid === gid);
+    if (!e || !await confirmar(`¿Sacar a ${e.nombre} del torneo?`)) return;
+    ctxEntreGrupos(id).cambiar(t => {
+      t.gids = t.gids.filter(x => x !== gid);
+      t.equipos = t.equipos.filter(x => x.gid !== gid);
+    }, `${e.nombre} quedó afuera`);
+  },
+  'tg-aceptar': async ({ id }) => {
+    const d = D.tg[id], gid = D.gid, uid = miUid();
+    if (!d) return;
+    const usados = d.equipos.map(e => e.colores?.[0]);
+    const color = [...COLOR_INICIAL, ...Object.keys(CATALOGO_COLORES)].find(c => !usados.includes(c));
+    const ok = await act(async () => {
+      await F.runTransaction(db, async tx => {
+        const s = (await tx.get(refTG(id))).data();
+        if (!s?.invitados?.includes(gid)) throw { mensaje: 'Esa invitación ya no está' };
+        tx.update(refTG(id), {
+          invitados: s.invitados.filter(x => x !== gid),
+          gids: [...s.gids, gid],
+          equipos: [...s.equipos, { gid, nombre: D.grupo.nombre.slice(0, 20), colores: [color], diseno: 'lisa', capitan: uid }],
+        });
+      });
+      if (!torneosDelGrupo().some(x => x.id === id)) await F.updateDoc(refGrupo(gid), { torneosG: [...torneosDelGrupo(), { id, ts: Date.now() }].slice(-10) });
+      await F.deleteDoc(F.doc(db, 'grupos', gid, 'torneosInv', id));
+    }, '🏆 ¡Están en el torneo! Avisale a los tuyos que se anoten');
+    if (ok) location.hash = `#/tg/${id}`;
+  },
+  'tg-rechazar': async ({ id }) => {
+    const d = D.tg[id], gid = D.gid;
+    if (!d || !await confirmar(`¿Rechazar la invitación a ${d.nombre}? Les va a aparecer que esta vez no pueden.`)) return;
+    await act(async () => {
+      await F.runTransaction(db, async tx => {
+        const s = (await tx.get(refTG(id))).data();
+        if (!s?.invitados?.includes(gid)) return;
+        tx.update(refTG(id), { invitados: s.invitados.filter(x => x !== gid), rechazados: [...(s.rechazados || []), gid] });
+      });
+      await F.deleteDoc(F.doc(db, 'grupos', gid, 'torneosInv', id));
+    }, 'Invitación rechazada');
+  },
+  'tg-anotarme': ({ id, e }) => {
+    const p = D.perfil;
+    act(() => F.setDoc(F.doc(colTGJug(id), miUid()), { e, usuario: p.usuario, foto: p.foto || '', posicion: p.posicion || 'comodin', ts: Date.now() }), '✅ ¡Estás en el torneo!');
+  },
+  'tg-bajarme': async ({ id }) => {
+    if (await confirmar('¿Te bajás del torneo?', { si: 'Me bajo', peligro: true })) act(() => F.deleteDoc(F.doc(colTGJug(id), miUid())), 'Te bajaste del torneo');
+  },
+  // ---- Modo árbitro ----
+  'arb-jugador': ({ id }) => { ui.arbSel = ui.arbSel === id ? null : id; render(); },
+  'arb-mostrar': ({ c }) => mostrarTarjeta(c === 'roja' ? 'roja' : 'am'),
+  'arb-evento': ({ k, t: tipo, l, id }) => {
+    const c = ctxT(), key = keyT(k), x = partidoK(c.t, key);
+    if (!x) return;
+    const m = minutoReloj(claveReloj(key)), n = id ? c.nombre(id) || '?' : '';
+    const ev = [...(x.eventos || [])];
+    if (tipo === 'am' && ev.some(e => e.j === id && e.t === 'am') && !ev.some(e => e.j === id && e.t === 'roja')) {
+      // Segunda amarilla: también es roja.
+      ev.push({ t: 'am', l, j: id, n, m }, { t: 'roja', l, j: id, n, m });
+      mostrarTarjeta('roja', { nombre: n, m, doble: true });
+    } else {
+      ev.push({ t: tipo, l, j: id || null, n, m });
+      if (tipo !== 'gol') mostrarTarjeta(tipo, { nombre: n, m });
+      else toast(`⚽ Gol${n ? ` de ${n}` : ''}${m ? ` (${m}')` : ''}`);
+    }
+    ui.arbSel = null;
+    guardarEventos(key, ev.slice(-150));
+  },
+  'arb-borrar': ({ k, n }) => {
+    const key = keyT(k), x = partidoK(ctxT().t, key);
+    if (x) guardarEventos(key, (x.eventos || []).filter((e, i) => i !== Number(n)));
+  },
+  'arb-reloj': ({ clave }) => {
+    const r = leerReloj(clave);
+    const nuevo = r.desde ? { desde: null, acum: msReloj(r) } : { desde: Date.now(), acum: r.acum };
+    try { localStorage.setItem(clave, JSON.stringify(nuevo)); } catch {}
+    render();
+  },
+  'arb-reloj-cero': async ({ clave }) => {
+    if (!await confirmar('¿Poner el reloj en cero?', { si: 'A cero', peligro: true })) return;
+    try { localStorage.removeItem(clave); } catch {}
+    render();
+  },
+  'arb-terminar': ({ k }) => {
+    const key = keyT(k), x = partidoK(ctxT().t, key);
+    if (!x) return;
+    ui.torneoK = key;
+    ui.goles = golesEventos(x.eventos);
+    ui.gana = x.gana || null;
+    ui.modal = 'torneo-res';
+    render();
+  },
+  'arb-corregir': ({ k }) => { ui.arbCorregir = `${ctxT().id}|${keyT(k)}`; render(); },
   // ---- Modos del grupo y árbitro ----
   'modos-ocultar': () => { guardado.set(LS + 'modosOcultos', '1'); toast('Listo. Lo encontrás en Administrar.'); render(); },
   arbitro: () => { ui.modal = 'arbitro'; render(); },
@@ -6862,25 +7487,27 @@ const acciones = {
     if (n !== s.torneo.cant) { s.torneo.cant = n; s.torneo.equipos = null; }
     if (s.torneo.arbitro === 'libre' && !(n % 2)) s.torneo.arbitro = 'nadie';
   }),
-  'torneo-vueltas': ({ n }) => actualizarGrupo(s => { s.torneo.vueltas = Number(n); }),
-  'torneo-formato': ({ f }) => actualizarGrupo(s => {
-    s.torneo.formato = f;
-    if (f === 'copa' && s.torneo.arbitro === 'libre') s.torneo.arbitro = 'nadie';
+  'torneo-vueltas': ({ n }) => ctxT().cambiar(t => { t.vueltas = Number(n); }),
+  'torneo-formato': ({ f }) => ctxT().cambiar(t => {
+    t.formato = f;
+    if (f === 'copa' && t.arbitro === 'libre') t.arbitro = 'nadie';
   }),
-  'torneo-cuando': ({ tipo }) => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, tipo }; }),
-  'torneo-dia': ({ d }) => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, dia: Number(d) }; }),
-  'torneo-arbitro': ({ a }) => actualizarGrupo(s => { s.torneo.arbitro = a === 'uno' ? miUid() : a; }),
+  'torneo-cuando': ({ tipo }) => ctxT().cambiar(t => { t.cuando = { ...t.cuando, tipo }; }),
+  'torneo-dia': ({ d }) => ctxT().cambiar(t => { t.cuando = { ...t.cuando, dia: Number(d) }; }),
+  'torneo-arbitro': ({ a }) => ctxT().cambiar(t => { t.arbitro = a === 'uno' ? miUid() : a; t.arbitroNombre = a === 'uno' ? D.perfil.usuario : ''; }),
   'torneo-armar': ({ modo }) => actualizarGrupo(s => {
     const t = s.torneo, viejos = t.equipos || [];
     t.equipos = repartirEnEquipos(t.ids, t.cant, modo).map((ids, i) => ({ nombre: viejos[i]?.nombre || colorT(i)[1], ids }));
     t.modo = modo;
   }, '🆚 Equipos armados'),
   'torneo-empezar': async () => {
-    const t = D.grupo.torneo;
-    if (t.equipos.some(e => !e.ids.length)) return toast('Hay un equipo sin jugadores');
+    const c = ctxT(), t = c.t;
+    if (c.tipo === 'grupo' && t.equipos.some(e => !e.ids.length)) return toast('Hay un equipo sin jugadores');
+    if (t.equipos.length < 2) return toast('Hacen falta al menos 2 equipos');
     if (!await confirmar(`¿Empezar "${t.nombre}"? Los equipos quedan fijos hasta el final.`)) return;
-    actualizarGrupo(s => {
-      const t = s.torneo;
+    c.cambiar(t => {
+      t.cant = t.equipos.length;
+      if (t.invitados) t.invitados = [];
       // La copa sola se sortea; en liga + copa, la llave se arma al terminar la liga.
       t.partidos = t.formato === 'copa' ? [] : fixtureTorneo(t.cant, t.vueltas);
       t.llave = t.formato === 'copa' ? armarLlave(shuffle(t.equipos.map((e, i) => i))) : null;
@@ -6890,13 +7517,13 @@ const acciones = {
     }, '🏁 ¡Arrancó el torneo!');
   },
   'torneo-copa': async () => {
-    const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length, k = clasificanCopa(t);
+    const t = ctxT().t, faltan = t.partidos.filter(x => x.ga == null).length, k = clasificanCopa(t);
     if (!await confirmar(`${faltan ? `Faltan ${faltan} partidos de la liga. ` : ''}¿Pasar a la copa con los ${k} primeros de la tabla?`)) return;
     const llave = armarLlave(tablaTorneo(t).slice(0, k).map(f => f.i));
-    actualizarGrupo(s => { s.torneo.llave = llave; s.torneo.res = {}; }, '🏆 ¡Empieza la copa!');
+    ctxT().cambiar(t => { t.llave = llave; t.res = {}; }, '🏆 ¡Empieza la copa!');
   },
   'torneo-res': ({ k }) => {
-    const key = String(k).includes('-') ? String(k) : Number(k), x = partidoK(D.grupo.torneo, key);
+    const key = keyT(k), x = partidoK(ctxT().t, key);
     if (!x) return;
     ui.torneoK = key;
     ui.goles = [x.ga ?? 0, x.gb ?? 0];
@@ -6907,7 +7534,7 @@ const acciones = {
   'torneo-gol': ({ lado, delta }) => { ui.goles[lado] = Math.max(0, Math.min(99, ui.goles[lado] + Number(delta))); render(); },
   'torneo-penales': ({ g }) => { ui.gana = g; render(); },
   'equipo-editar': ({ i }) => {
-    const e = D.grupo.torneo.equipos[i];
+    const e = ctxT().t.equipos[i];
     ui.eqI = Number(i);
     ui.eqDraft = { nombre: e.nombre, colores: [...coloresT(Number(i))], diseno: e.diseno || 'franja' };
     ui.modal = 'equipo';
@@ -6923,7 +7550,7 @@ const acciones = {
   },
   'equipo-diseno': ({ d: z }) => { ui.eqDraft.nombre = $('#eq-nombre')?.value ?? ui.eqDraft.nombre; ui.eqDraft.diseno = z; render(); },
   'equipo-guardar': async () => {
-    const t = D.grupo.torneo, i = ui.eqI, d = ui.eqDraft;
+    const c = ctxT(), t = c.t, i = ui.eqI, d = ui.eqDraft;
     const nombre = ($('#eq-nombre')?.value ?? d.nombre).trim().slice(0, 20);
     if (!nombre) return toast('Ponele un nombre al equipo');
     if (esInsulto(nombre)) return toast(MSJ_INSULTO);
@@ -6932,31 +7559,36 @@ const acciones = {
     ui.modal = null;
     render();
     const datos = { torneo: t.creado, nombre, colores: d.colores, diseno: d.colores[1] ? d.diseno : 'lisa', por: miUid(), ts: Date.now() };
+    if (c.tipo !== 'grupo') return c.cambiar(t => Object.assign(t.equipos[i], { nombre, colores: datos.colores, diseno: datos.diseno }), '👕 ¡Listo el equipo!');
     await act(() => F.setDoc(F.doc(colTorneoEquipos(D.gid), String(i)), datos), '👕 ¡Listo el equipo!');
   },
   'torneo-guardar-res': async () => {
     const k = ui.torneoK, [ga, gb] = ui.goles, gana = ga === gb ? ui.gana : null;
-    const t = D.grupo.torneo, x = partidoK(t, k);
+    const t = ctxT().t, x = partidoK(t, k);
     if (!x) return;
     if (typeof k === 'string' && ga === gb && !gana) return toast('Empataron: elegí quién ganó por penales');
     ui.modal = null;
     render();
+    ui.arbCorregir = null;
+    // Después de que el modal se saca del historial (history.back), de vuelta al torneo.
+    if (/\/arbitro\//.test(location.hash)) { const base = ctxT().base; setTimeout(() => { if (/\/arbitro\//.test(location.hash)) location.hash = base; }, 300); }
     await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga, gb, gana: typeof k === 'string' ? gana : null }, '💾 Resultado guardado');
   },
   'torneo-borrar-res': async () => {
-    const k = ui.torneoK, x = partidoK(D.grupo.torneo, k);
+    const k = ui.torneoK, x = partidoK(ctxT().t, k);
     ui.modal = null;
     render();
-    if (x) await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga: null, gb: null, gana: null }, 'Resultado borrado');
+    if (x) await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga: null, gb: null, gana: null, eventos: [] }, 'Resultado borrado');
   },
   'torneo-terminar': async () => {
-    const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length;
+    const t = ctxT().t, faltan = t.partidos.filter(x => x.ga == null).length;
     if (!await confirmar(faltan ? `Faltan ${faltan} partidos. ¿Terminar igual? Gana el que va primero en la tabla.` : '¿Terminar el torneo? Queda la tabla final con el campeón.')) return;
-    actualizarGrupo(s => { s.torneo.estado = 'terminado'; s.torneo.termino = Date.now(); }, '🏆 ¡Torneo terminado!');
+    ctxT().cambiar(t => { t.estado = 'terminado'; t.termino = Date.now(); }, '🏆 ¡Torneo terminado!');
   },
   'torneo-borrar': async () => {
-    const t = D.grupo.torneo;
+    const c = ctxT(), t = c.t;
     if (!await confirmar(t.estado === 'armando' ? '¿Cancelar el torneo?' : '¿Borrar el torneo con todos sus resultados? No se puede deshacer.')) return;
+    if (c.tipo !== 'grupo') return borrarTG(c.id);
     actualizarGrupo(s => { s.torneo = null; });
     location.hash = '#/torneo';
   },
@@ -7266,12 +7898,12 @@ const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n 
 const cambios = {
   'torneo-titulo': el => {
     const v = el.value.trim().slice(0, 40);
-    if (esInsulto(v)) { el.value = D.grupo.torneo.nombre; return toast(MSJ_INSULTO); }
-    if (v) actualizarGrupo(s => { s.torneo.nombre = v; });
+    if (esInsulto(v)) { el.value = ctxT().t.nombre; return toast(MSJ_INSULTO); }
+    if (v) ctxT().cambiar(t => { t.nombre = v; });
   },
   'torneo-capitan': el => actualizarGrupo(s => { s.torneo.equipos[Number(el.id.slice(3))].capitan = el.value || null; }, el.value ? `Capitán: ${jugador(el.value)?.usuario}` : null),
-  'torneo-hora': el => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, hora: el.value }; }),
-  'torneo-arbitro-id': el => actualizarGrupo(s => { s.torneo.arbitro = el.value; }),
+  'torneo-hora': el => ctxT().cambiar(t => { t.cuando = { ...t.cuando, hora: el.value.trim().slice(0, 5) }; }),
+  'torneo-arbitro-id': el => ctxT().cambiar(t => { t.arbitro = el.value; t.arbitroNombre = jugador(el.value)?.usuario || ctxT().nombre(el.value); }),
   modalidad: el => {
     const c = $('#p-cupo');
     if (el.value && c) { c.value = el.value; c.dataset.dirty = '1'; }
@@ -7445,6 +8077,16 @@ const formularios = {
   },
   'crear-grupo': f => esInsulto(f.get('nombre')) ? toast(MSJ_INSULTO) : crearGrupo(f.get('nombre').trim()),
   amistoso: f => armarAmistoso(f),
+  'tg-invitar': async (f, { id }) => {
+    const c = limpiarCodigo(f.get('codigo'));
+    if (c.length < 6) return toast('Escribí el código del otro grupo (ej: UADE-4821)');
+    let x = null;
+    try { x = (await F.getDoc(refCodigo(c))).data(); } catch (e) { console.warn(e); }
+    if (!x) return toast('No encontramos ese código. Revisalo con el admin del otro grupo');
+    if (!await confirmar(`¿Invitamos a "${x.nombre}" al torneo?`, { si: 'Invitar' })) return;
+    await invitarTG(id, x.gid, x.nombre);
+    return true;
+  },
   'vs-editar': f => { const id = ui.vsId; ui.modal = null; return act(() => F.updateDoc(refVs(id), datosFormVs(f)), '💾 Guardado'); },
   'vs-resultado': f => {
     const ga = parseInt(f.get('ga')), gb = parseInt(f.get('gb')), id = ui.vsId;
@@ -7697,7 +8339,7 @@ document.addEventListener('submit', async e => {
   try {
     if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
       form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-      if (['crear-grupo', 'unirse', 'invitado', 'cambiar-clave', 'amistoso'].includes(form.dataset.form)) {
+      if (['crear-grupo', 'unirse', 'invitado', 'cambiar-clave', 'amistoso', 'tg-invitar'].includes(form.dataset.form)) {
         form.reset();
         form.querySelectorAll('[data-out]').forEach(i => (document.getElementById(i.dataset.out).textContent = i.value));
       }
