@@ -331,6 +331,8 @@ const D = {
   bajas: [],           // bajas tardías (las registra api/avisar.js): { fecha, target, tipo, horas, excusa }
   rehacer: [],         // pedidos para rehacer los equipos: admins, todos; los demás, solo el suyo
   registrando: false,
+  vs: {},              // amistosos que sigo: id -> datos (null si no existe)
+  vsAnot: {},          // id -> anotados, en orden de llegada
   mvp: null,           // última votación del jugador del partido: { id: fecha, candidatos, nombres, abre, cierra, miVoto, votos }
 };
 const ui = { tab: 'entrar', foto: null };  // foto: null = sin cambios, '' = quitar, dataURL = nueva
@@ -625,6 +627,9 @@ A.onAuthStateChanged(auth, user => {
   cortar(subsMvp);
   Object.values(subsMisGrupos).forEach(f => f());
   subsMisGrupos = {};
+  Object.values(subsVs).forEach(f => f());
+  subsVs = {};
+  D.vs = {}; D.vsAnot = {};
   nivelesDe = mvpDe = pendientesDe = null;
   Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {} });
   if (user) {
@@ -661,8 +666,14 @@ function suscribirMisGrupos() {
   for (const gid of ids) if (!subsMisGrupos[gid]) {
     subsMisGrupos[gid] = F.onSnapshot(refGrupo(gid), s => {
       D.misGrupos[gid] = s.exists() ? normGrupo(s.data()) : null;
+      if (!s.exists()) olvidarGrupo(gid, 'Un grupo tuyo fue borrado');
       render();
-    }, e => { console.error(e); D.misGrupos[gid] = null; });
+    }, e => {
+      console.error(e);
+      D.misGrupos[gid] = null;
+      if (e.code === 'permission-denied') olvidarGrupo(gid, 'Ya no estás en uno de tus grupos');
+      render();
+    });
   }
 }
 
@@ -680,6 +691,7 @@ function elegirGrupo() {
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
     if (!s.exists()) return olvidarGrupo(gid, 'Ese grupo ya no existe');
     D.grupo = normGrupo(s.data());
+    rivales().forEach(x => seguirVs(x.id));
     suscribirNiveles();
     suscribirPendientes();
     suscribirReportes();
@@ -1233,7 +1245,9 @@ function suscribirNiveles() {
 }
 
 // Saca un grupo de mi lista (me expulsaron o lo borraron).
+let borrandoGrupo = null;
 function olvidarGrupo(gid, msg) {
+  if (gid === borrandoGrupo) return;
   toast(msg);
   if (guardado.get(LS + 'gid') === gid) guardado.set(LS + 'gid', null);
   const grupos = (D.perfil?.grupos || []).filter(g => g.id !== gid);
@@ -1292,38 +1306,6 @@ function crearGrupo(nombre) {
     evento('crear_grupo');
   }, '⚽ Grupo creado. Compartí el link de invitación desde el panel de admin.');
 }
-
-// Amistoso contra otro grupo: un grupo aparte para ese partido, al que se entra directo con
-// el link (sin aprobación). Los de este grupo quedan como "locales": así salen los equipos
-// Nosotros vs Ellos. Este grupo guarda cada rival en amistosos (acceso, historial y próxima fecha),
-// y las revanchas se juegan en el mismo grupo del amistoso.
-async function armarAmistoso(rival) {
-  const ya = rivales().find(a => a.rival.toLowerCase() === rival.toLowerCase());
-  if (ya) return toast(`Ya jugaron contra ${ya.rival}: tocá "Armar la revancha" en su ficha`);
-  const local = D.grupo.nombre, gid = genId(20), codigo = genId(12), uid = miUid();
-  const nombre = `${local} vs ${rival}`.slice(0, 60);
-  const ok = await act(async () => {
-    await F.setDoc(refGrupo(gid), {
-      nombre, creador: uid, admins: [uid], codigo, baneados: [], ...datosGrupoIniciales(), aprobacion: false,
-      partido: { ...datosGrupoIniciales().partido, titulo: `Amistoso vs ${rival}`.slice(0, 40) },
-      amistoso: { origen: D.gid, local, rival, locales: Object.keys(D.miembros) },
-    });
-    await F.setDoc(F.doc(colMiembros(gid), uid), { ...datosPerfil(D.perfil), codigo, unido: Date.now() });
-    await F.updateDoc(refUsuario(uid), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre }] });
-    await F.updateDoc(refGrupo(D.gid), { amistosos: [...rivales(), { gid, codigo, rival, ts: Date.now(), ficha: null, prox: null }].slice(-20) });
-    evento('crear_amistoso');
-  }, '⚔️ Amistoso armado. Poné la fecha y pasá el link a los dos grupos');
-  if (ok) { guardado.set(LS + 'gid', gid); location.hash = '#/'; }
-  return ok;
-}
-const mensajeAmistoso = () => {
-  const a = D.grupo.amistoso, p = D.grupo.partido;
-  const L = [`⚔️ *Amistoso: ${a.local} vs ${a.rival}*`];
-  if (p.fecha || p.cuando) L.push(`📅 ${[fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ')}`);
-  if (p.lugar) L.push(`📍 ${p.lugar}`);
-  L.push('', 'Entrá con este link y anotate (no hace falta que te acepten):', linkInvitacion());
-  return L.join('\n');
-};
 
 // ---------------- Jugadores, votos y puntajes ----------------
 function jugador(id) {
@@ -1877,7 +1859,7 @@ function actualizarAvisoUsuario() {
 // para entrar. Cualquier página lleva acá, salvo el login (#/entrar); el que viene con invitación
 // va directo al login.
 const verPortada = () => location.hash === '#/fulbo'
-  || (location.hash !== '#/entrar' && !guardado.get(LS + 'inv'));
+  || (location.hash !== '#/entrar' && !guardado.get(LS + 'inv') && !location.hash.startsWith('#/vs/'));
 function vistaPortada() {
   // Capturas reales de la app (carpeta capturas/), con datos de ejemplo.
   const celu = (img, alt, extra = '') => `
@@ -1971,7 +1953,7 @@ function vistaPortada() {
       ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
       ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
       ${pregunta('¿Puedo estar en más de un grupo?', 'Sí. Ves todos tus partidos juntos en el calendario.')}
-      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o un amistoso contra otro grupo, que entra con un link aparte. Los de afuera no ven nada de tu grupo.')}
+      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o un amistoso contra otro grupo: los dos ven la lista del partido y cada uno se anota de su lado. Nadie entra al grupo del otro.')}
     </section>
 
     <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
@@ -2003,6 +1985,7 @@ function vistaLogin() {
       <h1 class="text-3xl font-black mt-2">Fulbo</h1>
       <p class="text-slate-400 text-sm mt-1">Anotate, armá tu ficha y calificá a tus compañeros</p>
     </div>
+    ${location.hash.startsWith('#/vs/') ? `<p class="text-sm text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 text-center">⚔️ Te invitaron a un amistoso. Entrá o creá tu cuenta para anotarte.</p>` : ''}
     ${invitado ? `<p class="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 text-center">${ic('ticket')} Te invitaron a un grupo. Entrá o creá tu cuenta para sumarte.</p>` : ''}
     ${card(`
       <div class="grid grid-cols-2 gap-1 p-1 bg-slate-800 rounded-xl mb-4">${tab('entrar', 'Entrar')}${tab('registro', 'Crear cuenta')}</div>
@@ -2713,7 +2696,7 @@ function vistaPrincipal() {
     : t === 'jugadores' ? [jugadoresGrid()]
     : t === 'torneo' ? [cartelera(), vistaTorneo()]
     : t === 'amistoso' ? [cartelera(), vistaAmistoso()]
-    : [cartelera(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAmistoso(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
+    : [cartelera(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -2903,7 +2886,7 @@ function guia() {
   ]);
   const amistosos = tira([
     [`${barraGrupo({ admin: true })}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-8 rounded-lg bg-slate-800"></div>${modosMini('amistoso')}</div>`, 'El <b>admin</b> toca <b>Amistoso</b> en <b>Sumale algo al grupo</b> y escribe contra quién juegan.', true],
-    [`<div class="flex-1 p-1.5"><div class="rounded-lg p-2 text-center text-white" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)"><p class="text-[7px] font-black tracking-widest text-amber-200">AMISTOSO</p><div class="flex items-center justify-center gap-1 mt-1">${camiseta('#ef4444', 24)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 24)}</div><p class="text-[8px] mt-1">Pasale el link a los dos grupos</p><span class="mt-1.5 inline-block">${toca('<span class="block rounded bg-white text-slate-900 font-bold px-2 py-1">Copiar invitación</span>')}</span></div></div>`, 'Se arma un <b>grupo aparte</b> para el amistoso. Pasá el link a los dos grupos: entran directo y se anotan. Los equipos salen <b>grupo contra grupo</b>.', true],
+    [`<div class="flex-1 p-1.5"><div class="rounded-lg p-2 text-center text-white" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)"><p class="text-[7px] font-black tracking-widest text-amber-200">AMISTOSO</p><div class="flex items-center justify-center gap-1 mt-1">${camiseta('#ef4444', 24)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 24)}</div><p class="text-[8px] mt-1">Pasale el link a los dos grupos</p><span class="mt-1.5 inline-block">${toca('<span class="block rounded bg-white text-slate-900 font-bold px-2 py-1">Copiar invitación</span>')}</span></div></div>`, 'Pasá la invitación a los dos grupos. Cada uno se anota <b>de su lado</b> y todos ven cómo se completa. <b>Nadie entra al grupo del otro</b>.', true],
     [`<div class="flex-1 p-1.5 space-y-1.5">${tarjeta(`<div class="flex items-center justify-center gap-1">${camiseta('#ef4444', 20)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 20)}</div><div class="grid grid-cols-4 gap-0.5 mt-1.5 text-center">${[['5', 'PJ', ''], ['3', 'G', 'text-emerald-300'], ['1', 'E', ''], ['1', 'P', 'text-red-300']].map(([n, l, c]) => `<span class="rounded bg-slate-950/60 py-0.5"><b class="block text-[10px] ${c}">${n}</b>${l}</span>`).join('')}</div><p class="text-center font-bold mt-1">🔥 Van ganando 3 a 1</p><span class="mt-1 block">${toca('<span class="block rounded bg-emerald-500 text-slate-950 font-bold text-center py-1">🔁 Armar la revancha</span>', 'block')}</span>`)}</div>`, 'Cada rival queda con su <b>historial</b>. Para volver a jugar, tocá <b>Armar la revancha</b>: mismo link y mismo grupo.', true],
   ]);
   const paso = (titulo, cuerpo, abierto = false) => `
@@ -3098,10 +3081,10 @@ function vistaReglas() {
     ])}
     ${seccion('⚔️ Amistosos contra otros grupos', [
       'Sirven para jugar contra otro grupo, o cuando no llegan al cupo. Un admin toca <b>Sumale algo al grupo → Amistoso</b> y escribe contra quién juegan.',
-      'Se crea un <b>grupo aparte</b> para el amistoso: los de los dos grupos entran con el link, <b>sin que nadie los acepte</b>. Así tu grupo sigue cerrado: los de afuera no ven calificaciones, fichas ni historia.',
-      'Los de tu grupo se suman desde <b>Partido → Amistosos</b> con un toque.',
-      'Cuando se llena la lista, los equipos salen <b>grupo contra grupo</b> (los suplentes, con su grupo). Se pueden mezclar con Equilibrados o Al azar, pero esos partidos no cuentan para el historial.',
-      'Cada rival queda con su <b>historial</b>: jugados, ganados, empatados, perdidos y los últimos resultados. Para volver a jugar, <b>Armar la revancha</b> usa el mismo grupo y el mismo link.',
+      'El amistoso <b>no es un grupo nuevo</b>: es un partido que comparten los dos grupos. Los dos ven lo mismo: fecha, cancha, quién se anotó de cada lado y el resultado. <b>Nadie entra al grupo del otro</b>: no se ven calificaciones, fichas ni historia.',
+      'Con <b>Copiar invitación</b> lo mandás por WhatsApp a los dos grupos. Los de tu grupo lo ven en <b>Partido → Amistoso</b> y se anotan con un toque. Si el otro grupo usa Fulbo, su admin abre el link y lo <b>suma a su grupo</b>; si no, cada uno entra con el link y se anota del lado de ellos.',
+      'Cada lado tiene su cupo (5 en fútbol 5). Los equipos ya están: <b>ustedes contra ellos</b>. Un admin puede anotar a alguien sin cuenta, sacar a alguien, cambiar la fecha, <b>suspenderlo</b> o <b>borrarlo</b>.',
+      'Después del partido, un admin carga el resultado y queda el <b>historial</b> con cada rival en los dos grupos: jugados, ganados, empatados y perdidos. Para volver a jugar, <b>Armar la revancha</b>.',
     ])}
     ${seccion('🚫 Nombres', [
       'Los nombres de grupos, equipos, torneos, rivales e invitados <b>no pueden tener insultos fuertes</b> (discriminatorios, sexuales o violentos). La picardía pasa: "Los Sin Rodilla" o "Muertos FC" están perfectos.',
@@ -3800,31 +3783,150 @@ function esInsulto(texto) {
 const MSJ_INSULTO = 'Ese nombre no va 😅 Probá con otro.';
 
 // ---------------- Amistosos ----------------
-const rivales = () => D.grupo.amistosos || [];
+// Un amistoso es un partido compartido entre dos grupos (amistosos/{id}), no un grupo aparte. Cada grupo
+// lo tiene en su lista (amistosos: [{ id, rival, lado, ts }]) y los dos ven lo mismo: fecha, cancha, quién
+// se anotó de cada lado y el resultado. Nadie entra al grupo del otro. El link (#/vs/id) es la invitación:
+// los del otro grupo se anotan de su lado, y si el rival no usa Fulbo, se anota cualquiera con el link.
+// { local: { gid, nombre }, rival: { gid | null, nombre }, creador, admins, fecha, hora, lugar, cupo (por lado),
+//   suspendido, resultado: { ga, gb } | null, ts }. Anotados en amistosos/{id}/anotados/{uid o inv_...}.
+const refVs = id => F.doc(db, 'amistosos', id);
+const colVsAnot = id => F.collection(db, 'amistosos', id, 'anotados');
+const linkVs = id => `${urlBase()}#/vs/${id}`;
+// Los de antes (un grupo aparte por amistoso) tenían gid en vez de id: esos ya no se muestran.
+const rivales = () => (D.grupo?.amistosos || []).filter(x => x.id);
 
-// Historial contra un rival, contado desde los locales (los de este grupo). Un resultado cuenta
-// si los equipos salieron grupo contra grupo (la mayoría de un lado son locales).
-function fichaRival(resultados, locales) {
-  const L = new Set(locales), f = { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, ult: [], ultimo: null };
-  for (const x of [...resultados].sort((a, b) => b.fecha.localeCompare(a.fecha))) {
-    const enA = (x.A || []).filter(id => L.has(id)).length, enB = (x.B || []).filter(id => L.has(id)).length;
-    if (enA === enB) continue;
-    const nos = enA > enB ? 'A' : 'B', res = x.ganador === 'empate' ? 'E' : x.ganador === nos ? 'G' : 'P';
-    const goles = x.golesA != null ? (nos === 'A' ? [x.golesA, x.golesB] : [x.golesB, x.golesA]) : null;
+let subsVs = {};  // id -> cortar las dos suscripciones
+function seguirVs(id) {
+  if (subsVs[id]) return;
+  const docu = F.onSnapshot(refVs(id), s => { D.vs[id] = s.exists() ? s.data() : null; render(); },
+    e => { console.warn(e.code); D.vs[id] = null; render(); });
+  const anot = F.onSnapshot(colVsAnot(id), qs => {
+    D.vsAnot[id] = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+    render();
+  }, e => console.warn(e.code));
+  subsVs[id] = () => { docu(); anot(); };
+}
+
+// Titulares (los primeros en anotarse, hasta el cupo) y suplentes de cada lado.
+function planillaVs(id) {
+  const a = D.vs[id], todos = D.vsAnot[id] || [];
+  const lado = l => { const xs = todos.filter(x => x.lado === l); return { tit: xs.slice(0, a.cupo), sup: xs.slice(a.cupo) }; };
+  return { A: lado('A'), B: lado('B') };
+}
+// De qué lado juego: el de mi grupo. Sin grupo en el amistoso, del lado del rival si el rival no tiene grupo en Fulbo.
+function miLadoVs(a) {
+  const mios = new Set((D.perfil?.grupos || []).map(g => g.id));
+  if (mios.has(a.local.gid)) return 'A';
+  if (!a.rival.gid || mios.has(a.rival.gid)) return 'B';
+  return null;
+}
+const adminVs = a => !!a && (a.admins || []).includes(miUid());
+const nombreLado = (a, l) => l === 'A' ? a.local.nombre : a.rival.nombre;
+const COLOR_VS = { A: '#ef4444', B: '#0ea5e9' };
+const vsJugado = a => !!a.resultado;
+const vsCuando = a => [a.fecha ? fechaLinda(a.fecha) : '', a.hora].filter(Boolean).join(' · ');
+
+const mensajeVs = id => {
+  const a = D.vs[id], P = planillaVs(id);
+  const L = [`⚔️ *Amistoso: ${a.local.nombre} vs ${a.rival.nombre}*`];
+  if (a.fecha || a.hora) L.push(`📅 ${vsCuando(a)}`);
+  if (a.lugar) L.push(`📍 ${a.lugar}`);
+  L.push('');
+  for (const l of ['A', 'B']) {
+    const n = P[l].tit.length, falta = a.cupo - n;
+    L.push(`${l === 'A' ? '🔴' : '🔵'} ${nombreLado(a, l)}: ${n}/${a.cupo}${falta > 0 ? ` (faltan ${falta})` : ' ✅'}`);
+  }
+  L.push('', 'Anotate de tu lado acá 👇', linkVs(id));
+  return L.join('\n');
+};
+
+// Un lado de la planilla: los que juegan, los lugares libres y los suplentes.
+function columnaVs(id, l) {
+  const a = D.vs[id], P = planillaVs(id)[l], admin = adminVs(a) && !vsJugado(a), yo = miUid();
+  const fila = (x, sup) => `
+    <li class="flex items-center gap-2 min-w-0 py-1 ${sup ? 'opacity-70' : ''}">
+      ${avatar(x, 26)}
+      <span class="flex-1 min-w-0 truncate text-sm ${x.id === yo ? 'font-black text-emerald-300' : 'font-medium'}">${esc(x.usuario)}${x.inv ? ' <span class="text-[10px] text-slate-500">(sin cuenta)</span>' : ''}</span>
+      ${admin && x.id !== yo ? `<button data-action="vs-sacar" data-id="${id}" data-u="${x.id}" aria-label="Sacar a ${esc(x.usuario)}" class="text-slate-500 hover:text-red-300">${ic('x')}</button>` : ''}
+    </li>`;
+  const libres = Math.max(0, a.cupo - P.tit.length);
+  return `
+    <div class="min-w-0">
+      <div class="flex items-center gap-1.5">
+        ${camiseta(COLOR_VS[l], 22, inicial(nombreLado(a, l)))}
+        <p class="flex-1 min-w-0 truncate text-sm font-black">${esc(nombreLado(a, l))}</p>
+      </div>
+      <div class="h-1.5 rounded-full bg-slate-800 mt-1.5 overflow-hidden"><div class="h-full rounded-full" style="width:${Math.round(100 * P.tit.length / a.cupo)}%;background:${COLOR_VS[l]}"></div></div>
+      <p class="text-[11px] mt-1 ${libres ? 'text-amber-300' : 'text-emerald-300'}">${libres ? `${P.tit.length}/${a.cupo} · faltan ${libres}` : `${a.cupo}/${a.cupo} ✅ completo`}</p>
+      <ul class="mt-1">
+        ${P.tit.map(x => fila(x)).join('')}
+        ${Array.from({ length: libres }, () => '<li class="flex items-center gap-2 py-1"><span class="w-[26px] h-[26px] rounded-full border-2 border-dashed border-slate-700"></span><span class="text-xs text-slate-600">libre</span></li>').join('')}
+      </ul>
+      ${P.sup.length ? `<p class="text-[10px] uppercase tracking-wide text-slate-500 mt-1">Suplentes</p><ul>${P.sup.map(x => fila(x, true)).join('')}</ul>` : ''}
+    </div>`;
+}
+
+// La tarjeta del amistoso: la ven igual los dos grupos (y los que entran con el link).
+function tarjetaVs(id) {
+  const a = D.vs[id];
+  if (a === undefined) return card('<p class="text-sm text-slate-400">Cargando el amistoso…</p>');
+  if (!a) return '';
+  const P = planillaVs(id), mio = (D.vsAnot[id] || []).find(x => x.id === miUid());
+  const lado = miLadoVs(a), admin = adminVs(a), jugado = vsJugado(a);
+  const completo = P.A.tit.length >= a.cupo && P.B.tit.length >= a.cupo;
+  const pasado = a.fecha && a.fecha < hoyArg();
+  const marcador = jugado ? `
+    <div class="flex items-center justify-center gap-3 mt-2">
+      <span class="text-4xl font-black text-white tabular-nums">${a.resultado.ga}</span><span class="text-white/60 font-black">-</span><span class="text-4xl font-black text-white tabular-nums">${a.resultado.gb}</span>
+    </div>` : '';
+  const boton = (accion, icono, txt, cls = BTN_CHIP) => `<button data-action="${accion}" data-id="${id}" class="${cls}">${ic(icono)} ${txt}</button>`;
+  return `
+    <div class="space-y-0">
+      ${cancha(`
+        <p class="text-center text-[11px] font-black uppercase tracking-[.25em] text-amber-200">${jugado ? 'Amistoso · terminado' : 'Amistoso'}</p>
+        <div class="mt-3">${versus({ color: COLOR_VS.A, nombre: a.local.nombre }, { color: COLOR_VS.B, nombre: a.rival.nombre })}</div>
+        ${marcador}
+        <p class="text-center text-sm text-white mt-3">${a.fecha || a.hora ? `${ic('calendar')} <b>${esc(vsCuando(a))}</b>` : '<span class="text-white/70">Sin fecha todavía</span>'}${a.lugar ? `<br>${ic('map-pin')} ${esc(a.lugar)}` : ''}</p>
+        ${a.suspendido ? '<p class="text-center mt-2"><span class="inline-block rounded-lg bg-red-600 px-3 py-1 text-sm font-black text-white">🚫 Suspendido</span></p>' : ''}`, '!rounded-b-none')}
+      <div class="${CARD} !rounded-t-none !border-t-0 !mt-0">
+        <div class="grid grid-cols-2 gap-3">${columnaVs(id, 'A')}${columnaVs(id, 'B')}</div>
+        ${!jugado && completo ? `<p class="mt-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 px-3 py-2 text-center text-sm font-bold text-emerald-200">⚔️ ¡Están todos! ${esc(a.local.nombre)} vs ${esc(a.rival.nombre)}</p>` : ''}
+        ${jugado || a.suspendido ? '' : mio ? `
+          <button data-action="vs-bajarme" data-id="${id}" class="${BTN_SEC} w-full mt-3">Me bajo</button>`
+        : lado ? `
+          <button data-action="vs-anotarme" data-id="${id}" class="${BTN_OK} w-full mt-3 py-3 text-base">${ic('user-plus')} Me anoto con ${esc(nombreLado(a, lado))}</button>`
+        : `<p class="text-xs text-slate-400 text-center mt-3">Este amistoso es entre ${esc(a.local.nombre)} y ${esc(a.rival.nombre)}. Si querés jugar, pedile a un admin que te anote.</p>`}
+        ${jugado ? '' : `<button data-action="vs-copiar" data-id="${id}" class="${BTN_BLANCO} w-full mt-2 text-sm">${ic('copy')} Copiar invitación para WhatsApp</button>
+        <p class="text-[11px] text-slate-500 text-center mt-1">Mandala a los dos grupos: cada uno se anota de su lado. Nadie entra al grupo del otro.</p>`}
+        ${admin ? `
+          <div class="flex flex-wrap justify-center gap-1.5 mt-3 pt-3 border-t border-slate-800">
+            ${jugado ? '' : boton('vs-editar', 'calendar', 'Fecha y cancha')}
+            ${jugado ? '' : boton('vs-invitado', 'user-plus', 'Anotar a alguien')}
+            ${jugado || pasado || completo ? boton('vs-resultado', 'pencil', jugado ? 'Corregir resultado' : '¿Cómo salió?', `${BTN_CHIP} !bg-emerald-500 !text-slate-950`) : ''}
+            ${jugado ? '' : boton('vs-suspender', a.suspendido ? 'repeat' : 'ban', a.suspendido ? 'Se juega' : 'Suspender')}
+            ${D.misGrupos?.[a.local.gid]?.admins?.includes(miUid()) ? boton('vs-borrar', 'trash-2', 'Borrar', `${BTN_CHIP} hover:!text-red-300`) : ''}
+          </div>` : ''}
+      </div>
+    </div>`;
+}
+
+// Historial contra un rival, desde mi lado: jugados, ganados, empates, perdidos, goles y los últimos.
+function fichaVs(lista) {
+  const f = { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, ult: [], ultimo: null };
+  for (const { a, lado } of [...lista].sort((x, y) => (y.a.fecha || '').localeCompare(x.a.fecha || '') || y.a.ts - x.a.ts)) {
+    const nos = lado === 'A' ? a.resultado.ga : a.resultado.gb, ellos = lado === 'A' ? a.resultado.gb : a.resultado.ga;
+    const res = nos > ellos ? 'G' : nos < ellos ? 'P' : 'E';
     f.pj++;
     f[res.toLowerCase()]++;
-    if (goles) { f.gf += goles[0]; f.gc += goles[1]; }
+    f.gf += nos; f.gc += ellos;
     if (f.ult.length < 5) f.ult.push(res);
-    if (!f.ultimo) f.ultimo = { fecha: x.fecha, res, nos: goles ? goles[0] : null, ellos: goles ? goles[1] : null };
+    if (!f.ultimo) f.ultimo = { fecha: a.fecha, res, nos, ellos };
   }
   return f;
 }
 const bolitaRes = l => `<span class="w-5 h-5 rounded-full ${{ G: 'bg-emerald-500', E: 'bg-slate-500', P: 'bg-red-500' }[l]} text-[10px] font-black text-white grid place-items-center">${l}</span>`;
-// Con nombres (en el grupo del amistoso, que lo ven los dos) dice quién gana la serie.
-const fraseRival = (f, n) => !f?.pj ? '' : f.g > f.p ? (n ? `🔥 ${esc(n[0])} gana la serie ${f.g} a ${f.p}` : `🔥 Van ganando ${f.g} a ${f.p}`)
-  : f.g < f.p ? (n ? `🔥 ${esc(n[1])} gana la serie ${f.p} a ${f.g}` : `😤 Ellos van ganando ${f.p} a ${f.g}`) : '🤝 Serie empatada';
-function tablaFicha(f, nombres) {
-  if (!f?.pj) return '<p class="text-sm text-slate-400 text-center mt-3">Todavía no jugaron. Cuando carguen el resultado, acá queda el historial.</p>';
+const fraseRival = f => !f?.pj ? '' : f.g > f.p ? `🔥 Van ganando ${f.g} a ${f.p}` : f.g < f.p ? `😤 Ellos van ganando ${f.p} a ${f.g}` : '🤝 Serie empatada';
+function tablaFicha(f) {
   return `
     <div class="grid grid-cols-4 gap-1.5 mt-3 text-center">
       ${[['Jugados', f.pj, ''], ['Ganados', f.g, 'text-emerald-300'], ['Empates', f.e, 'text-slate-300'], ['Perdidos', f.p, 'text-red-300']].map(([l, v, c]) => `
@@ -3832,92 +3934,178 @@ function tablaFicha(f, nombres) {
     </div>
     <div class="flex items-center justify-between gap-2 mt-3 text-sm">
       <span class="flex items-center gap-1">${f.ult.map(bolitaRes).join('')}</span>
-      ${f.ultimo ? `<span class="text-slate-400 text-xs">Último: ${fechaCorta(f.ultimo.fecha)}${f.ultimo.nos != null ? ` · <b class="text-white font-mono">${f.ultimo.nos}-${f.ultimo.ellos}</b>` : ''}</span>` : ''}
+      ${f.ultimo ? `<span class="text-slate-400 text-xs">Último: ${f.ultimo.fecha ? fechaCorta(f.ultimo.fecha) + ' · ' : ''}<b class="text-white font-mono">${f.ultimo.nos}-${f.ultimo.ellos}</b></span>` : ''}
     </div>
-    <p class="text-center font-black mt-3">${fraseRival(f, nombres)}</p>`;
+    <p class="text-center font-black mt-3">${fraseRival(f)}</p>`;
 }
 
-// El admin (que está en los dos grupos) trae el historial y la próxima fecha de cada rival, y suma
-// a los locales nuevos para que salgan de este lado. Una vez por rival y por sesión.
-const rivalesLeidos = new Set();
-async function sincronizarAmistosos() {
-  if (!esAdmin()) return;
-  const mios = new Set((D.perfil.grupos || []).map(g => g.id)), locales = Object.keys(D.miembros);
-  for (const a of rivales()) {
-    if (rivalesLeidos.has(a.gid) || !mios.has(a.gid)) continue;
-    rivalesLeidos.add(a.gid);
-    try {
-      const g = (await F.getDoc(refGrupo(a.gid))).data();
-      if (!g?.amistoso) continue;
-      const todos = [...new Set([...(g.amistoso.locales || []), ...locales])];
-      if (g.admins?.includes(miUid()) && todos.length > (g.amistoso.locales || []).length) await F.updateDoc(refGrupo(a.gid), { 'amistoso.locales': todos });
-      const rs = (await F.getDocs(F.query(colResultados(a.gid), F.orderBy('fecha', 'desc'), F.limit(30)))).docs.map(d => d.data());
-      const ficha = fichaRival(rs, todos);
-      const prox = g.partido?.fecha && g.partido.fecha >= hoyArg() ? { fecha: g.partido.fecha, cuando: g.partido.cuando || '' } : null;
-      if (JSON.stringify([ficha, prox]) !== JSON.stringify([a.ficha ?? null, a.prox ?? null])) {
-        await actualizarGrupo(s => { const x = (s.amistosos || []).find(y => y.gid === a.gid); if (x) Object.assign(x, { ficha, prox }); });
-      }
-    } catch (e) { console.warn(e); }
+// Los rivales con los que ya jugamos, cada uno con su historial y la revancha.
+function fichasRivales() {
+  const por = {};
+  for (const x of rivales()) {
+    const a = D.vs[x.id];
+    if (!a || !vsJugado(a)) continue;
+    const otro = x.lado === 'B' ? a.local : a.rival, k = otro.nombre.toLowerCase();
+    (por[k] ||= { nombre: otro.nombre, gid: otro.gid, lista: [] }).lista.push({ a, lado: x.lado || 'A' });
   }
+  return Object.values(por).map(r => card(`
+    <div class="rounded-2xl bg-slate-950/40 py-3">${versus({ color: COLOR_VS.A, nombre: D.grupo.nombre }, { color: COLOR_VS.B, nombre: r.nombre }, 46)}</div>
+    ${tablaFicha(fichaVs(r.lista))}
+    ${esAdmin() ? `<button data-action="vs-revancha" data-nombre="${esc(r.nombre)}" data-gid="${esc(r.gid || '')}" class="${BTN_OK} w-full mt-3">${ic('repeat')} Armar la revancha</button>` : ''}`)).join('');
 }
 
-// En el grupo del amistoso: el link para que se sumen los de los dos grupos.
-function tarjetaAmistoso() {
-  const a = D.grupo.amistoso;
-  if (!a) return '';
-  return cancha(`
-    <p class="text-center text-[11px] font-black uppercase tracking-[.25em] text-amber-200">Amistoso</p>
-    <div class="mt-3">${versus({ color: '#ef4444', nombre: a.local }, { color: '#0ea5e9', nombre: a.rival })}</div>
-    ${D.resultados.length ? `<div class="rounded-2xl bg-slate-950/50 p-3 mt-3">${tablaFicha(fichaRival(D.resultados, a.locales || []), [a.local, a.rival])}</div>` : ''}
-    ${esAdmin() && yaSeJugo() ? `
-      <button data-action="revancha" class="${BTN_BLANCO} w-full mt-3 py-3">${ic('repeat')} Armar la revancha</button>
-      <p class="text-xs text-white/75 text-center mt-1.5">Se vacía la lista y ponés la fecha nueva. Mismo link, mismo grupo.</p>`
-    : `<p class="text-sm text-white/85 text-center mt-3">Pasale el link a los dos grupos: entran directo y se anotan como siempre. Los equipos salen grupo contra grupo.</p>
-    <button data-action="copiar-amistoso" class="${BTN_BLANCO} w-full mt-3 text-sm">${ic('copy')} Copiar invitación para WhatsApp</button>`}`);
-}
-const yaSeJugo = () => { const p = D.grupo.partido; return !p.fecha || p.fecha < hoyArg() || fasePartido() === 'terminado'; };
-
-// En el grupo de origen: la ficha de un rival (historial, próxima fecha y acceso).
-function tarjetaRival(a) {
-  const adentro = (D.perfil.grupos || []).some(g => g.id === a.gid), admin = esAdmin();
+// Formulario para armar un amistoso (solo admin). Con revancha viene con el rival puesto.
+function formAmistoso() {
+  const rev = ui.vsRevancha;
   return card(`
-    <div class="relative rounded-2xl bg-slate-950/40 py-3">
-      ${admin ? `<button data-action="quitar-amistoso" data-gid="${a.gid}" title="Quitar este rival" aria-label="Quitar este rival" class="absolute top-2 right-2 ${BTN_CHIP} !bg-transparent hover:!text-red-300">${ic('x')}</button>` : ''}
-      ${versus({ color: '#ef4444', nombre: D.grupo.nombre }, { color: '#0ea5e9', nombre: a.rival }, 46)}
-    </div>
-    ${tablaFicha(a.ficha)}
-    ${a.prox ? `<p class="flex items-center justify-center gap-1.5 text-sm text-amber-200 mt-3">${ic('calendar')} Próximo: <b>${fechaCorta(a.prox.fecha)}${a.prox.cuando ? ' · ' + esc(a.prox.cuando) : ''}</b></p>` : ''}
-    <button data-action="${adentro ? 'cambiar-grupo' : 'sumarme-amistoso'}" data-gid="${a.gid}" class="${adentro && !a.prox && admin ? BTN_OK : adentro ? BTN_SEC : BTN_OK} w-full mt-3">
-      ${!adentro ? `${ic('user-plus')} Sumarme al amistoso` : !a.prox && admin ? `${ic('repeat')} Armar la revancha` : `Ir al amistoso ${ic('arrow-right')}`}
-    </button>`);
+    <div id="form-amistoso" class="rounded-2xl bg-slate-950/40 py-3">${versus({ color: COLOR_VS.A, nombre: D.grupo.nombre }, { color: COLOR_VS.B, nombre: rev?.nombre || 'Otro grupo' })}</div>
+    <h2 class="text-xl font-black text-center mt-3">${rev ? `Revancha contra ${esc(rev.nombre)}` : 'Armar un amistoso'}</h2>
+    <p class="text-sm text-slate-400 text-center mt-1">¿Les faltan jugadores o quieren medirse con otro grupo? Ustedes de un lado, ellos del otro.</p>
+    <ol class="mt-3 space-y-2 text-sm">
+      ${['Poné contra quién, cuándo y dónde', 'Copiá la invitación y mandala a los dos grupos', 'Cada uno se anota de su lado y ven cómo se completa'].map((txt, k) => `
+        <li class="flex items-center gap-2.5"><span class="w-7 h-7 shrink-0 rounded-full bg-amber-400 text-slate-950 text-sm font-black grid place-items-center">${k + 1}</span>${txt}</li>`).join('')}
+    </ol>
+    <form data-form="amistoso" class="mt-4 space-y-2">
+      <input type="hidden" name="rgid" value="${esc(rev?.gid || '')}">
+      <input id="a-rival" name="rival" required maxlength="30" value="${esc(rev?.nombre || '')}" placeholder="¿Contra quién? (ej: Los del laburo)" class="${INPUT}">
+      ${camposVs({ cupo: 5 })}
+      <button class="${BTN_OK} w-full py-3 text-base">${ic('swords')} Armar amistoso</button>
+      ${rev ? '<button type="button" data-action="vs-revancha-no" class="w-full py-2 text-sm text-slate-400">Otro rival</button>' : ''}
+    </form>`);
+}
+const camposVs = (a = {}) => `
+  <div class="grid grid-cols-[1fr_6.5rem] gap-2">
+    <label class="text-sm text-slate-400">Fecha<input id="vs-fecha" name="fecha" type="date" value="${esc(a.fecha || '')}" class="${INPUT} mt-1"></label>
+    <label class="text-sm text-slate-400">Hora<input id="vs-hora" name="hora" value="${esc(a.hora || '')}" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} mt-1"></label>
+  </div>
+  <label class="block text-sm text-slate-400">Dónde<input id="vs-lugar" name="lugar" value="${esc(a.lugar || '')}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
+  <label class="block text-sm text-slate-400">Jugadores por lado
+    <select id="vs-cupo" name="cupo" class="${INPUT} mt-1">
+      ${[[5, 'Fútbol 5 (5 por lado)'], [6, '6 por lado'], [7, 'Fútbol 7 (7 por lado)'], [8, 'Fútbol 8 (8 por lado)'], [9, '9 por lado'], [11, 'Fútbol 11 (11 por lado)']].map(([n, t]) => `<option value="${n}" ${n === (a.cupo || 5) ? 'selected' : ''}>${t}</option>`).join('')}
+    </select>
+  </label>`;
+const datosFormVs = f => ({
+  fecha: f.get('fecha') || '', hora: (f.get('hora') || '').trim().slice(0, 5), lugar: (f.get('lugar') || '').trim().slice(0, 60),
+  cupo: [5, 6, 7, 8, 9, 11].includes(+f.get('cupo')) ? +f.get('cupo') : 5,
+});
+
+async function armarAmistoso(f) {
+  const rival = f.get('rival').trim().slice(0, 30);
+  if (!rival) return toast('Escribí contra quién juegan');
+  if (esInsulto(rival)) return toast(MSJ_INSULTO);
+  const id = genId(20), ts = Date.now();
+  const rgid = ui.vsRevancha && f.get('rgid') && f.get('rgid') !== D.gid ? f.get('rgid') : null;
+  const datos = {
+    local: { gid: D.gid, nombre: D.grupo.nombre.slice(0, 60) }, rival: { gid: rgid, nombre: rival },
+    creador: miUid(), admins: [miUid(), ...D.grupo.admins.filter(x => x !== miUid())].slice(0, 6),
+    ...datosFormVs(f), suspendido: false, resultado: null, ts,
+  };
+  const ok = await act(async () => {
+    await F.setDoc(refVs(id), datos);
+    await F.updateDoc(refGrupo(D.gid), { amistosos: [...rivales(), { id, rival, lado: 'A', ts }].slice(-20) });
+    evento('crear_amistoso');
+  }, '⚔️ ¡Amistoso armado! Ahora copiá la invitación y mandala');
+  if (ok) { ui.vsRevancha = null; seguirVs(id); scrollTo(0, 0); }
+  return ok;
 }
 
-// Formulario para armar un amistoso con otro grupo (solo admin).
-const formAmistoso = (otro = false) => card(`
-  <div class="rounded-2xl bg-slate-950/40 py-3">${versus({ color: '#ef4444', nombre: D.grupo.nombre }, { color: '#0ea5e9', nombre: otro ? 'Rival nuevo' : 'Otro grupo' })}</div>
-  <h2 class="text-xl font-black text-center mt-3">${otro ? 'Jugar contra otro rival' : 'Amistoso con otro grupo'}</h2>
-  <p class="text-sm text-slate-400 text-center mt-1">¿Les faltan jugadores? Inviten a otro grupo (los del laburo, los del club) y jueguen ustedes contra ellos.</p>
-  <ol class="mt-3 space-y-2 text-sm">
-    ${['Escribí contra quién juegan', 'Pasá el link por WhatsApp a los dos grupos', 'Se anotan y los equipos salen grupo contra grupo'].map((txt, k) => `
-      <li class="flex items-center gap-2.5"><span class="w-7 h-7 shrink-0 rounded-full bg-amber-400 text-slate-950 text-sm font-black grid place-items-center">${k + 1}</span>${txt}</li>`).join('')}
-  </ol>
-  <form data-form="amistoso" class="mt-4 space-y-2">
-    <input id="a-rival" name="rival" required maxlength="30" placeholder="¿Contra quién? (ej: Los del laburo)" class="${INPUT}">
-    <button class="${BTN_OK} w-full py-3 text-base">${ic('swords')} Armar amistoso</button>
-  </form>`);
-
-function vistaAmistoso() {
-  const lista = [...rivales()].sort((a, b) => (a.prox ? 0 : 1) - (b.prox ? 0 : 1) || b.ts - a.ts);
-  setTimeout(sincronizarAmistosos);
+// Página del link de invitación (#/vs/id): el amistoso y, si sos admin de un grupo, sumarlo a tu grupo.
+function vistaVs(id) {
+  seguirVs(id);
+  const a = D.vs[id];
+  const volver = `<a href="#/inicio" class="${BTN_CHIP} !h-10 !px-2.5 !text-sm">${ic('arrow-left')} Inicio</a>`;
+  if (a === null) return `${volver}${card('<p class="text-center text-sm text-slate-400 py-4">Este amistoso ya no existe. Capaz lo borraron.</p>')}`;
+  if (a === undefined) return `${volver}${card('<p class="text-sm text-slate-400">Cargando el amistoso…</p>')}`;
+  const mios = D.perfil.grupos || [];
+  const enMiGrupo = mios.find(g => (g.id === a.local.gid || g.id === a.rival.gid) && D.misGrupos[g.id]?.amistosos?.some(x => x.id === id));
+  // Admin de un grupo que todavía no es parte del amistoso: lo puede sumar como el rival.
+  const puedoSumar = !enMiGrupo && mios.filter(g => g.id !== a.local.gid && (!a.rival.gid || a.rival.gid === g.id) && D.misGrupos[g.id]?.admins?.includes(miUid()));
   return `
-    ${cancha(`
+    ${volver}
+    ${tarjetaVs(id)}
+    ${enMiGrupo ? `<button data-action="vs-ir" data-gid="${enMiGrupo.id}" class="${BTN_SEC} w-full">Verlo en ${esc(D.misGrupos[enMiGrupo.id]?.nombre || enMiGrupo.nombre)} ${ic('arrow-right')}</button>` : ''}
+    ${puedoSumar?.length ? card(`
+      <h2 class="text-lg font-black">${ic('users', 'text-sky-300')} ¿Son ${esc(a.rival.nombre)}?</h2>
+      <p class="text-sm text-slate-400 mt-1">Sumalo a tu grupo: aparece ahí, los tuyos se anotan con un toque y ves el historial contra ${esc(a.local.nombre)}. Ellos no ven nada de tu grupo.</p>
+      <div class="space-y-2 mt-3">
+        ${puedoSumar.map(g => `<button data-action="vs-vincular" data-id="${id}" data-gid="${g.id}" class="${BTN_OK} w-full">${ic('plus')} Sumarlo a ${esc(D.misGrupos[g.id]?.nombre || g.nombre)}</button>`).join('')}
+      </div>`) : ''}`;
+}
+
+// En el grupo: los amistosos que vienen, el historial con cada rival y, para el admin, armar uno nuevo.
+let limpiandoVs = '';
+function vistaAmistoso() {
+  const ids = rivales().map(x => x.id);
+  ids.forEach(seguirVs);
+  const vienen = ids.filter(id => D.vs[id] !== null && !(D.vs[id] && vsJugado(D.vs[id])))
+    .sort((x, y) => (D.vs[x]?.fecha || '9').localeCompare(D.vs[y]?.fecha || '9'));
+  // Si lo borraron del otro lado, sale de la lista.
+  const borrados = ids.filter(id => D.vs[id] === null).join();
+  if (esAdmin() && borrados && limpiandoVs !== borrados) {
+    limpiandoVs = borrados;
+    setTimeout(() => actualizarGrupo(s => { s.amistosos = (s.amistosos || []).filter(x => x.id && D.vs[x.id] !== null); }));
+  }
+  const fichas = fichasRivales();
+  return `
+    ${vienen.length ? '' : cancha(`
       <div class="text-center py-1">
-        <div class="flex items-center justify-center gap-1">${camiseta('#ef4444', 44)}<b class="text-amber-300 text-sm">VS</b>${camiseta('#0ea5e9', 44)}</div>
+        <div class="flex items-center justify-center gap-1">${camiseta(COLOR_VS.A, 44)}<b class="text-amber-300 text-sm">VS</b>${camiseta(COLOR_VS.B, 44)}</div>
         <h2 class="text-2xl font-black text-white mt-2">Amistosos</h2>
         <p class="text-sm text-white/85 mt-1">Contra otros grupos. Cada rival queda con su historial.</p>
       </div>`)}
-    ${lista.map(tarjetaRival).join('')}
-    ${esAdmin() ? formAmistoso(lista.length > 0) : lista.length ? '' : card('<p class="text-sm text-slate-400">Todavía no hay amistosos.</p>')}`;
+    ${vienen.map(tarjetaVs).join('')}
+    ${fichas ? `<h2 class="text-sm font-black uppercase tracking-wide text-slate-400 pt-2">Historial con cada rival</h2>${fichas}` : ''}
+    ${esAdmin() ? formAmistoso() : vienen.length || fichas ? '' : card('<p class="text-sm text-slate-400">Todavía no hay amistosos. Los arma un admin.</p>')}`;
+}
+
+// Modales del amistoso (fecha y cancha, resultado, anotar a alguien sin cuenta).
+function modalVs() {
+  const id = ui.vsId, a = D.vs[id];
+  if (!ui.modal?.startsWith('vs-')) return '';
+  if (!a || !adminVs(a)) { ui.modal = null; return ''; }
+  const cabeza = t => `
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <h2 class="text-lg font-bold">${t}</h2>
+      <button data-action="cerrar-modal" aria-label="Cerrar" class="${BTN_ICONO} !w-9 !h-9">${ic('x')}</button>
+    </div>`;
+  if (ui.modal === 'vs-editar') return modal(`
+    ${cabeza(`${ic('calendar', 'text-emerald-400')} Fecha y cancha`)}
+    <form data-form="vs-editar" class="space-y-3">${camposVs(a)}<button class="${BTN_OK} w-full">${ic('save')} Guardar</button></form>`);
+  if (ui.modal === 'vs-resultado') {
+    const r = a.resultado || {}, gol = (n, l, v) => `
+      <label class="flex-1 min-w-0 flex flex-col items-center gap-1.5">
+        ${camiseta(COLOR_VS[l], 40, inicial(nombreLado(a, l)))}
+        <span class="text-sm font-bold truncate max-w-full">${esc(nombreLado(a, l))}</span>
+        <input name="${n}" type="number" min="0" max="99" inputmode="numeric" required value="${v ?? ''}" class="${INPUT} text-center text-3xl font-black !py-3">
+      </label>`;
+    return modal(`
+      ${cabeza('¿Cómo salió?')}
+      <form data-form="vs-resultado" class="space-y-3">
+        <div class="flex items-end gap-3">${gol('ga', 'A', r.ga)}<span class="pb-5 font-black text-slate-500">-</span>${gol('gb', 'B', r.gb)}</div>
+        <p class="text-xs text-slate-400 text-center">Queda en el historial de los dos grupos.</p>
+        <div class="flex gap-2">
+          ${a.resultado ? `<button type="button" data-action="vs-sin-resultado" class="${BTN_SEC} text-sm">${ic('trash-2')}</button>` : ''}
+          <button class="${BTN_OK} flex-1">${ic('save')} Guardar</button>
+        </div>
+      </form>`);
+  }
+  if (ui.modal === 'vs-invitado') return modal(`
+    ${cabeza(`${ic('user-plus', 'text-emerald-400')} Anotar a alguien`)}
+    <p class="text-sm text-slate-400 mb-3">Para alguien que no tiene cuenta. Elegí de qué lado juega.</p>
+    <form data-form="vs-invitado" class="space-y-3">
+      <input name="nombre" required maxlength="30" placeholder="Nombre" class="${INPUT}">
+      <div class="grid grid-cols-2 gap-2">
+        ${['A', 'B'].map((l, k) => `
+          <label class="cursor-pointer min-w-0">
+            <input type="radio" name="lado" value="${l}" ${k ? '' : 'checked'} class="peer sr-only">
+            <span class="flex flex-col items-center gap-1 rounded-2xl border-2 border-slate-700 bg-slate-800 p-2 peer-checked:border-emerald-500 peer-checked:bg-emerald-500/10">
+              ${camiseta(COLOR_VS[l], 30, inicial(nombreLado(a, l)))}<span class="text-sm font-bold truncate max-w-full">${esc(nombreLado(a, l))}</span>
+            </span>
+          </label>`).join('')}
+      </div>
+      <button class="${BTN_OK} w-full">Anotar</button>
+    </form>`);
+  return '';
 }
 
 // ---------------- Árbitro del partido del grupo ----------------
@@ -3987,10 +4175,17 @@ function tarjetaModos() {
 function cartelera() {
   if (D.grupo.amistoso) return '';
   const t = D.grupo.torneo, tab = tabGrupo(), p = D.grupo.partido;
-  const prox = rivales().filter(x => x.prox).sort((x, y) => x.prox.fecha.localeCompare(y.prox.fecha))[0];
+  const prox = rivales().map(x => D.vs[x.id] ? { id: x.id, a: D.vs[x.id] } : null)
+    .filter(x => x && !vsJugado(x.a) && !x.a.suspendido && (!x.a.fecha || x.a.fecha >= hoyArg()))
+    .sort((x, y) => (x.a.fecha || '9').localeCompare(y.a.fecha || '9'))[0];
   const items = [['partido', '#/', '<span class="text-2xl leading-none">⚽</span>', 'Del grupo', p.fecha ? `${fechaCorta(p.fecha)}${p.cuando ? ' · ' + esc(p.cuando) : ''}` : 'Sin fecha']];
   if (t && (t.estado !== 'armando' || esAdmin())) items.push(['torneo', '#/torneo', `<span class="text-amber-300">${ic('trophy', '!w-6 !h-6')}</span>`, t.nombre, estadoTorneo(t)]);
-  if (rivales().length) items.push(['amistoso', '#/amistoso', camiseta('#0ea5e9', 26), prox ? `vs ${prox.rival}` : 'Amistosos', prox ? `${fechaCorta(prox.prox.fecha)}${prox.prox.cuando ? ' · ' + esc(prox.prox.cuando) : ''}` : `${rivales().length} ${rivales().length === 1 ? 'rival' : 'rivales'}`]);
+  if (prox) {
+    const P = planillaVs(prox.id), yo = (D.vsAnot[prox.id] || []).some(x => x.id === miUid());
+    const falta = Object.values(P).reduce((n, l) => n + Math.max(0, prox.a.cupo - l.tit.length), 0);
+    const otro = rivales().find(x => x.id === prox.id)?.rival || prox.a.rival.nombre;
+    items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), `vs ${otro}`, `${prox.a.fecha ? fechaCorta(prox.a.fecha) + ' · ' : ''}${yo ? '✅ anotado' : falta ? `faltan ${falta}` : 'completo'}`]);
+  } else if (rivales().length) items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), 'Amistosos', 'Historial']);
   if (items.length < 2) return '';
   return `
     <div class="grid ${items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2">
@@ -4800,7 +4995,11 @@ function vistaAdmin() {
         </div>
       </div>`)}
     ${tarjetaPendientes()}
-    ${panelAdmin(derivar())}`}
+    ${panelAdmin(derivar())}
+    ${card(`
+      <h2 class="text-base font-bold">${ic('trash-2', 'text-red-400')} Borrar el grupo</h2>
+      <p class="text-xs text-slate-400 mt-1">Se borra para todos: la lista, los jugadores y la historia. No se puede deshacer.</p>
+      <button data-action="borrar-grupo" class="${BTN} w-full mt-3 bg-red-950/60 hover:bg-red-900/70 text-red-200 text-sm">${ic('trash-2')} Borrar ${esc(D.grupo.nombre)}</button>`)}`}
     ${pie()}`;
 }
 
@@ -5708,7 +5907,7 @@ function renderModal() {
   const m = D.mvp;
   // Se abre solo una vez por votación si todavía no votaste.
   const clave = m && `${LS}mvp_visto_${D.gid}_${m.id}`;
-  const enPrincipal = !/^#\/(jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil|grupos|calendario)/.test(location.hash);
+  const enPrincipal = !/^#\/(vs|jugador|grupos|reglas|ayuda|terminos|privacidad|clave|verificar|admin|inicio|perfil|grupos|calendario)/.test(location.hash);
   let visto = false;
   try { visto = !!sessionStorage.getItem(clave); } catch {}
   if (!ui.modal && m && estadoMvp() === 'abierta' && m.miVoto === null && enPrincipal && !visto) {
@@ -6090,7 +6289,7 @@ function render() {
   renderVistas();
   pintar($('#nav'), navInferior());
   const listo = D.user && D.perfil && D.grupo && D.miembros?.[miUid()];
-  pintar($('#modal'), listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : D.perfil && ui.modal === 'ficha' ? modalFicha() : D.perfil && ui.modal === 'instalar' ? modalInstalar() : '');
+  pintar($('#modal'), modalVs() || (listo ? renderModal() : D.perfil && ui.modal === 'avisos' ? modalAvisos() : D.perfil && ui.modal === 'foto' ? modalFoto() : D.perfil && ui.modal === 'ficha' ? modalFicha() : D.perfil && ui.modal === 'instalar' ? modalInstalar() : ''));
   activarCargaPerezosa();
   sumarGoles();
   filtrarCuadros();
@@ -6119,6 +6318,8 @@ function renderVistas() {
   if (!D.perfil) return pintar(el, vistaCompletar());
   const actualizar = pendienteActualizar();
   if (actualizar) return pintar(el, actualizar === 'cargando' ? cargando() : vistaActualizar());
+  const vs = location.hash.match(/^#\/vs\/([A-Za-z0-9]+)$/);
+  if (vs) return pintar(el, vistaVs(vs[1]));
   if (['#/inicio', '#/perfil', '#/grupos', '#/calendario'].includes(location.hash) || !D.gid) return pintar(el, vistaInicio());
   if (!D.grupo || !D.miembros || !D.miembros[miUid()]) return pintar(el, cargando());
   if (location.hash === '#/admin' && esAdmin()) return pintar(el, vistaAdmin());
@@ -6272,28 +6473,74 @@ const acciones = {
   },
   copiar: () => copiar(mensajeWsp()),
   'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
-  'copiar-amistoso': () => copiar(mensajeAmistoso(), '📋 Invitación copiada. Pegala en los dos grupos'),
   'copiar-torneo': () => copiar(mensajeTorneo(D.grupo.torneo), '📋 Tabla copiada. Pegala en el grupo'),
-  'sumarme-amistoso': async ({ gid }) => {
-    const a = rivales().find(x => x.gid === gid);
-    if (a && await unirse(a.gid, a.codigo)) location.hash = '#/';
+  // ---- Amistosos ----
+  'vs-copiar': ({ id }) => D.vs[id] && copiar(mensajeVs(id), '📋 Invitación copiada. Pegala en los dos grupos'),
+  'vs-anotarme': ({ id }) => {
+    const a = D.vs[id], lado = a && miLadoVs(a), p = D.perfil;
+    if (!lado) return;
+    act(() => F.setDoc(F.doc(colVsAnot(id), miUid()), { lado, usuario: p.usuario, foto: p.foto || '', posicion: p.posicion || 'comodin', ts: Date.now() }), `✅ Anotado con ${nombreLado(a, lado)}`);
   },
-  'quitar-amistoso': ({ gid }) => {
-    const a = rivales().find(x => x.gid === gid);
-    if (a && confirm(`¿Quitar a ${a.rival} de la lista? Se pierde el historial acá; el grupo del amistoso sigue existiendo.`)) actualizarGrupo(s => { s.amistosos = (s.amistosos || []).filter(x => x.gid !== gid); });
+  'vs-bajarme': ({ id }) => { if (confirm('¿Te bajás del amistoso?')) act(() => F.deleteDoc(F.doc(colVsAnot(id), miUid())), 'Te bajaste del amistoso'); },
+  'vs-sacar': ({ id, u }) => {
+    const x = (D.vsAnot[id] || []).find(y => y.id === u);
+    if (x && confirm(`¿Sacar a ${x.usuario} del amistoso?`)) act(() => F.deleteDoc(F.doc(colVsAnot(id), u)), `${x.usuario} quedó afuera`);
   },
-  // En el grupo del amistoso: lista nueva para la revancha y a poner la fecha.
-  revancha: async () => {
-    if (!confirm('¿Armar la revancha? Se vacía la lista y los equipos, y ponés la fecha nueva. El resultado anterior queda en el historial.')) return;
-    // Como en "Nueva fecha": la votación del mejor queda armada con los que jugaron.
-    const f = D.grupo.partido.fecha;
-    if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
-    const ok = await actualizarGrupo(s => {
-      s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.avisos = []; s.publico = [];
-      delete s.partido.suspendido;
-      s.partido.fecha = '';
-    }, '⚔️ ¡Revancha! Poné la fecha y pasá el link');
-    if (ok) { ui.modal = 'fecha'; render(); }
+  'vs-editar': ({ id }) => { ui.vsId = id; ui.modal = 'vs-editar'; render(); },
+  'vs-resultado': ({ id }) => { ui.vsId = id; ui.modal = 'vs-resultado'; render(); },
+  'vs-invitado': ({ id }) => { ui.vsId = id; ui.modal = 'vs-invitado'; render(); },
+  'vs-sin-resultado': () => { const id = ui.vsId; ui.modal = null; render(); act(() => F.updateDoc(refVs(id), { resultado: null }), 'Resultado borrado'); },
+  'vs-suspender': ({ id }) => {
+    const a = D.vs[id];
+    if (a && (a.suspendido || confirm('¿Suspender el amistoso? Lo ven los dos grupos. Después lo podés volver a poner.'))) act(() => F.updateDoc(refVs(id), { suspendido: !a.suspendido }), a.suspendido ? '⚽ ¡Se juega!' : '🚫 Amistoso suspendido');
+  },
+  'vs-borrar': async ({ id }) => {
+    const a = D.vs[id];
+    if (!a || !confirm(`¿Borrar el amistoso contra ${a.rival.nombre}? Se borra para los dos grupos, con la lista y el resultado. No se puede deshacer.`)) return;
+    await act(async () => {
+      await Promise.all((D.vsAnot[id] || []).map(x => F.deleteDoc(F.doc(colVsAnot(id), x.id))));
+      await F.deleteDoc(refVs(id));
+      const g = D.misGrupos[a.local.gid];
+      if (g) await F.updateDoc(refGrupo(a.local.gid), { amistosos: (g.amistosos || []).filter(x => x.id && x.id !== id) });
+    }, '🗑️ Amistoso borrado');
+  },
+  'vs-revancha': ({ nombre, gid }) => {
+    ui.vsRevancha = { nombre, gid };
+    render();
+    $('#form-amistoso')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+  'vs-revancha-no': () => { ui.vsRevancha = null; render(); },
+  'vs-ir': ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = '#/amistoso'; },
+  // Un admin del otro grupo lo suma a su grupo: queda como admin del amistoso y lo ve todo su grupo.
+  'vs-vincular': async ({ id, gid }) => {
+    const a = D.vs[id];
+    if (!a) return;
+    const ok = await act(async () => {
+      if (!a.admins.includes(miUid())) await F.updateDoc(refVs(id), { rival: { gid, nombre: a.rival.nombre }, admins: [...a.admins, miUid()] });
+      await F.runTransaction(db, async tx => {
+        const g = (await tx.get(refGrupo(gid))).data();
+        const lista = (g.amistosos || []).filter(x => x.id);
+        if (!lista.some(x => x.id === id)) tx.update(refGrupo(gid), { amistosos: [...lista, { id, rival: a.local.nombre, lado: 'B', ts: Date.now() }].slice(-20) });
+      });
+    }, `⚔️ Listo: el amistoso está en ${D.misGrupos[gid]?.nombre || 'tu grupo'}`);
+    if (ok) { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = '#/amistoso'; }
+  },
+  // ---- Borrar el grupo (solo admin) ----
+  'borrar-grupo': async () => {
+    const gid = D.gid, nombre = D.grupo.nombre;
+    const escrito = prompt(`Esto borra "${nombre}" para todos: la lista, los jugadores y la historia. No se puede deshacer.\n\nPara confirmar, escribí BORRAR`);
+    if (escrito == null) return;
+    if (escrito.trim().toUpperCase() !== 'BORRAR') return toast('No se borró: tenías que escribir BORRAR');
+    borrandoGrupo = gid;
+    const ok = await act(async () => {
+      const otros = Object.keys(D.miembros).filter(id => id !== miUid());
+      await Promise.allSettled(otros.map(id => F.deleteDoc(F.doc(colMiembros(gid), id))));
+      await F.deleteDoc(refGrupo(gid));
+      if (guardado.get(LS + 'gid') === gid) guardado.set(LS + 'gid', null);
+      await F.updateDoc(refUsuario(miUid()), { grupos: (D.perfil.grupos || []).filter(x => x.id !== gid) });
+    }, `🗑️ ${nombre} se borró`);
+    if (ok) location.hash = '#/inicio';
+    else borrandoGrupo = null;
   },
   // ---- Modos del grupo y árbitro ----
   'modos-ocultar': () => { guardado.set(LS + 'modosOcultos', '1'); toast('Listo. Lo encontrás en Administrar.'); render(); },
@@ -6900,7 +7147,21 @@ const formularios = {
     return ok;
   },
   'crear-grupo': f => esInsulto(f.get('nombre')) ? toast(MSJ_INSULTO) : crearGrupo(f.get('nombre').trim()),
-  amistoso: f => esInsulto(f.get('rival')) ? toast(MSJ_INSULTO) : armarAmistoso(f.get('rival').trim()),
+  amistoso: f => armarAmistoso(f),
+  'vs-editar': f => { const id = ui.vsId; ui.modal = null; return act(() => F.updateDoc(refVs(id), datosFormVs(f)), '💾 Guardado'); },
+  'vs-resultado': f => {
+    const ga = parseInt(f.get('ga')), gb = parseInt(f.get('gb')), id = ui.vsId;
+    if (!(ga >= 0 && ga <= 99 && gb >= 0 && gb <= 99)) return toast('Poné los goles de los dos');
+    ui.modal = null;
+    return act(() => F.updateDoc(refVs(id), { resultado: { ga, gb }, suspendido: false }), '🏁 Resultado guardado');
+  },
+  'vs-invitado': f => {
+    const nombre = f.get('nombre').trim().slice(0, 30), lado = f.get('lado') === 'B' ? 'B' : 'A', id = ui.vsId;
+    if (!nombre) return toast('Escribí el nombre');
+    if (esInsulto(nombre)) return toast(MSJ_INSULTO);
+    ui.modal = null;
+    return act(() => F.setDoc(F.doc(colVsAnot(id), 'inv_' + genId(10)), { lado, usuario: nombre, inv: true, por: miUid(), ts: Date.now() }), `✅ ${nombre} anotado`);
+  },
   arbitro: f => {
     const id = f.get('id'), nombre = id ? jugador(id)?.usuario : f.get('nombre').trim().slice(0, 30);
     if (!nombre) return toast('Elegí a alguien o escribí el nombre');

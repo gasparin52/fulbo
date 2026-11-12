@@ -76,6 +76,72 @@ service cloud.firestore {
       allow read: if logueado() && uid() == u;
     }
 
+    // Amistosos: un partido compartido entre dos grupos (no es un grupo). El id es largo y al azar y hace
+    // de invitación: lo ve quien tenga el link, pero no se pueden listar. Lo arma un admin del grupo local;
+    // un admin del grupo rival lo suma a su grupo y queda como admin del amistoso. Nadie entra al grupo del otro.
+    function amistoso(a) { return get(/databases/$(database)/documents/amistosos/$(a)).data; }
+    function textoCorto(x, n) { return x is string && x.size() <= n; }
+    function datosAmistoso(d) {
+      return d.keys().hasOnly(['local', 'rival', 'creador', 'admins', 'fecha', 'hora', 'lugar', 'cupo', 'suspendido', 'resultado', 'ts'])
+        && d.local.keys().hasOnly(['gid', 'nombre']) && d.local.gid is string && textoCorto(d.local.nombre, 60)
+        && d.rival.keys().hasOnly(['gid', 'nombre']) && (d.rival.gid == null || d.rival.gid is string) && textoCorto(d.rival.nombre, 60)
+        && d.admins is list && d.admins.size() <= 12
+        && textoCorto(d.fecha, 10) && textoCorto(d.hora, 5) && textoCorto(d.lugar, 60)
+        && d.cupo is int && d.cupo >= 3 && d.cupo <= 11
+        && d.suspendido is bool
+        && (d.resultado == null || (d.resultado.keys().hasOnly(['ga', 'gb'])
+          && d.resultado.ga is int && d.resultado.ga >= 0 && d.resultado.ga <= 99
+          && d.resultado.gb is int && d.resultado.gb >= 0 && d.resultado.gb <= 99));
+    }
+    match /amistosos/{a} {
+      allow get: if logueado();
+      allow create: if logueado()
+        && datosAmistoso(request.resource.data)
+        && request.resource.data.creador == uid()
+        && uid() in request.resource.data.admins
+        && esAdmin(request.resource.data.local.gid);
+      // Los admins cambian fecha, cancha, cupo, suspendido y resultado. Un admin del grupo rival lo suma a su grupo.
+      allow update: if logueado() && datosAmistoso(request.resource.data) && (
+          (uid() in resource.data.admins
+            && request.resource.data.local == resource.data.local
+            && request.resource.data.rival == resource.data.rival
+            && request.resource.data.creador == resource.data.creador
+            && request.resource.data.admins == resource.data.admins)
+          || (cambia().hasOnly(['rival', 'admins'])
+            && request.resource.data.rival.nombre == resource.data.rival.nombre
+            && (resource.data.rival.gid == null || resource.data.rival.gid == request.resource.data.rival.gid)
+            && request.resource.data.rival.gid is string
+            && request.resource.data.rival.gid != resource.data.local.gid
+            && esAdmin(request.resource.data.rival.gid)
+            && !(uid() in resource.data.admins)
+            && request.resource.data.admins == resource.data.admins.concat([uid()])));
+      allow delete: if logueado() && esAdmin(resource.data.local.gid);
+
+      // Los anotados de cada lado (A = el grupo local, B = el rival). Cada uno se anota solo del lado de su
+      // grupo; si el rival no tiene grupo en Fulbo, cualquiera con el link se anota del lado B.
+      // Los admins anotan a gente sin cuenta (inv_...) y sacan a cualquiera.
+      match /anotados/{u} {
+        allow read: if logueado();
+        allow create: if logueado()
+          && request.resource.data.lado in ['A', 'B']
+          && request.resource.data.ts is int
+          && (
+            (u == uid()
+              && request.resource.data.keys().hasOnly(['lado', 'usuario', 'foto', 'posicion', 'ts'])
+              && request.resource.data.usuario.lower() + '@fulbo.app' == request.auth.token.email
+              && request.resource.data.foto is string && request.resource.data.foto.size() < 200000
+              && request.resource.data.posicion in ['comodin', 'arquero', 'defensor', 'medio', 'delantero']
+              && ((request.resource.data.lado == 'A' && esMiembro(amistoso(a).local.gid))
+                || (request.resource.data.lado == 'B' && (amistoso(a).rival.gid == null || esMiembro(amistoso(a).rival.gid)))))
+            || (u.matches('inv_[A-Za-z0-9]+')
+              && uid() in amistoso(a).admins
+              && request.resource.data.keys().hasOnly(['lado', 'usuario', 'inv', 'por', 'ts'])
+              && textoCorto(request.resource.data.usuario, 30) && request.resource.data.usuario.size() > 0
+              && request.resource.data.inv == true && request.resource.data.por == uid()));
+        allow delete: if logueado() && (u == uid() || uid() in amistoso(a).admins);
+      }
+    }
+
     match /grupos/{g} {
       // Solo los miembros ven el grupo. Afuera no se ve nada.
       allow read: if esMiembro(g);

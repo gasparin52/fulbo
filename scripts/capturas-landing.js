@@ -100,6 +100,14 @@ window.conTorneoYAmistosos = () => {
     3: { torneo: 1, nombre: 'Muertos FC', colores: ['negro'], diseno: 'lisa' },
   };
   D.torneoResultados = {};
-  D.grupo.amistosos = [{ gid: 'g7', codigo: 'x', rival: 'Los del laburo', ts: Date.now(), prox: { fecha: '2026-11-21', cuando: '10:00' },
-    ficha: { pj: 5, g: 3, e: 1, p: 1, gf: 21, gc: 15, ult: ['G', 'G', 'E', 'P', 'G'], ultimo: { fecha: '2026-11-07', res: 'G', nos: 5, ellos: 3 } } }];
+  // Amistoso compartido con otro grupo (amistosos/{id}): el que viene, con la planilla de cada lado, y los ya jugados.
+  // En la copia, seguirVs() no tiene que suscribirse a nada (window.__demoLocal).
+  const vs = (fecha, resultado) => ({ local: { gid: 'g1', nombre: D.grupo.nombre }, rival: { gid: 'g7', nombre: 'Los del laburo' }, creador: 'u9', admins: ['u9'],
+    fecha, hora: '10:00', lugar: 'Club Ferro', cupo: 5, suspendido: false, resultado, ts: Date.parse(fecha) });
+  const jugados = [['2026-11-07', 5, 3], ['2026-10-31', 4, 4], ['2026-10-24', 2, 3], ['2026-10-17', 6, 2]];
+  D.vs = { prox: vs('2026-11-21', null), ...Object.fromEntries(jugados.map(([f, ga, gb], k) => ['j' + k, vs(f, { ga, gb })])) };
+  const ellos = ['carlitos', 'el_ruso', 'pela', 'chino'];
+  D.vsAnot = { prox: [...ids.slice(0, 5).map((id, k) => ({ id, lado: 'A', usuario: D.miembros[id].usuario, foto: '', ts: k })),
+    ...ellos.map((usuario, k) => ({ id: 'r' + k, lado: 'B', usuario, foto: '', ts: 10 + k }))] };
+  D.grupo.amistosos = Object.keys(D.vs).map(id => ({ id, rival: 'Los del laburo', lado: 'A', ts: D.vs[id].ts }));
 };
