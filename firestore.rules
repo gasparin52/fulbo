@@ -274,6 +274,42 @@ service cloud.firestore {
         allow delete: if esAdmin(g);
       }
 
+      // Nombre, colores y diseño de cada equipo del torneo interno: los elige su capitán o un admin.
+      // El documento se llama como el número del equipo y vale solo para el torneo actual (torneo = creado).
+      match /torneoEquipos/{i} {
+        allow read: if esMiembro(g);
+        allow create, update: if (esAdmin(g) || grupo(g).torneo.equipos[int(i)].get('capitan', '') == uid())
+          && request.resource.data.keys().hasOnly(['torneo', 'nombre', 'colores', 'diseno', 'por', 'ts'])
+          && request.resource.data.torneo == grupo(g).torneo.creado
+          && request.resource.data.por == uid()
+          && request.resource.data.nombre is string && request.resource.data.nombre.size() > 0 && request.resource.data.nombre.size() <= 20
+          && request.resource.data.colores is list && request.resource.data.colores.size() > 0 && request.resource.data.colores.size() <= 2
+          && request.resource.data.diseno in ['lisa', 'mangas', 'bastones', 'franja', 'banda'];
+        allow delete: if esAdmin(g);
+      }
+
+      // Resultados del torneo interno: los cargan los capitanes de los dos equipos, el árbitro del torneo o un admin.
+      // El documento se llama como el partido (su número en la liga, 'ronda-lugar' en la copa) y vale solo para
+      // el torneo actual. En la liga se controla que los equipos sean los de ese partido.
+      match /torneoResultados/{k} {
+        allow read: if esMiembro(g);
+        allow create, update: if (esAdmin(g)
+            || grupo(g).torneo.equipos[request.resource.data.a].get('capitan', '') == uid()
+            || grupo(g).torneo.equipos[request.resource.data.b].get('capitan', '') == uid()
+            || grupo(g).torneo.get('arbitro', '') == uid())
+          && grupo(g).torneo.estado == 'jugando'
+          && request.resource.data.keys().hasOnly(['torneo', 'a', 'b', 'ga', 'gb', 'gana', 'por', 'ts'])
+          && request.resource.data.torneo == grupo(g).torneo.creado
+          && request.resource.data.por == uid()
+          && request.resource.data.a is int && request.resource.data.b is int
+          && (!k.matches('^[0-9]+$') || (grupo(g).torneo.partidos[int(k)].a == request.resource.data.a
+            && grupo(g).torneo.partidos[int(k)].b == request.resource.data.b))
+          && (request.resource.data.ga == null || (request.resource.data.ga is int && request.resource.data.ga >= 0 && request.resource.data.ga <= 99))
+          && (request.resource.data.gb == null || (request.resource.data.gb is int && request.resource.data.gb >= 0 && request.resource.data.gb <= 99))
+          && request.resource.data.gana in [null, 'a', 'b'];
+        allow delete: if esAdmin(g);
+      }
+
       // Niveles que pone el admin: los ven admins y armadores (para equilibrar), los cambian solo los admins.
       match /privado/{doc} {
         allow read: if esAdmin(g) || esArmador(g);

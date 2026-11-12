@@ -81,3 +81,25 @@ D.misGrupos = {
   g1: D.grupo,
   g2: t.normGrupo({ nombre: 'Los del laburo', admins: ['u1'], partido: { fecha: '2026-11-17', cuando: '19:30', lugar: 'Club Ferro', cupo: 14, duracion: 60 }, anotados: ['u1', 'u5', 'u7', 'u11', 'u12', 'u3', 'u9', 'u2'], agenda: { slots: [{ dia: 2, hora: '19:30', lugar: 'Club Ferro' }], saltear: [] } }),
 };
+
+// Torneo terminado (capturas/torneo.jpg, en #/torneo) y un rival de amistoso (capturas/amistosos.jpg, en #/amistoso).
+// Cada equipo con el nombre y la camiseta que eligió su capitán.
+window.conTorneoYAmistosos = () => {
+  const P = (f, a, b, ga, gb) => ({ f, a, b, ga, gb });
+  const ids = Object.keys(D.miembros);
+  D.grupo.torneo = {
+    nombre: 'Copa de noviembre', estado: 'terminado', ids, cant: 4, formato: 'liga', vueltas: 1, modo: 'equilibrado',
+    cuando: { tipo: 'grupo' }, arbitro: 'nadie', creado: 1, empezo: Date.now(), termino: Date.now(), llave: null, res: {},
+    equipos: [0, 1, 2, 3].map(i => ({ nombre: '', ids: ids.slice(i * 3, i * 3 + 3) })),
+    partidos: [P(1, 0, 3, 4, 2), P(1, 1, 2, 3, 3), P(2, 0, 2, 5, 1), P(2, 3, 1, 1, 2), P(3, 0, 1, 2, 2), P(3, 2, 3, 3, 0)],
+  };
+  D.torneoEquipos = {
+    0: { torneo: 1, nombre: 'La Academia', colores: ['celeste', 'blanco'], diseno: 'bastones' },
+    1: { torneo: 1, nombre: 'Los Xeneizes', colores: ['azul', 'amarillo'], diseno: 'franja' },
+    2: { torneo: 1, nombre: 'Los Millos', colores: ['blanco', 'rojo'], diseno: 'banda' },
+    3: { torneo: 1, nombre: 'Muertos FC', colores: ['negro'], diseno: 'lisa' },
+  };
+  D.torneoResultados = {};
+  D.grupo.amistosos = [{ gid: 'g7', codigo: 'x', rival: 'Los del laburo', ts: Date.now(), prox: { fecha: '2026-11-21', cuando: '10:00' },
+    ficha: { pj: 5, g: 3, e: 1, p: 1, gf: 21, gc: 15, ult: ['G', 'G', 'E', 'P', 'G'], ultimo: { fecha: '2026-11-07', res: 'G', nos: 5, ellos: 3 } } }];
+};

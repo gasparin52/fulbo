@@ -39,9 +39,21 @@
     .flota { animation: flota 5s ease-in-out infinite; }
     .brillo { background-size: 200% auto; animation: brillo 5s linear infinite; }
     .late { animation: late 7s ease-in-out infinite; }
+    @keyframes caer { from { translate: 0 -1rem; rotate: 0deg; } to { translate: 0 26rem; rotate: 540deg; } }
+    /* Lo que se desliza de costado: barra finita y oscura, sin flechas (la del sistema queda fea en la compu). */
+    .overflow-x-auto::-webkit-scrollbar { height: 6px; }
+    .overflow-x-auto::-webkit-scrollbar-track, .overflow-x-auto::-webkit-scrollbar-corner { background: transparent; }
+    .overflow-x-auto::-webkit-scrollbar-button { display: none; }
+    .overflow-x-auto::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .3); border-radius: 9999px; }
+    .overflow-x-auto::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .55); }
+    @supports (-moz-appearance: none) { .overflow-x-auto { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, .35) transparent; } }
+    .sin-barra { scrollbar-width: none; }
+    .sin-barra::-webkit-scrollbar { display: none; }
+    .confeti i { position: absolute; top: -1rem; width: 6px; height: 11px; border-radius: 1px; opacity: .85; animation: caer 3s linear infinite; }
     @media (prefers-reduced-motion: reduce) {
       .aparece { opacity: 1; translate: none; scale: none; transition: none; }
       .entra, .entra-izq, .entra-der, .flota, .brillo, .late { animation: none; }
+      .confeti { display: none; }
     }
   </style>
 </head>
@@ -184,6 +196,8 @@ const colReportes = g => F.collection(db, 'grupos', g, 'reportes');
 const colFaltas = g => F.collection(db, 'grupos', g, 'faltas');
 const colBajas = g => F.collection(db, 'grupos', g, 'bajas');
 const colResultados = g => F.collection(db, 'grupos', g, 'resultados');
+const colTorneoEquipos = g => F.collection(db, 'grupos', g, 'torneoEquipos');
+const colTorneoResultados = g => F.collection(db, 'grupos', g, 'torneoResultados');
 const colRehacer = g => F.collection(db, 'grupos', g, 'rehacer');
 const refRehacer = (g, u) => F.doc(db, 'grupos', g, 'rehacer', u);
 
@@ -347,6 +361,11 @@ const ICONOS = {
   calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
   'chart-column': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  'arrow-right': '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  dices: '<rect width="12" height="12" x="2" y="10" rx="2" ry="2"/><path d="m17.92 14 3.5-3.5a2.24 2.24 0 0 0 0-3l-5-4.92a2.24 2.24 0 0 0-3 0L10 6"/><path d="M6 18h.01"/><path d="M10 14h.01"/><path d="M15 6h.01"/><path d="M18 9h.01"/>',
+  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
+  palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>',
+  shirt: '<path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/>',
   'chevron-down': '<path d="m6 9 6 6 6-6"/>',
   'circle-alert': '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
   'circle-check': '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
@@ -422,6 +441,10 @@ const puedeEditarEquipos = () => esAdmin() || esArmador(miUid());
 const equipoDe = id => D.grupo?.equipos?.A.includes(id) ? 'A' : D.grupo?.equipos?.B.includes(id) ? 'B' : null;
 const otroEquipo = e => (e === 'A' ? 'B' : 'A');
 const NOMBRE_EQUIPO = { A: '🔴 Equipo A', B: '🔵 Equipo B' };
+// En un amistoso armado por grupo, cada equipo lleva el nombre de su grupo.
+const porGrupo = () => !!D.grupo?.amistoso && D.grupo.equipos?.modo === 'grupos';
+const nombreCorto = e => porGrupo() ? D.grupo.amistoso[e === 'A' ? 'local' : 'rival'] : `Equipo ${e}`;
+const nombreEquipo = e => `${e === 'A' ? '🔴' : '🔵'} ${nombreCorto(e)}`;
 
 // Pasa a alguien al equipo "a" dentro de un estado de grupo (para usar en actualizarGrupo).
 // Sirve para titulares (A / B) y para suplentes (SA / SB).
@@ -513,8 +536,10 @@ function repartirSuplentes(s) {
   const fuerza = e => eq['S' + e].reduce((t, id) => t + puntaje(id), 0);
   const nuevos = sups.filter(id => !eq.SA.includes(id) && !eq.SB.includes(id));
   if (eq.modo !== 'aleatorio') nuevos.sort((a, b) => puntaje(b) - puntaje(a));
+  // Amistoso por grupo: cada suplente va con los de su grupo.
+  const locales = eq.modo === 'grupos' && s.amistoso ? new Set(s.amistoso.locales || []) : null;
   nuevos.forEach(id => {
-    const e = eq.SA.length !== eq.SB.length ? (eq.SA.length < eq.SB.length ? 'A' : 'B') : fuerza('A') <= fuerza('B') ? 'A' : 'B';
+    const e = locales ? (locales.has(id) ? 'A' : 'B') : eq.SA.length !== eq.SB.length ? (eq.SA.length < eq.SB.length ? 'A' : 'B') : fuerza('A') <= fuerza('B') ? 'A' : 'B';
     eq['S' + e].push(id);
   });
 }
@@ -601,7 +626,7 @@ A.onAuthStateChanged(auth, user => {
   Object.values(subsMisGrupos).forEach(f => f());
   subsMisGrupos = {};
   nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {} });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -649,7 +674,7 @@ function elegirGrupo() {
   cortar(subsGrupo);
   cortar(subsMvp);
   nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [] });
+  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {} });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -666,6 +691,16 @@ function elegirGrupo() {
   }));
   subsGrupo.push(F.onSnapshot(colMiembros(gid), qs => {
     D.miembros = Object.fromEntries(qs.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    render();
+  }, e => console.warn(e.code)));
+  // Nombre y colores que eligió cada capitán del torneo interno.
+  subsGrupo.push(F.onSnapshot(colTorneoEquipos(gid), qs => {
+    D.torneoEquipos = Object.fromEntries(qs.docs.map(d => [d.id, d.data()]));
+    render();
+  }, e => console.warn(e.code)));
+  // Resultados del torneo que cargan los capitanes, el árbitro o un admin.
+  subsGrupo.push(F.onSnapshot(colTorneoResultados(gid), qs => {
+    D.torneoResultados = Object.fromEntries(qs.docs.map(d => [d.id, d.data()]));
     render();
   }, e => console.warn(e.code)));
   // Votos: cada uno lee solo los suyos; los promedios, el 😈 y el 🧐 los arma el servidor
@@ -1258,6 +1293,38 @@ function crearGrupo(nombre) {
   }, '⚽ Grupo creado. Compartí el link de invitación desde el panel de admin.');
 }
 
+// Amistoso contra otro grupo: un grupo aparte para ese partido, al que se entra directo con
+// el link (sin aprobación). Los de este grupo quedan como "locales": así salen los equipos
+// Nosotros vs Ellos. Este grupo guarda cada rival en amistosos (acceso, historial y próxima fecha),
+// y las revanchas se juegan en el mismo grupo del amistoso.
+async function armarAmistoso(rival) {
+  const ya = rivales().find(a => a.rival.toLowerCase() === rival.toLowerCase());
+  if (ya) return toast(`Ya jugaron contra ${ya.rival}: tocá "Armar la revancha" en su ficha`);
+  const local = D.grupo.nombre, gid = genId(20), codigo = genId(12), uid = miUid();
+  const nombre = `${local} vs ${rival}`.slice(0, 60);
+  const ok = await act(async () => {
+    await F.setDoc(refGrupo(gid), {
+      nombre, creador: uid, admins: [uid], codigo, baneados: [], ...datosGrupoIniciales(), aprobacion: false,
+      partido: { ...datosGrupoIniciales().partido, titulo: `Amistoso vs ${rival}`.slice(0, 40) },
+      amistoso: { origen: D.gid, local, rival, locales: Object.keys(D.miembros) },
+    });
+    await F.setDoc(F.doc(colMiembros(gid), uid), { ...datosPerfil(D.perfil), codigo, unido: Date.now() });
+    await F.updateDoc(refUsuario(uid), { grupos: [...(D.perfil.grupos || []), { id: gid, nombre }] });
+    await F.updateDoc(refGrupo(D.gid), { amistosos: [...rivales(), { gid, codigo, rival, ts: Date.now(), ficha: null, prox: null }].slice(-20) });
+    evento('crear_amistoso');
+  }, '⚔️ Amistoso armado. Poné la fecha y pasá el link a los dos grupos');
+  if (ok) { guardado.set(LS + 'gid', gid); location.hash = '#/'; }
+  return ok;
+}
+const mensajeAmistoso = () => {
+  const a = D.grupo.amistoso, p = D.grupo.partido;
+  const L = [`⚔️ *Amistoso: ${a.local} vs ${a.rival}*`];
+  if (p.fecha || p.cuando) L.push(`📅 ${[fechaLinda(p.fecha), p.cuando].filter(Boolean).join(' · ')}`);
+  if (p.lugar) L.push(`📍 ${p.lugar}`);
+  L.push('', 'Entrá con este link y anotate (no hace falta que te acepten):', linkInvitacion());
+  return L.join('\n');
+};
+
 // ---------------- Jugadores, votos y puntajes ----------------
 function jugador(id) {
   if (id.startsWith('inv_')) {
@@ -1381,14 +1448,20 @@ function asegurarEquipos() {
     const { titulares, cupo } = dividir(s);
     const base = baseKey(titulares);
     if (titulares.length < cupo || s.equipos?.base === base) return;
-    s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base };
+    const modo = s.amistoso ? 'grupos' : 'equilibrado';
+    s.equipos = { ...armarEquipos(titulares, modo), modo, base };
     repartirSuplentes(s);
     nuevaRonda(s);
     s.solicitudes = {};
-  }, '⚖️ Se llenó el cupo: equipos equilibrados armados');
+  }, D.grupo.amistoso ? '⚔️ Se llenó el cupo: equipos armados, cada grupo de un lado' : '⚖️ Se llenó el cupo: equipos equilibrados armados');
 }
 
 function armarEquipos(jugadores, modo) {
+  // Amistoso: los del grupo que lo armó contra los demás.
+  if (modo === 'grupos') {
+    const locales = new Set(D.grupo.amistoso?.locales || []);
+    return { A: jugadores.filter(p => locales.has(p.id)).map(p => p.id), B: jugadores.filter(p => !locales.has(p.id)).map(p => p.id) };
+  }
   const mezclados = shuffle([...jugadores]);
   const A = [], B = [];
   if (modo === 'aleatorio') {
@@ -1461,7 +1534,7 @@ function mensajeWsp() {
 function lineasEquipos() {
   const d = derivar();
   const L = ['🆚 *EQUIPOS*'];
-  [['🔴', 'Equipo A', 'A'], ['🔵', 'Equipo B', 'B']].forEach(([emoji, nom, e]) => {
+  [['🔴', nombreCorto('A'), 'A'], ['🔵', nombreCorto('B'), 'B']].forEach(([emoji, nom, e]) => {
     const js = D.grupo.equipos[e].map(jugador).filter(Boolean);
     L.push('', `${emoji} *${nom}* (${js.length})`);
     js.forEach(j => L.push(`• ${j.usuario} ${pos(j).emoji}`));
@@ -1862,7 +1935,7 @@ function vistaPortada() {
     </section>
 
     <div class="flex flex-wrap justify-center gap-2 -mt-4">
-      ${chip('clipboard-list', 'Lista con suplentes', 0)}${chip('scale', 'Equipos parejos', 1)}${chip('bell', 'Avisos al celu', 2)}${chip('repeat', 'Fecha fija', 3)}
+      ${chip('clipboard-list', 'Lista con suplentes', 0)}${chip('scale', 'Equipos parejos', 1)}${chip('bell', 'Avisos al celu', 2)}${chip('repeat', 'Fecha fija', 3)}${chip('trophy', 'Torneos', 4)}${chip('swords', 'Amistosos', 5)}
     </div>
 
     <div class="space-y-16 sm:space-y-20 py-8 overflow-x-clip">
@@ -1873,6 +1946,8 @@ function vistaPortada() {
         `<img src="capturas/mvp.jpg" alt="El jugador del partido" loading="lazy" class="block w-full rounded-3xl shadow-2xl shadow-amber-900/30 ring-1 ring-amber-400/30">`)}
       ${bloque('ficha', 'La ficha de un jugador', 'chart-column', 'Tu ficha de jugador', 'Tus números según lo que votan tus compañeros, partidos ganados y premios.')}
       ${bloque('calendario', 'El calendario', 'calendar', 'Todos tus partidos', 'Si jugás en varios grupos, los ves juntos. Con fecha fija se arma solo cada semana.', true)}
+      ${bloque('torneo', 'Un torneo interno', 'trophy', 'Torneos entre ustedes', 'Liga, copa o las dos. Cada capitán elige el nombre y la camiseta de su equipo, y al final hay campeón y podio.')}
+      ${bloque('amistosos', 'Los amistosos', 'swords', 'Desafiá a otro grupo', '¿Les faltan jugadores o quieren medirse? Arman un amistoso con otro grupo y queda el historial de cada rival.', true)}
     </div>
 
     <section>
@@ -1896,6 +1971,7 @@ function vistaPortada() {
       ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
       ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
       ${pregunta('¿Puedo estar en más de un grupo?', 'Sí. Ves todos tus partidos juntos en el calendario.')}
+      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o un amistoso contra otro grupo, que entra con un link aparte. Los de afuera no ven nada de tu grupo.')}
     </section>
 
     <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
@@ -2613,10 +2689,10 @@ function tarjetaPedidos() {
 
 // Grupos: mis grupos, pedidos pendientes y unirse o crear.
 
-const tabGrupo = () => location.hash === '#/equipos' ? 'equipos' : location.hash === '#/jugadores' ? 'jugadores' : 'partido';
+const tabGrupo = () => ({ '#/equipos': 'equipos', '#/jugadores': 'jugadores', '#/torneo': 'torneo', '#/amistoso': 'amistoso' })[location.hash] || 'partido';
 function tabsGrupo() {
   const t = tabGrupo();
-  const item = (h, k, icono, txt) => `<a href="${h}" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${t === k ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}">${ic(icono)} ${txt}</a>`;
+  const item = (h, k, icono, txt) => `<a href="${h}" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${t === k || (k === 'partido' && (t === 'torneo' || t === 'amistoso')) ? 'bg-emerald-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}">${ic(icono)} ${txt}</a>`;
   return `
     <div class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-slate-950/90 backdrop-blur">
       <div class="flex gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800">
@@ -2632,10 +2708,12 @@ function vistaPrincipal() {
   const t = tabGrupo();
   const sinEquipos = card(`
     <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
-    <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos y equilibrados cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
+    <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos ${D.grupo.amistoso ? '(cada grupo de un lado)' : 'y equilibrados'} cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
-    : [header(d), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
+    : t === 'torneo' ? [cartelera(), vistaTorneo()]
+    : t === 'amistoso' ? [cartelera(), vistaAmistoso()]
+    : [cartelera(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAmistoso(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -2767,11 +2845,21 @@ function guia() {
   const en = (x, y, html) => `<span class="absolute -translate-x-1/2 -translate-y-1/2" style="left:${x}%;top:${y}%">${html}</span>`;
   const cancha = cont => `<div class="relative flex-1 m-1.5 rounded-lg overflow-hidden border border-emerald-500/30" style="background:repeating-linear-gradient(180deg,#052e22 0 12%,#063a2b 12% 24%)"><div class="absolute inset-x-0 top-1/2 border-t border-emerald-300/25"></div><div class="absolute left-1/2 top-1/2 w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-300/25"></div>${cont}</div>`;
   const tarjeta = html => `<div class="rounded-lg bg-slate-800 p-2">${html}</div>`;
+  // Las tarjetitas de arriba de Partido y la tarjeta "Sumale algo al grupo" del admin.
+  const cartelitos = marcar => `<div class="grid grid-cols-3 gap-1 mx-1.5 mt-1.5 text-center text-[7px]">${[['partido', '⚽', 'Del grupo'], ['torneo', '🏆', 'Torneo'], ['amistoso', '👕', 'vs Laburo']].map(([k, e, t], i) => {
+    const b = `<span class="block rounded-md border ${i ? 'border-slate-700' : 'border-emerald-500 bg-emerald-500/10'} py-1"><span class="block text-[10px]">${e}</span><b>${t}</b></span>`;
+    return k === marcar ? toca(b, 'block') : b;
+  }).join('')}</div>`;
+  const modosMini = marcar => tarjeta(`<p class="font-bold mb-1">${ic('sparkles', 'text-amber-300')} Sumale algo al grupo</p><div class="grid grid-cols-3 gap-1 text-center text-[7px]">${[['torneo', camiseta('#ef4444', 16) + camiseta('#1d4ed8', 16), 'Torneo'], ['amistoso', camiseta('#ef4444', 16) + camiseta('#7dd3fc', 16), 'Amistoso'], ['arbitro', tarjetaAmarilla(14), 'Árbitro']].map(([k, d, t]) => {
+    const b = `<span class="block rounded-md border border-slate-600 py-1"><span class="flex justify-center items-center h-5">${d}</span><b>${t}</b></span>`;
+    return k === marcar ? toca(b, 'block') : b;
+  }).join('')}</div>`);
 
   const moverse = tira([
     [`<div class="flex-1 p-2 space-y-1.5"><p class="text-slate-400">Hola,</p><b class="text-[11px]">juanp</b><div class="rounded-lg bg-emerald-600/30 border border-emerald-500/40 p-1.5"><b class="text-emerald-300">HOY</b> · 20:00 · Fulbo del jueves</div><p class="font-bold pt-1">Mis grupos</p>${grupoMini}</div>${navAbajo('inicio')}`, 'En <b>Inicio</b> ves el partido de hoy (o el próximo) y tus grupos. Tocá un grupo para entrar.', true],
     [`${barraGrupo()}${tabsG('partido', 'equipos')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-12 rounded-lg bg-slate-800"></div><div class="h-6 rounded-lg bg-emerald-600/70"></div><div class="h-14 rounded-lg bg-slate-800"></div></div>`, 'Adentro del grupo hay 3 pestañas: <b>Partido</b> (la lista), <b>Equipos</b> y <b>Jugadores</b>. Con la <b>flecha</b> de arriba volvés a Inicio.', true],
     [`<div class="flex-1 p-2 space-y-1.5"><b class="text-[11px]">Mi perfil</b><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="rounded bg-slate-700 py-1">⚽ Mi ficha</span><span class="py-1 text-slate-400">${ic('settings')} Configuración</span></div><div class="h-10 rounded-lg bg-slate-800"></div><div class="h-10 rounded-lg bg-slate-800"></div></div>${navAbajo('perfil', 'perfil')}`, 'En <b>Perfil</b> está <b>Mi ficha</b> (tus números de todos los grupos) y <b>Configuración</b>. En <b>Calendario</b> ves todas tus fechas.', true],
+    [`${barraGrupo()}${tabsG('partido')}${cartelitos('torneo')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-10 rounded-lg bg-slate-800"></div><div class="h-12 rounded-lg bg-slate-800"></div></div>`, 'Si tu grupo tiene un <b>torneo</b> o <b>amistosos</b>, arriba de Partido aparecen unas tarjetitas. Tocá una para ver eso; <b>Del grupo</b> te vuelve al partido de siempre.', true],
   ]);
   const cuenta = tira([
     [`<div class="flex-1 bg-slate-900 text-slate-100 p-2 space-y-1.5"><div class="grid grid-cols-2 gap-0.5 rounded bg-slate-800 p-0.5 text-center"><span class="py-1">Entrar</span><span class="rounded bg-slate-950 py-1">Crear cuenta</span></div>${toca('<span class="block w-[118px] rounded bg-slate-800 px-1.5 py-1 text-slate-300">juanp</span>')}<p class="text-amber-300 text-[8px] pt-1">Solo un nombre, sin @ ni mail</p><div class="rounded bg-slate-800 px-1.5 py-1 text-slate-400">••••••••</div><p class="text-slate-500 text-[8px]">8 o más, con letras y números</p></div>`, 'Elegí un <b>nombre de usuario</b> (no tu mail) y una contraseña. Después cargá tu <b>mail</b>: es la única forma de recuperarla si te la olvidás.'],
@@ -2806,6 +2894,18 @@ function guia() {
     [`${barraGrupo({ admin: true })}<div class="grid grid-cols-2 gap-0.5 mx-1.5 mt-1 rounded-lg bg-slate-800 p-0.5 text-center text-[8px] font-semibold"><span class="py-0.5 text-slate-400">Partido</span><span class="rounded py-0.5 bg-emerald-500 text-slate-950">Grupo</span></div><div class="flex-1 p-1.5">${tarjeta(`<p class="text-slate-300 font-semibold mb-1.5">${ic('ticket')} Link de invitación</p><div class="flex items-center gap-1"><span class="flex-1 truncate rounded bg-slate-950 px-1 py-1 font-mono text-[7px]">https://${SITIO}/#/unirse/…</span>${toca('<span class="rounded bg-emerald-500 text-slate-950 font-bold px-1.5 py-1">Copiar</span>')}</div>`)}</div>`, 'En la pestaña <b>Grupo</b>, toca <b>Copiar</b> en el link de invitación.', true],
     [`<div class="flex-1 flex flex-col bg-[#efeae2]"><div class="bg-[#075e54] text-white px-2 py-2 font-semibold">⬅ Fulbo 🟢</div><div class="flex-1 p-2"><div class="ml-auto w-[105px] rounded-lg bg-[#d9fdd3] p-1.5 text-[8px]">Entren acá para anotarse ⚽<br><span class="text-blue-600 underline break-all">https://${SITIO}/#/unirse/…</span></div></div><div class="flex items-center gap-1 p-1.5"><span class="flex-1 rounded-full bg-white px-2 py-1 text-slate-400">Mantené apretado → Pegar</span>${toca('<span class="w-5 h-5 rounded-full bg-[#00a884] text-white grid place-items-center">➤</span>')}</div></div>`, 'Lo <b>pega</b> en el grupo de WhatsApp y lo manda. El que entra crea su cuenta y al admin le llega el pedido para <b>aceptarlo</b>.'],
   ]);
+  const marcador = (a, b, cargar) => `<div class="flex items-center gap-1 rounded-lg bg-slate-800 px-1.5 py-1">${camiseta(a, 16)}<span class="flex-1">${a === '#1d4ed8' ? 'Xeneizes' : 'Rojo'}</span>${cargar ? toca('<span class="rounded bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5">✏️ Cargar</span>') : '<span class="rounded bg-slate-950 font-mono font-black text-amber-300 px-1.5 py-0.5">2-1</span>'}<span class="flex-1 text-right">${b === '#7dd3fc' ? 'La Academia' : 'Verde'}</span>${camiseta(b, 16, '', '#f1f5f9', 'bastones')}</div>`;
+  const torneo = tira([
+    [`${barraGrupo({ admin: true })}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-8 rounded-lg bg-slate-800"></div>${modosMini('torneo')}</div>`, 'El <b>admin</b> toca <b>Torneo</b> en <b>Sumale algo al grupo</b> (está abajo de la lista, y también en Administrar).', true],
+    [`${barraGrupo({ admin: true })}<div class="flex-1 p-2 space-y-2"><div class="flex items-center justify-between px-1">${['👥', '👕', '🏆', '📅'].map((e, i) => `<span class="w-6 h-6 rounded-full grid place-items-center border ${i === 2 ? 'bg-emerald-500 border-emerald-300' : 'border-emerald-500 bg-emerald-500/20'}">${e}</span>`).join('<span class="flex-1 h-0.5 bg-emerald-500"></span>')}</div>${tarjeta(`<p class="font-bold mb-1">¿Cómo se juega?</p>${['Liga', 'Copa', 'Liga + Copa'].map((t, i) => `<p class="rounded border ${i === 2 ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-600'} px-1.5 py-1 mb-1">${t}</p>`).join('')}`)}</div>`, 'Se arma en 4 pasos: <b>jugadores</b>, <b>equipos</b> (equilibrados o al azar), <b>formato</b> (liga, copa o las dos) y <b>fechas</b> (en el partido del grupo o en otro día).', true],
+    [`${barraGrupo()}<div class="flex-1 p-1.5 space-y-1.5">${tarjeta(`<div class="flex items-center gap-1.5">${camiseta('#7dd3fc', 30, 'A', '#f1f5f9', 'bastones')}<b class="flex-1">La Academia</b></div><div class="flex items-center gap-1 mt-1.5"><span class="w-3 h-3 rounded-full bg-amber-400 text-slate-950 text-[6px] font-black grid place-items-center">C</span><span class="flex-1">Capitán: <b>vos</b></span>${toca('<span class="rounded bg-slate-700 text-amber-200 font-bold px-1 py-0.5">🎨 Nombre y colores</span>')}</div>`)}</div>`, 'Cada equipo tiene un <b>capitán</b>: elige el nombre, los colores y el diseño de la camiseta. Si no hay capitán, lo hace el admin.', true],
+    [`${barraGrupo()}<div class="flex-1 p-1.5 space-y-1.5"><p class="font-bold">${ic('calendar', 'text-emerald-400')} Fixture</p><p class="text-slate-500 text-[7px] font-bold">FECHA 1</p>${marcador('#1d4ed8', '#16a34a', false)}${marcador('#ef4444', '#7dd3fc', true)}</div>`, 'Después de jugar, el <b>capitán</b> de uno de los dos equipos (o el árbitro, o el admin) toca <b>Cargar</b> y pone los goles. La tabla y la llave se actualizan solas.', true],
+  ]);
+  const amistosos = tira([
+    [`${barraGrupo({ admin: true })}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-8 rounded-lg bg-slate-800"></div>${modosMini('amistoso')}</div>`, 'El <b>admin</b> toca <b>Amistoso</b> en <b>Sumale algo al grupo</b> y escribe contra quién juegan.', true],
+    [`<div class="flex-1 p-1.5"><div class="rounded-lg p-2 text-center text-white" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)"><p class="text-[7px] font-black tracking-widest text-amber-200">AMISTOSO</p><div class="flex items-center justify-center gap-1 mt-1">${camiseta('#ef4444', 24)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 24)}</div><p class="text-[8px] mt-1">Pasale el link a los dos grupos</p><span class="mt-1.5 inline-block">${toca('<span class="block rounded bg-white text-slate-900 font-bold px-2 py-1">Copiar invitación</span>')}</span></div></div>`, 'Se arma un <b>grupo aparte</b> para el amistoso. Pasá el link a los dos grupos: entran directo y se anotan. Los equipos salen <b>grupo contra grupo</b>.', true],
+    [`<div class="flex-1 p-1.5 space-y-1.5">${tarjeta(`<div class="flex items-center justify-center gap-1">${camiseta('#ef4444', 20)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 20)}</div><div class="grid grid-cols-4 gap-0.5 mt-1.5 text-center">${[['5', 'PJ', ''], ['3', 'G', 'text-emerald-300'], ['1', 'E', ''], ['1', 'P', 'text-red-300']].map(([n, l, c]) => `<span class="rounded bg-slate-950/60 py-0.5"><b class="block text-[10px] ${c}">${n}</b>${l}</span>`).join('')}</div><p class="text-center font-bold mt-1">🔥 Van ganando 3 a 1</p><span class="mt-1 block">${toca('<span class="block rounded bg-emerald-500 text-slate-950 font-bold text-center py-1">🔁 Armar la revancha</span>', 'block')}</span>`)}</div>`, 'Cada rival queda con su <b>historial</b>. Para volver a jugar, tocá <b>Armar la revancha</b>: mismo link y mismo grupo.', true],
+  ]);
   const paso = (titulo, cuerpo, abierto = false) => `
     <details class="group rounded-xl border border-slate-800 bg-slate-900/40" ${abierto ? 'open' : ''}>
       <summary class="cursor-pointer list-none flex items-center justify-between gap-2 px-3 py-3 font-semibold"><span>${titulo}</span><span class="text-slate-500 transition group-open:rotate-180">▾</span></summary>
@@ -2822,6 +2922,8 @@ function guia() {
       ${paso(ic('user') + ' Tu cuenta, tu ficha y calificar', cuenta)}
       ${paso('⚽ Anotarte, bajarte o ir a la tribuna', anotarse)}
       ${paso('📍 Elegir tu posición en la cancha', posiciones)}
+      ${paso('🏆 Armar un torneo entre ustedes', torneo + nota('Los jugadores ven todo: su equipo, la tabla, la llave y el campeón.'))}
+      ${paso('⚔️ Jugar contra otro grupo (amistoso)', amistosos + nota('Tu grupo sigue cerrado: los del otro grupo no ven tus calificaciones ni tu historia.'))}
       ${paso(ic('bell') + ' Recibir avisos en el celu', notis + nota('En iPhone primero tenés que instalarla (paso de instalar) y abrirla desde el ícono.'))}
       ${paso(ic('link') + ' Invitar a alguien (copiar el link)', link + nota('El link solo lo tiene el admin. No lo pases fuera del grupo: con él cualquiera puede pedir entrar.'))}
     </div>`);
@@ -2981,6 +3083,28 @@ function vistaReglas() {
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
       'Al terminar, un admin o armador carga <b>¿Cómo salió?</b>: quién ganó y, si el grupo lo eligió, los goles (del equipo o de cada uno). Lo ven todos.',
+      'Si el admin prende el <b>' + tarjetaAmarilla(12) + ' Árbitro</b>, arriba de la lista dice quién dirige el partido.',
+    ])}
+    ${seccion('🏆 Torneo interno', [
+      'Lo arma un admin desde <b>Sumale algo al grupo → Torneo</b>. Elige los jugadores, cuántos equipos (de 2 a 8) y cómo armarlos: <b>equilibrados</b> (un arquero por equipo y promedios parejos) o <b>al azar</b>. Los equipos quedan fijos hasta el final.',
+      '<b>Liga</b>: todos contra todos, a una o dos ruedas. 3 puntos por partido ganado y 1 por empate; si empatan en puntos, desempata la diferencia de gol y después los goles a favor. Con cantidad impar de equipos, en cada fecha uno queda libre.',
+      '<b>Copa</b>: eliminación directa hasta la final. La llave se sortea al empezar; si no da justo, algunos pasan directo a la ronda siguiente. Si un partido termina empatado, se carga quién ganó por penales.',
+      '<b>Liga + Copa</b>: primero la liga y después los 4 primeros (o los 2, si son menos de 4 equipos) juegan semis y final.',
+      'Cada fecha se juega <b>en el partido del grupo</b> o en <b>otro día fijo</b> que elige el admin.',
+      'El admin elige un <b>capitán</b> por equipo (si no, el capitán es el admin). El capitán elige el nombre, uno o dos colores y el diseño de la camiseta. En un torneo no puede haber dos equipos con el mismo color principal ni la misma combinación.',
+      'Los <b>resultados</b> los cargan los capitanes de los dos equipos que jugaron, el árbitro del torneo o un admin. Queda a la vista quién lo cargó; si está mal, se corrige.',
+      '<b>' + tarjetaAmarilla(12) + ' Árbitro del torneo</b>: sin árbitro, el equipo que queda libre en cada fecha, o alguien fijo del grupo.',
+      'Al final aparecen el <b>campeón</b> y el podio, y el torneo queda en <b>Campeones anteriores</b>. Con <b>Copiar para WhatsApp</b> mandás la tabla y los resultados.',
+    ])}
+    ${seccion('⚔️ Amistosos contra otros grupos', [
+      'Sirven para jugar contra otro grupo, o cuando no llegan al cupo. Un admin toca <b>Sumale algo al grupo → Amistoso</b> y escribe contra quién juegan.',
+      'Se crea un <b>grupo aparte</b> para el amistoso: los de los dos grupos entran con el link, <b>sin que nadie los acepte</b>. Así tu grupo sigue cerrado: los de afuera no ven calificaciones, fichas ni historia.',
+      'Los de tu grupo se suman desde <b>Partido → Amistosos</b> con un toque.',
+      'Cuando se llena la lista, los equipos salen <b>grupo contra grupo</b> (los suplentes, con su grupo). Se pueden mezclar con Equilibrados o Al azar, pero esos partidos no cuentan para el historial.',
+      'Cada rival queda con su <b>historial</b>: jugados, ganados, empatados, perdidos y los últimos resultados. Para volver a jugar, <b>Armar la revancha</b> usa el mismo grupo y el mismo link.',
+    ])}
+    ${seccion('🚫 Nombres', [
+      'Los nombres de grupos, equipos, torneos, rivales e invitados <b>no pueden tener insultos fuertes</b> (discriminatorios, sexuales o violentos). La picardía pasa: "Los Sin Rodilla" o "Muertos FC" están perfectos.',
     ])}
     ${seccion(ic('chart-column') + ' Calificaciones', [
       'Cada jugador tiene una ficha con 7 habilidades del 1 al 10: Velocidad, Técnica, Pase, Remate, Defensa, Resistencia y Arquero.',
@@ -3280,8 +3404,10 @@ function equipos(d) {
   const eq = D.grupo.equipos;
   const editor = puedeEditarEquipos();
   const vigentes = eq && !equiposDesactualizados(d);
+  const am = D.grupo.amistoso;
   const botones = editor ? `
     <div class="grid grid-cols-2 gap-2 mt-3">
+      ${am ? `<button data-action="armar" data-modo="grupos" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm col-span-2">${ic('swords')} ${esc(am.local)} vs ${esc(am.rival)}</button>` : ''}
       <button data-action="armar" data-modo="equilibrado" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_OK} text-sm">${ic('scale')} Armar equilibrados</button>
       <button data-action="armar" data-modo="aleatorio" ${d.titulares.length < 2 ? 'disabled' : ''} class="${BTN_SEC} text-sm">🎲 Aleatorio</button>
     </div>
@@ -3295,7 +3421,7 @@ function equipos(d) {
   const solicitudes = Object.entries(D.grupo.solicitudes).filter(([id, s]) => jugador(id) && equipoDe(id) && equipoDe(id) !== s.a);
   // Las flechas y los botones de armar aparecen solo en modo edición (admins y armadores).
   const editando = editor && vigentes && ui.editarEquipos;
-  const mover = (p, e) => editando ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${NOMBRE_EQUIPO[otroEquipo(e)]}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : '';
+  const mover = (p, e) => editando ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${nombreEquipo(otroEquipo(e))}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : '';
   const prom = e => { const js = eq[e].map(jugador).filter(Boolean); return js.reduce((t, p) => t + puntaje(p.id), 0) / (js.length || 1); };
   const columna = (e, borde, fondo, texto) => {
     const js = eq[e].map(jugador).filter(Boolean);
@@ -3337,7 +3463,7 @@ function equipos(d) {
   const abiertos = vigentes && miEquipo && !editor && !equiposCerrados();
   const pedido = abiertos ? (miSolicitud && miSolicitud.a !== miEquipo
     ? `<div class="flex items-center justify-between gap-2 text-xs bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
-         <span>${ic('arrow-left-right')} Pediste pasar al ${NOMBRE_EQUIPO[miSolicitud.a]}.</span>
+         <span>${ic('arrow-left-right')} Pediste pasar al ${nombreEquipo(miSolicitud.a)}.</span>
          <button data-action="cancelar-solicitud" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Cancelar</button>
        </div>`
     : `<button data-action="pedir-cambio" class="${BTN_SEC} w-full text-xs py-2">${ic('arrow-left-right')} Pasarme al otro equipo</button>`) : '';
@@ -3349,7 +3475,7 @@ function equipos(d) {
         ${solicitudes.map(([id, s]) => `
           <li class="flex items-center gap-2 text-sm">
             ${avatar(jugador(id), 24)}
-            <span class="flex-1 min-w-0 truncate"><b>${esc(jugador(id).usuario)}</b> quiere pasar al ${NOMBRE_EQUIPO[s.a]}</span>
+            <span class="flex-1 min-w-0 truncate"><b>${esc(jugador(id).usuario)}</b> quiere pasar al ${nombreEquipo(s.a)}</span>
             <button data-action="aprobar-cambio" data-id="${id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-emerald-500 text-slate-950">Aprobar</button>
             <button data-action="rechazar-cambio" data-id="${id}" class="rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800 text-slate-300">Rechazar</button>
           </li>`).join('')}
@@ -3374,7 +3500,7 @@ function equipos(d) {
     ? `<button data-action="rehacer-cancelar" class="${BTN} w-full text-xs py-2 bg-violet-500/15 text-violet-200 border border-violet-500/30" title="Nadie ve quién lo pidió">🙋 Pediste rehacerlos · Cancelar</button>`
     : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full text-xs py-2">🙋 Pedir rehacerlos</button>`) : '';
 
-  const modo = eq.editado ? ic('pencil') + ' editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : ic('scale') + ' equilibrado';
+  const modo = eq.editado ? ic('pencil') + ' editado a mano' : eq.modo === 'aleatorio' ? '🎲 aleatorio' : eq.modo === 'grupos' ? ic('swords') + ' por grupo' : ic('scale') + ' equilibrado';
   const dif = Math.abs(prom('A') - prom('B'));
   return card(`
     <div class="flex items-center justify-between gap-2">
@@ -3388,12 +3514,12 @@ function equipos(d) {
     ${pendientes}
     <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
       <div>
-        <p class="text-lg sm:text-xl font-black text-red-300 tracking-wide">🔴 EQUIPO A</p>
+        <p class="text-lg sm:text-xl font-black text-red-300 tracking-wide break-words">🔴 ${esc(nombreCorto('A')).toUpperCase()}</p>
         ${editor ? `<p class="text-xs text-slate-400">prom <b class="text-slate-200">${prom('A').toFixed(1)}</b></p>` : `<p class="text-xs text-slate-500">${eq.A.length} jugadores</p>`}
       </div>
       <span class="text-xs font-black text-slate-500 rounded-full border border-slate-700 w-9 h-9 grid place-items-center">VS</span>
       <div>
-        <p class="text-lg sm:text-xl font-black text-sky-300 tracking-wide">EQUIPO B 🔵</p>
+        <p class="text-lg sm:text-xl font-black text-sky-300 tracking-wide break-words">${esc(nombreCorto('B')).toUpperCase()} 🔵</p>
         ${editor ? `<p class="text-xs text-slate-400">prom <b class="text-slate-200">${prom('B').toFixed(1)}</b></p>` : `<p class="text-xs text-slate-500">${eq.B.length} jugadores</p>`}
       </div>
     </div>
@@ -3597,6 +3723,1053 @@ function avisoPendientes() {
     </a>`;
 }
 
+// ---------------- Dibujos futboleros: camiseta, cancha, "vs" y tarjeta amarilla ----------------
+// Camiseta del color del equipo, con la inicial en el pecho.
+// Camiseta del color del equipo, con la inicial en el pecho. Con segundo color, un diseño:
+// mangas, bastones (como Racing), franja (como Boca) o banda (como River).
+const luz = hex => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
+// Letra del pecho: la de la primera palabra que importa ("Los Xeneizes" → X, "Club Ferro" → F).
+const PALABRAS_DE_RELLENO = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'club', 'fc', 'cf', 'ca', 'cd', 'deportivo', 'atletico', 'atlético', 'team', 'the', 'real']);
+const inicial = s => {
+  const ws = String(s || '').trim().split(/\s+/).filter(Boolean);
+  return ((ws.find(w => !PALABRAS_DE_RELLENO.has(w.toLowerCase())) || ws[0] || '')[0] || '').toUpperCase();
+};
+const CUERPO_CAMISETA = 'M23 6 11 11 3 25l10 6 4-6v31h30V25l4 6 10-6-8-14-12-5c-1.5 4.5-5 7-9 7s-7.5-2.5-9-7Z';
+const DISENOS = {
+  mangas: c => `<path d="M23 6 11 11 3 25l10 6 4-6V12Z M41 6l12 5 8 14-10 6-4-6V12Z" fill="${c}"/>`,
+  bastones: c => [20, 28, 36, 44].map(x => `<rect x="${x}" y="0" width="4.5" height="64" fill="${c}"/>`).join(''),
+  franja: c => `<rect x="0" y="26" width="64" height="11" fill="${c}"/>`,
+  banda: c => `<path d="M11 11 21 6 51 58H39Z" fill="${c}"/>`,
+};
+const NOMBRE_DISENO = { mangas: 'Mangas', bastones: 'Bastones', franja: 'Franja', banda: 'Banda' };
+let nCamiseta = 0;
+const camiseta = (color, px = 40, letra = '', color2 = '', diseno = '') => {
+  const id = `cam${++nCamiseta}`, dibujo = color2 && DISENOS[diseno];
+  return `<svg viewBox="0 0 64 64" width="${px}" height="${px}" aria-hidden="true" class="shrink-0 drop-shadow-md">${dibujo ? `<clipPath id="${id}"><path d="${CUERPO_CAMISETA}"/></clipPath>` : ''}<path d="${CUERPO_CAMISETA}" fill="${color}"/>${dibujo ? `<g clip-path="url(#${id})">${dibujo(color2)}</g>` : ''}<path d="${CUERPO_CAMISETA}" fill="none" stroke="${luz(color) < .2 ? 'rgba(255,255,255,.45)' : 'rgba(0,0,0,.35)'}" stroke-width="2" stroke-linejoin="round"/><path d="M23 6c1.5 4.5 5 7 9 7s7.5-2.5 9-7" fill="none" stroke="${color2 || 'rgba(255,255,255,.65)'}" stroke-width="2.5"/>${dibujo ? '' : '<path d="M17 25v31M47 25v31" stroke="rgba(0,0,0,.18)" stroke-width="3"/>'}${letra ? `<text x="32" y="47" text-anchor="middle" font-size="19" font-weight="900" font-family="system-ui,sans-serif" fill="${luz(color) > .6 ? '#0f172a' : '#fff'}" stroke="${color}" stroke-width="3" paint-order="stroke">${esc(letra)}</text>` : ''}</svg>`;
+};
+const SIN_EQUIPO = '#334155';
+// Fondo de cancha: franjas de pasto y las líneas blancas.
+const cancha = (html, cls = '') => `
+  <div class="relative overflow-hidden rounded-3xl border border-emerald-300/30 shadow-lg shadow-emerald-950/40 ${cls}" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)">
+    <svg viewBox="0 0 300 160" preserveAspectRatio="none" aria-hidden="true" class="absolute inset-0 w-full h-full opacity-30" fill="none" stroke="#fff" stroke-width="1.5">
+      <rect x="6" y="6" width="288" height="148" rx="3" vector-effect="non-scaling-stroke"/><line x1="150" y1="6" x2="150" y2="154" vector-effect="non-scaling-stroke"/>
+      <ellipse cx="150" cy="80" rx="26" ry="30" vector-effect="non-scaling-stroke"/><rect x="6" y="42" width="32" height="76" vector-effect="non-scaling-stroke"/><rect x="262" y="42" width="32" height="76" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="absolute inset-0 bg-gradient-to-b from-slate-950/10 to-slate-950/55"></div>
+    <div class="relative p-5">${html}</div>
+  </div>`;
+// Dos camisetas enfrentadas: a y b son { color, nombre }.
+const versus = (a, b, px = 52) => {
+  const lado = x => `<div class="flex-1 min-w-0 flex flex-col items-center gap-1.5">${x.camiseta || camiseta(x.color, px, inicial(x.nombre))}<span class="text-sm font-bold text-white truncate max-w-full">${esc(x.nombre)}</span></div>`;
+  return `
+    <div class="flex items-start gap-2">
+      ${lado(a)}
+      <span class="shrink-0 mt-3 rounded-lg bg-slate-950/80 border border-white/10 px-2 py-1 text-xs font-black tracking-widest text-amber-300">VS</span>
+      ${lado(b)}
+    </div>`;
+};
+const tarjetaAmarilla = (px = 20) => `<span aria-hidden="true" class="inline-block shrink-0 rounded-[3px] bg-amber-400 shadow-md shadow-black/40 border border-amber-200/50" style="width:${Math.round(px * .7)}px;height:${px}px;rotate:12deg"></span>`;
+const BTN_BLANCO = `${BTN} bg-white hover:bg-slate-100 text-slate-900`;
+const fechaCorta = f => { const d = new Date(`${f}T12:00:00Z`); return `${DIAS[d.getUTCDay()].slice(0, 3)} ${d.getUTCDate()}/${d.getUTCMonth() + 1}`; };
+
+// ---------------- Filtro de insultos fuertes ----------------
+// La picardía pasa ("Los Sin Rodilla", "Muertos FC", "Los Pelotudos"); se frenan los insultos fuertes,
+// discriminatorios o sexuales. Se compara palabra entera (así "Disputa", "Pijama" o "Vergara" pasan),
+// después de sacar acentos, números en lugar de letras ("b0lud0"), letras repetidas y letras sueltas ("p u t o").
+const normalizarTexto = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[0134578@$]/g, c => ({ 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't', 8: 'b', '@': 'a', $: 's' })[c])
+  .replace(/(.)\1+/g, '$1');
+const INSULTOS = new Set(['puto', 'puta', 'putos', 'putas', 'putito', 'putita', 'putazo', 'trolo', 'trola', 'trolos', 'trolas', 'maricon', 'maricones', 'marica', 'maricas',
+  'mogolico', 'mogolicos', 'mongolico', 'mongolicos', 'retrasado', 'retrasados', 'sudaca', 'sudacas', 'travuco', 'travucos',
+  'pija', 'pijas', 'pijita', 'pijon', 'verga', 'vergas', 'chota', 'chotas', 'culiado', 'culiados', 'culiao', 'concha',
+  'nazi', 'nazis', 'hitler', 'violador', 'violadores', 'pedofilo', 'pedofilos', 'hdp', 'hdps', 'lcdtm', 'ctm'].map(normalizarTexto));
+const FRASES_INSULTO = ['hijo de puta', 'hija de puta', 'hijos de puta', 'concha de tu', 'concha de su', 'concha tu', 'concha su', 'chupa pija', 'chupame la',
+  'negro de mierda', 'negros de mierda', 'judio de mierda', 'judios de mierda', 'boliviano de mierda', 'paraguayo de mierda', 'peruano de mierda'].map(normalizarTexto);
+function esInsulto(texto) {
+  const palabras = normalizarTexto(texto).split(/[^a-z]+/).filter(Boolean);
+  const pegadas = [];
+  let suelta = '';
+  for (const w of [...palabras, '']) {
+    if (w.length === 1) suelta += w;
+    else { if (suelta.length > 2) pegadas.push(suelta); suelta = ''; }
+  }
+  const frase = ` ${palabras.join(' ')} `;
+  // "concha" sola es apellido y lugar: cuenta solo en las frases.
+  return [...palabras, ...pegadas].some(w => w !== 'concha' && INSULTOS.has(w)) || FRASES_INSULTO.some(f => frase.includes(` ${f} `));
+}
+const MSJ_INSULTO = 'Ese nombre no va 😅 Probá con otro.';
+
+// ---------------- Amistosos ----------------
+const rivales = () => D.grupo.amistosos || [];
+
+// Historial contra un rival, contado desde los locales (los de este grupo). Un resultado cuenta
+// si los equipos salieron grupo contra grupo (la mayoría de un lado son locales).
+function fichaRival(resultados, locales) {
+  const L = new Set(locales), f = { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, ult: [], ultimo: null };
+  for (const x of [...resultados].sort((a, b) => b.fecha.localeCompare(a.fecha))) {
+    const enA = (x.A || []).filter(id => L.has(id)).length, enB = (x.B || []).filter(id => L.has(id)).length;
+    if (enA === enB) continue;
+    const nos = enA > enB ? 'A' : 'B', res = x.ganador === 'empate' ? 'E' : x.ganador === nos ? 'G' : 'P';
+    const goles = x.golesA != null ? (nos === 'A' ? [x.golesA, x.golesB] : [x.golesB, x.golesA]) : null;
+    f.pj++;
+    f[res.toLowerCase()]++;
+    if (goles) { f.gf += goles[0]; f.gc += goles[1]; }
+    if (f.ult.length < 5) f.ult.push(res);
+    if (!f.ultimo) f.ultimo = { fecha: x.fecha, res, nos: goles ? goles[0] : null, ellos: goles ? goles[1] : null };
+  }
+  return f;
+}
+const bolitaRes = l => `<span class="w-5 h-5 rounded-full ${{ G: 'bg-emerald-500', E: 'bg-slate-500', P: 'bg-red-500' }[l]} text-[10px] font-black text-white grid place-items-center">${l}</span>`;
+// Con nombres (en el grupo del amistoso, que lo ven los dos) dice quién gana la serie.
+const fraseRival = (f, n) => !f?.pj ? '' : f.g > f.p ? (n ? `🔥 ${esc(n[0])} gana la serie ${f.g} a ${f.p}` : `🔥 Van ganando ${f.g} a ${f.p}`)
+  : f.g < f.p ? (n ? `🔥 ${esc(n[1])} gana la serie ${f.p} a ${f.g}` : `😤 Ellos van ganando ${f.p} a ${f.g}`) : '🤝 Serie empatada';
+function tablaFicha(f, nombres) {
+  if (!f?.pj) return '<p class="text-sm text-slate-400 text-center mt-3">Todavía no jugaron. Cuando carguen el resultado, acá queda el historial.</p>';
+  return `
+    <div class="grid grid-cols-4 gap-1.5 mt-3 text-center">
+      ${[['Jugados', f.pj, ''], ['Ganados', f.g, 'text-emerald-300'], ['Empates', f.e, 'text-slate-300'], ['Perdidos', f.p, 'text-red-300']].map(([l, v, c]) => `
+        <div class="rounded-xl bg-slate-950/50 py-2"><p class="text-2xl font-black ${c}">${v}</p><p class="text-[10px] uppercase tracking-wide text-slate-400">${l}</p></div>`).join('')}
+    </div>
+    <div class="flex items-center justify-between gap-2 mt-3 text-sm">
+      <span class="flex items-center gap-1">${f.ult.map(bolitaRes).join('')}</span>
+      ${f.ultimo ? `<span class="text-slate-400 text-xs">Último: ${fechaCorta(f.ultimo.fecha)}${f.ultimo.nos != null ? ` · <b class="text-white font-mono">${f.ultimo.nos}-${f.ultimo.ellos}</b>` : ''}</span>` : ''}
+    </div>
+    <p class="text-center font-black mt-3">${fraseRival(f, nombres)}</p>`;
+}
+
+// El admin (que está en los dos grupos) trae el historial y la próxima fecha de cada rival, y suma
+// a los locales nuevos para que salgan de este lado. Una vez por rival y por sesión.
+const rivalesLeidos = new Set();
+async function sincronizarAmistosos() {
+  if (!esAdmin()) return;
+  const mios = new Set((D.perfil.grupos || []).map(g => g.id)), locales = Object.keys(D.miembros);
+  for (const a of rivales()) {
+    if (rivalesLeidos.has(a.gid) || !mios.has(a.gid)) continue;
+    rivalesLeidos.add(a.gid);
+    try {
+      const g = (await F.getDoc(refGrupo(a.gid))).data();
+      if (!g?.amistoso) continue;
+      const todos = [...new Set([...(g.amistoso.locales || []), ...locales])];
+      if (g.admins?.includes(miUid()) && todos.length > (g.amistoso.locales || []).length) await F.updateDoc(refGrupo(a.gid), { 'amistoso.locales': todos });
+      const rs = (await F.getDocs(F.query(colResultados(a.gid), F.orderBy('fecha', 'desc'), F.limit(30)))).docs.map(d => d.data());
+      const ficha = fichaRival(rs, todos);
+      const prox = g.partido?.fecha && g.partido.fecha >= hoyArg() ? { fecha: g.partido.fecha, cuando: g.partido.cuando || '' } : null;
+      if (JSON.stringify([ficha, prox]) !== JSON.stringify([a.ficha ?? null, a.prox ?? null])) {
+        await actualizarGrupo(s => { const x = (s.amistosos || []).find(y => y.gid === a.gid); if (x) Object.assign(x, { ficha, prox }); });
+      }
+    } catch (e) { console.warn(e); }
+  }
+}
+
+// En el grupo del amistoso: el link para que se sumen los de los dos grupos.
+function tarjetaAmistoso() {
+  const a = D.grupo.amistoso;
+  if (!a) return '';
+  return cancha(`
+    <p class="text-center text-[11px] font-black uppercase tracking-[.25em] text-amber-200">Amistoso</p>
+    <div class="mt-3">${versus({ color: '#ef4444', nombre: a.local }, { color: '#0ea5e9', nombre: a.rival })}</div>
+    ${D.resultados.length ? `<div class="rounded-2xl bg-slate-950/50 p-3 mt-3">${tablaFicha(fichaRival(D.resultados, a.locales || []), [a.local, a.rival])}</div>` : ''}
+    ${esAdmin() && yaSeJugo() ? `
+      <button data-action="revancha" class="${BTN_BLANCO} w-full mt-3 py-3">${ic('repeat')} Armar la revancha</button>
+      <p class="text-xs text-white/75 text-center mt-1.5">Se vacía la lista y ponés la fecha nueva. Mismo link, mismo grupo.</p>`
+    : `<p class="text-sm text-white/85 text-center mt-3">Pasale el link a los dos grupos: entran directo y se anotan como siempre. Los equipos salen grupo contra grupo.</p>
+    <button data-action="copiar-amistoso" class="${BTN_BLANCO} w-full mt-3 text-sm">${ic('copy')} Copiar invitación para WhatsApp</button>`}`);
+}
+const yaSeJugo = () => { const p = D.grupo.partido; return !p.fecha || p.fecha < hoyArg() || fasePartido() === 'terminado'; };
+
+// En el grupo de origen: la ficha de un rival (historial, próxima fecha y acceso).
+function tarjetaRival(a) {
+  const adentro = (D.perfil.grupos || []).some(g => g.id === a.gid), admin = esAdmin();
+  return card(`
+    <div class="relative rounded-2xl bg-slate-950/40 py-3">
+      ${admin ? `<button data-action="quitar-amistoso" data-gid="${a.gid}" title="Quitar este rival" aria-label="Quitar este rival" class="absolute top-2 right-2 ${BTN_CHIP} !bg-transparent hover:!text-red-300">${ic('x')}</button>` : ''}
+      ${versus({ color: '#ef4444', nombre: D.grupo.nombre }, { color: '#0ea5e9', nombre: a.rival }, 46)}
+    </div>
+    ${tablaFicha(a.ficha)}
+    ${a.prox ? `<p class="flex items-center justify-center gap-1.5 text-sm text-amber-200 mt-3">${ic('calendar')} Próximo: <b>${fechaCorta(a.prox.fecha)}${a.prox.cuando ? ' · ' + esc(a.prox.cuando) : ''}</b></p>` : ''}
+    <button data-action="${adentro ? 'cambiar-grupo' : 'sumarme-amistoso'}" data-gid="${a.gid}" class="${adentro && !a.prox && admin ? BTN_OK : adentro ? BTN_SEC : BTN_OK} w-full mt-3">
+      ${!adentro ? `${ic('user-plus')} Sumarme al amistoso` : !a.prox && admin ? `${ic('repeat')} Armar la revancha` : `Ir al amistoso ${ic('arrow-right')}`}
+    </button>`);
+}
+
+// Formulario para armar un amistoso con otro grupo (solo admin).
+const formAmistoso = (otro = false) => card(`
+  <div class="rounded-2xl bg-slate-950/40 py-3">${versus({ color: '#ef4444', nombre: D.grupo.nombre }, { color: '#0ea5e9', nombre: otro ? 'Rival nuevo' : 'Otro grupo' })}</div>
+  <h2 class="text-xl font-black text-center mt-3">${otro ? 'Jugar contra otro rival' : 'Amistoso con otro grupo'}</h2>
+  <p class="text-sm text-slate-400 text-center mt-1">¿Les faltan jugadores? Inviten a otro grupo (los del laburo, los del club) y jueguen ustedes contra ellos.</p>
+  <ol class="mt-3 space-y-2 text-sm">
+    ${['Escribí contra quién juegan', 'Pasá el link por WhatsApp a los dos grupos', 'Se anotan y los equipos salen grupo contra grupo'].map((txt, k) => `
+      <li class="flex items-center gap-2.5"><span class="w-7 h-7 shrink-0 rounded-full bg-amber-400 text-slate-950 text-sm font-black grid place-items-center">${k + 1}</span>${txt}</li>`).join('')}
+  </ol>
+  <form data-form="amistoso" class="mt-4 space-y-2">
+    <input id="a-rival" name="rival" required maxlength="30" placeholder="¿Contra quién? (ej: Los del laburo)" class="${INPUT}">
+    <button class="${BTN_OK} w-full py-3 text-base">${ic('swords')} Armar amistoso</button>
+  </form>`);
+
+function vistaAmistoso() {
+  const lista = [...rivales()].sort((a, b) => (a.prox ? 0 : 1) - (b.prox ? 0 : 1) || b.ts - a.ts);
+  setTimeout(sincronizarAmistosos);
+  return `
+    ${cancha(`
+      <div class="text-center py-1">
+        <div class="flex items-center justify-center gap-1">${camiseta('#ef4444', 44)}<b class="text-amber-300 text-sm">VS</b>${camiseta('#0ea5e9', 44)}</div>
+        <h2 class="text-2xl font-black text-white mt-2">Amistosos</h2>
+        <p class="text-sm text-white/85 mt-1">Contra otros grupos. Cada rival queda con su historial.</p>
+      </div>`)}
+    ${lista.map(tarjetaRival).join('')}
+    ${esAdmin() ? formAmistoso(lista.length > 0) : lista.length ? '' : card('<p class="text-sm text-slate-400">Todavía no hay amistosos.</p>')}`;
+}
+
+// ---------------- Árbitro del partido del grupo ----------------
+function tarjetaArbitro() {
+  const a = D.grupo.arbitro;
+  if (!a) return '';
+  return `
+    <div class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5">
+      ${tarjetaAmarilla(22)}
+      <p class="flex-1 min-w-0 text-sm truncate">Dirige <b>${esc(a.nombre)}</b></p>
+      ${esAdmin() ? `<button data-action="arbitro" class="${BTN_CHIP}">${ic('pencil')} Cambiar</button>` : ''}
+    </div>`;
+}
+
+function modalArbitro() {
+  const a = D.grupo.arbitro || {};
+  return modal(`
+    <div class="flex items-center gap-3">${tarjetaAmarilla(30)}<h2 class="text-xl font-black">Árbitro</h2></div>
+    <p class="text-sm text-slate-400 mt-2">¿Quién dirige el partido del grupo? Se ve arriba de la lista para que todos sepan.</p>
+    <form data-form="arbitro" class="space-y-2 mt-4">
+      <select name="id" class="${INPUT}">
+        <option value="">Alguien de afuera del grupo</option>
+        ${jugadoresDelGrupo().map(p => `<option value="${p.id}" ${a.id === p.id ? 'selected' : ''}>${esc(p.usuario)}</option>`).join('')}
+      </select>
+      <input name="nombre" maxlength="30" value="${a.id ? '' : esc(a.nombre || '')}" placeholder="Nombre (si es de afuera)" class="${INPUT}">
+      <div class="flex gap-2 pt-2">
+        ${D.grupo.arbitro ? `<button type="button" data-action="arbitro-quitar" class="${BTN_SEC} text-sm">Sin árbitro</button>` : ''}
+        <button type="button" data-action="cerrar-modal" class="${BTN_SEC} text-sm flex-1">Cancelar</button>
+        <button class="${BTN_OK} text-sm flex-1">${ic('save')} Guardar</button>
+      </div>
+    </form>`);
+}
+
+// ---------------- Modos del grupo y cartelera ----------------
+// Lo básico (lista, equipos equilibrados, mejor jugador) viene siempre; lo demás se prende acá.
+function tarjetaModos() {
+  if (!esAdmin() || D.grupo.amistoso) return '';
+  const enAdmin = location.hash === '#/admin';
+  if (!enAdmin && guardado.get(LS + 'modosOcultos')) return '';
+  const t = D.grupo.torneo, a = rivales().length > 0;
+  const modo = (activo, attrs, dibujo, titulo, txt) => {
+    const tag = attrs.startsWith('href') ? 'a' : 'button';
+    return `
+      <${tag} ${attrs} class="relative flex flex-col items-center text-center gap-1 rounded-2xl border-2 px-1.5 pb-3 pt-6 transition active:scale-95 ${activo ? 'border-emerald-500/70 bg-emerald-500/10' : 'border-slate-700 bg-slate-800/40 hover:border-slate-500'}">
+        <span class="absolute top-1.5 right-1.5 text-[9px] font-black uppercase rounded-full px-1.5 py-0.5 ${activo ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-200'}">${activo ? 'Activo' : '+ Sumar'}</span>
+        <span class="h-12 flex items-center justify-center">${dibujo}</span>
+        <span class="font-black text-sm leading-tight mt-1">${titulo}</span>
+        <span class="text-[11px] text-slate-400 leading-tight">${txt}</span>
+      </${tag}>`;
+  };
+  return card(`
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <h2 class="text-lg font-black">${ic('sparkles', 'text-amber-300')} Sumale algo al grupo</h2>
+        <p class="text-xs text-slate-400">Prendé lo que quieran usar. Lo que no, no aparece.</p>
+      </div>
+      ${enAdmin ? '' : `<button data-action="modos-ocultar" title="Ocultar" aria-label="Ocultar" class="${BTN_CHIP}">${ic('x')}</button>`}
+    </div>
+    <div class="grid grid-cols-3 gap-2 mt-3">
+      ${modo(!!t, t ? 'href="#/torneo"' : 'data-action="torneo-nuevo"', `<span class="flex -space-x-3">${[0, 1, 2].map(i => camiseta(colorT(i)[2], 30)).join('')}</span>`, 'Torneo', 'Liga o copa entre ustedes')}
+      ${modo(!!a, 'href="#/amistoso"', `<span class="flex items-center">${camiseta('#ef4444', 30)}<b class="text-[10px] text-amber-300 -mx-0.5">VS</b>${camiseta('#0ea5e9', 30)}</span>`, 'Amistoso', 'Contra otro grupo')}
+      ${modo(!!D.grupo.arbitro, 'data-action="arbitro"', tarjetaAmarilla(34), 'Árbitro', 'Alguien que dirige')}
+    </div>`);
+}
+
+// Arriba de Partido: el partido del grupo y lo que haya además (torneo, amistoso). Si no hay nada más, no se ve.
+function cartelera() {
+  if (D.grupo.amistoso) return '';
+  const t = D.grupo.torneo, tab = tabGrupo(), p = D.grupo.partido;
+  const prox = rivales().filter(x => x.prox).sort((x, y) => x.prox.fecha.localeCompare(y.prox.fecha))[0];
+  const items = [['partido', '#/', '<span class="text-2xl leading-none">⚽</span>', 'Del grupo', p.fecha ? `${fechaCorta(p.fecha)}${p.cuando ? ' · ' + esc(p.cuando) : ''}` : 'Sin fecha']];
+  if (t && (t.estado !== 'armando' || esAdmin())) items.push(['torneo', '#/torneo', `<span class="text-amber-300">${ic('trophy', '!w-6 !h-6')}</span>`, t.nombre, estadoTorneo(t)]);
+  if (rivales().length) items.push(['amistoso', '#/amistoso', camiseta('#0ea5e9', 26), prox ? `vs ${prox.rival}` : 'Amistosos', prox ? `${fechaCorta(prox.prox.fecha)}${prox.prox.cuando ? ' · ' + esc(prox.prox.cuando) : ''}` : `${rivales().length} ${rivales().length === 1 ? 'rival' : 'rivales'}`]);
+  if (items.length < 2) return '';
+  return `
+    <div class="grid ${items.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2">
+      ${items.map(([k, h, dibujo, tit, sub]) => `
+        <a href="${h}" class="min-w-0 flex flex-col items-center text-center gap-1 rounded-2xl border-2 px-1.5 py-2 transition ${tab === k ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/70 hover:border-slate-600'}">
+          <span class="h-7 grid place-items-center">${dibujo}</span>
+          <span class="block w-full text-[13px] font-black leading-tight truncate">${esc(tit)}</span>
+          <span class="block w-full text-[10px] text-slate-400 leading-tight truncate">${sub}</span>
+        </a>`).join('')}
+    </div>`;
+}
+
+// ---------------- Torneo interno ----------------
+// Uno por grupo, en grupos/{gid}.torneo; lo arma y lo maneja un admin:
+// { nombre, estado: 'armando' | 'jugando' | 'terminado', ids: [jugadores], cant: cuántos equipos,
+//   formato: 'liga' | 'copa' | 'ligacopa', vueltas: 1 | 2, equipos: [{ nombre, ids }] | null, modo,
+//   cuando: { tipo: 'grupo' | 'propio', dia, hora }, arbitro: 'nadie' | 'libre' | id de jugador,
+//   partidos: [{ f: fecha, a, b, ga, gb }] (la liga), llave: [{ a, b }] (primera ronda de la copa, null = pasa directo),
+//   res: { 'ronda-lugar': { a, b, ga, gb, gana } } (resultados de la copa), empezo, termino }.
+// Cuando se arma otro, el terminado queda resumido en torneosViejos (los últimos 10).
+// Colores que puede elegir cada equipo (uno o dos). En un torneo no se repite el color principal ni la combinación.
+const CATALOGO_COLORES = {
+  rojo: ['🔴', 'Rojo', '#ef4444'], bordo: ['🟥', 'Bordó', '#9f1239'], naranja: ['🟠', 'Naranja', '#f97316'],
+  amarillo: ['🟡', 'Amarillo', '#facc15'], verde: ['🟢', 'Verde', '#16a34a'], celeste: ['🩵', 'Celeste', '#7dd3fc'],
+  azul: ['🔵', 'Azul', '#1d4ed8'], violeta: ['🟣', 'Violeta', '#8b5cf6'], rosa: ['🩷', 'Rosa', '#f472b6'],
+  blanco: ['⚪', 'Blanco', '#f1f5f9'], negro: ['⚫', 'Negro', '#18181b'], gris: ['🩶', 'Gris', '#9ca3af'], marron: ['🟤', 'Marrón', '#92400e'],
+};
+const COLOR_INICIAL = ['rojo', 'azul', 'verde', 'amarillo', 'violeta', 'naranja', 'blanco', 'celeste'];
+// Colores del equipo i del torneo actual (los que eligió su capitán, o los de arranque).
+const coloresT = i => { const c = D.grupo?.torneo?.equipos?.[i]?.colores; return c?.length ? c : [COLOR_INICIAL[i % COLOR_INICIAL.length]]; };
+const colorT = i => CATALOGO_COLORES[coloresT(i)[0]];
+const nombreT = (t, i) => `${colorT(i)[0]} ${t.equipos[i].nombre}`;
+const camisetaT = (t, i, px) => {
+  if (!definido(i)) return camiseta(SIN_EQUIPO, px);
+  const [c1, c2] = coloresT(i).map(c => CATALOGO_COLORES[c][2]);
+  return camiseta(c1, px, inicial(t.equipos[i].nombre), c2, t.equipos[i].diseno);
+};
+const esCapitan = (t, i) => !!t.equipos?.[i]?.capitan && t.equipos[i].capitan === miUid();
+const puedeEditarEquipo = (t, i) => t.estado !== 'terminado' && (esAdmin() || esCapitan(t, i));
+// Encima de los datos del torneo: el nombre, los colores y el diseño que eligió cada capitán (torneoEquipos)
+// y los resultados cargados (torneoResultados: el número del partido en la liga, 'ronda-lugar' en la copa).
+// Cuando la final de la copa tiene ganador, el torneo terminó.
+function aplicarIdentidades() {
+  const t = D.grupo?.torneo;
+  if (!t?.equipos) return;
+  t.equipos.forEach((e, i) => {
+    const x = D.torneoEquipos?.[i];
+    if (x && x.torneo === t.creado) Object.assign(e, { nombre: x.nombre, colores: x.colores, diseno: x.diseno });
+  });
+  for (const [k, x] of Object.entries(D.torneoResultados || {})) {
+    if (x.torneo !== t.creado) continue;
+    if (k.includes('-')) t.res = { ...(t.res || {}), [k]: { a: x.a, b: x.b, ga: x.ga, gb: x.gb, gana: x.gana ?? null, por: x.por } };
+    else if (t.partidos?.[k]?.a === x.a && t.partidos[k].b === x.b) Object.assign(t.partidos[k], { ga: x.ga, gb: x.gb, por: x.por });
+  }
+  if (t.estado === 'jugando' && t.llave) {
+    const R = rondasCopa(t);
+    if (definido(ganadorLlave(R[R.length - 1][0]))) t.estado = 'terminado';
+  }
+}
+// Cargan el resultado de un partido: un admin, los capitanes de los dos equipos o el árbitro del torneo.
+const puedeCargar = (t, x) => t?.estado === 'jugando' && !!x && definido(x.a) && definido(x.b)
+  && (esAdmin() || esCapitan(t, x.a) || esCapitan(t, x.b) || (!!t.arbitro && t.arbitro === miUid()));
+// Si el equipo i chocaría de colores con otro, el porqué.
+function choqueColores(t, i, colores) {
+  const clave = cs => [...cs].sort().join('+');
+  for (const j of t.equipos.keys()) {
+    if (j === i) continue;
+    const otro = coloresT(j);
+    if (otro[0] === colores[0]) return `${t.equipos[j].nombre} ya usa el ${CATALOGO_COLORES[colores[0]][1].toLowerCase()} como color principal.`;
+    if (clave(otro) === clave(colores)) return `${t.equipos[j].nombre} ya tiene esa combinación de colores.`;
+  }
+  return '';
+}
+const definido = i => typeof i === 'number';
+const jugadoresDelGrupo = () => [
+  ...Object.values(D.miembros).sort((a, b) => a.usuario.localeCompare(b.usuario)),
+  ...Object.keys(D.grupo.invitados).map(jugador).filter(Boolean),
+];
+
+// Reparte en n equipos (de tamaño parejo, ±1). Equilibrado: de mejor a peor en serpentina,
+// con los arqueros primero (uno por equipo), y después prueba cambios de a dos mientras
+// achiquen la diferencia entre el mejor y el peor promedio.
+function repartirEnEquipos(ids, n, modo) {
+  const js = shuffle(ids.map(jugador).filter(Boolean));
+  const eqs = Array.from({ length: n }, () => []);
+  if (modo === 'aleatorio') { js.forEach((p, i) => eqs[i % n].push(p)); return eqs.map(e => e.map(p => p.id)); }
+  const mejor = (a, b) => puntaje(b.id) - puntaje(a.id);
+  const arqs = js.filter(p => p.posicion === 'arquero').sort(mejor);
+  const orden = [...arqs.slice(0, n), ...[...arqs.slice(n), ...js.filter(p => p.posicion !== 'arquero')].sort(mejor)];
+  orden.forEach((p, i) => { const v = Math.floor(i / n), k = i % n; eqs[v % 2 ? n - 1 - k : k].push(p); });
+  const prom = e => e.reduce((t, p) => t + puntaje(p.id), 0) / (e.length || 1);
+  const spread = () => { const ps = eqs.map(prom); return Math.max(...ps) - Math.min(...ps); };
+  for (let vuelta = 0, mejoro = true; mejoro && vuelta < 50; vuelta++) {
+    mejoro = false;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) for (let x = 0; x < eqs[i].length; x++) for (let y = 0; y < eqs[j].length; y++) {
+      const a = eqs[i][x], b = eqs[j][y];
+      if ((a.posicion === 'arquero') !== (b.posicion === 'arquero')) continue;
+      const antes = spread();
+      eqs[i][x] = b; eqs[j][y] = a;
+      if (spread() < antes - 1e-9) mejoro = true;
+      else { eqs[i][x] = a; eqs[j][y] = b; }
+    }
+  }
+  return eqs.map(e => e.map(p => p.id));
+}
+
+// Todos contra todos (método del círculo). Con cantidad impar, cada fecha uno queda libre.
+function fixtureTorneo(n, vueltas) {
+  let ids = [...Array(n).keys()];
+  if (n % 2) ids.push(null);
+  const m = ids.length, out = [];
+  for (let f = 0; f < m - 1; f++) {
+    for (let k = 0; k < m / 2; k++) {
+      const a = ids[k], b = ids[m - 1 - k];
+      if (a !== null && b !== null) out.push({ f: f + 1, a: f % 2 ? b : a, b: f % 2 ? a : b, ga: null, gb: null });
+    }
+    ids = [ids[0], ids[m - 1], ...ids.slice(1, m - 1)];
+  }
+  if (vueltas === 2) out.push(...out.map(x => ({ ...x, f: x.f + m - 1, a: x.b, b: x.a })));
+  return out;
+}
+
+// Tabla de posiciones: 3 puntos por partido ganado y 1 por empate. Desempata la diferencia de gol y los goles a favor.
+function tablaTorneo(t) {
+  const filas = t.equipos.map((e, i) => ({ i, pj: 0, pg: 0, pe: 0, pp: 0, gf: 0, gc: 0, pts: 0 }));
+  for (const x of t.partidos || []) {
+    if (x.ga == null || x.gb == null) continue;
+    const A = filas[x.a], B = filas[x.b];
+    A.pj++; B.pj++; A.gf += x.ga; A.gc += x.gb; B.gf += x.gb; B.gc += x.ga;
+    if (x.ga > x.gb) { A.pg++; B.pp++; A.pts += 3; } else if (x.ga < x.gb) { B.pg++; A.pp++; B.pts += 3; } else { A.pe++; B.pe++; A.pts++; B.pts++; }
+  }
+  return filas.sort((x, y) => y.pts - x.pts || (y.gf - y.gc) - (x.gf - x.gc) || y.gf - x.gf || x.i - y.i);
+}
+
+// ---- Copa (eliminación directa) ----
+// Orden clásico de cabezas de serie: el 1 contra el último, y el 1 y el 2 recién se cruzan en la final.
+const ordenSemillas = m => { let o = [0]; while (o.length < m) { const n = o.length * 2; o = o.flatMap(x => [x, n - 1 - x]); } return o; };
+function armarLlave(semillas) {
+  let m = 2;
+  while (m < semillas.length) m *= 2;
+  const lugares = ordenSemillas(m).map(k => semillas[k] ?? null);
+  return Array.from({ length: m / 2 }, (_, s) => ({ a: lugares[2 * s], b: lugares[2 * s + 1] }));
+}
+// Ganador de un cruce: número, undefined si no se jugó todavía. Contra nadie (null) pasa directo.
+function ganadorLlave(x) {
+  if (x.a === null) return x.b;
+  if (x.b === null) return x.a;
+  if (!definido(x.a) || !definido(x.b) || x.ga == null) return undefined;
+  return x.ga > x.gb ? x.a : x.gb > x.ga ? x.b : x.gana === 'b' ? x.b : x.a;
+}
+const perdedorLlave = x => { const g = ganadorLlave(x); return definido(g) && definido(x.a) && definido(x.b) ? (g === x.a ? x.b : x.a) : undefined; };
+const nombreRonda = n => ({ 1: 'Final', 2: 'Semifinal', 4: 'Cuartos', 8: 'Octavos' })[n] || `Ronda de ${n * 2}`;
+const clasificanCopa = t => t.cant >= 4 ? 4 : 2;
+// Las rondas de la copa, armadas con la primera y los resultados cargados.
+// Un resultado vale solo si los que juegan siguen siendo los mismos (por si se corrigió un partido anterior).
+function rondasCopa(t) {
+  if (!t.llave) return [];
+  const base = (t.partidos || []).reduce((m, x) => Math.max(m, x.f), 0);
+  const R = [];
+  let ronda = t.llave.map(x => ({ a: x.a, b: x.b }));
+  for (let r = 0; ; r++) {
+    ronda = ronda.map((x, s) => {
+      const res = t.res?.[`${r}-${s}`];
+      const vale = res && res.a === x.a && res.b === x.b;
+      return { ...x, key: `${r}-${s}`, f: base + r + 1, n: ronda.length, ga: vale ? res.ga : null, gb: vale ? res.gb : null, gana: vale ? res.gana : null, por: vale ? res.por : null };
+    });
+    R.push(ronda);
+    if (ronda.length === 1) break;
+    const ant = ronda;
+    ronda = Array.from({ length: ant.length / 2 }, (_, s) => ({ a: ganadorLlave(ant[2 * s]), b: ganadorLlave(ant[2 * s + 1]) }));
+  }
+  return R;
+}
+// Todos los partidos (liga y copa), con su clave: el número en la liga o 'ronda-lugar' en la copa.
+const partidosTorneo = t => [
+  ...(t.partidos || []).map((x, k) => ({ ...x, key: k })),
+  ...rondasCopa(t).flat().filter(x => x.a !== null && x.b !== null),
+];
+const partidoK = (t, k) => t && partidosTorneo(t).find(x => x.key === k && definido(x.a) && definido(x.b));
+const proximoTorneo = t => t.estado === 'jugando' ? partidosTorneo(t).find(x => definido(x.a) && definido(x.b) && x.ga == null) : null;
+// Los tres primeros: en liga por la tabla, en copa el campeón, el de la final y uno de semis.
+function podioTorneo(t) {
+  if (!t.llave) return tablaTorneo(t).slice(0, 3).map(f => f.i);
+  const R = rondasCopa(t), fin = R[R.length - 1][0];
+  const semis = R.length > 1 ? R[R.length - 2].map(perdedorLlave).filter(definido) : [];
+  return [ganadorLlave(fin), perdedorLlave(fin), ...semis].filter(definido).slice(0, 3);
+}
+const totalPartidosTorneo = t => partidosTorneo(t).length + (t.formato === 'ligacopa' && !t.llave ? clasificanCopa(t) - 1 : 0);
+
+// ---- Fechas y árbitro ----
+// Día de una fecha que falta jugar: cae en el partido del grupo o en el día fijo del torneo.
+function diaFechaTorneo(t, f) {
+  const c = t.cuando || { tipo: 'grupo' }, prox = proximoTorneo(t);
+  const sumar = (iso, dias) => new Date(Date.parse(`${iso}T12:00:00Z`) + dias * DIA).toISOString().slice(0, 10);
+  if (c.tipo === 'grupo') return prox && f >= prox.f && D.grupo.partido.fecha ? sumar(D.grupo.partido.fecha, 7 * (f - prox.f)) : '';
+  const base = new Date((t.empezo || Date.now()) - 3 * 3600e3).toISOString().slice(0, 10);
+  return sumar(base, ((c.dia - new Date(`${base}T12:00:00Z`).getUTCDay() + 7) % 7) + 7 * (f - 1));
+}
+function cuandoFechaTorneo(t, f) {
+  const dia = diaFechaTorneo(t, f), hora = t.cuando?.tipo === 'propio' ? t.cuando.hora : D.grupo.partido.cuando;
+  return dia ? `${fechaCorta(dia)}${hora ? ' · ' + hora : ''}` : '';
+}
+const libreEn = (t, f) => {
+  const ps = (t.partidos || []).filter(x => x.f === f);
+  return ps.length ? t.equipos.map((e, i) => i).find(i => !ps.some(x => x.a === i || x.b === i)) ?? null : null;
+};
+function arbitroTorneo(t, f) {
+  if (t.arbitro === 'libre') { const l = libreEn(t, f); return l != null ? t.equipos[l].nombre : ''; }
+  return t.arbitro && t.arbitro !== 'nadie' ? jugador(t.arbitro)?.usuario || '' : '';
+}
+function estadoTorneo(t) {
+  if (t.estado === 'armando') return 'Armándose';
+  if (t.estado === 'terminado') { const c = podioTorneo(t)[0]; return c != null ? `👑 ${esc(t.equipos[c].nombre)}` : 'Terminado'; }
+  const x = proximoTorneo(t);
+  return x ? (typeof x.key === 'string' ? nombreRonda(x.n) : `Fecha ${x.f}`) + (cuandoFechaTorneo(t, x.f) ? ` · ${cuandoFechaTorneo(t, x.f)}` : '') : 'En juego';
+}
+
+function mensajeTorneo(t) {
+  const L = [`🏆 *${t.nombre}*`, ''];
+  const podio = podioTorneo(t);
+  if (t.estado === 'terminado' && podio.length) L.push(`👑 Campeón: *${nombreT(t, podio[0])}*`, '');
+  if ((t.partidos || []).length) {
+    L.push('*Tabla*');
+    tablaTorneo(t).forEach((f, n) => L.push(`${n + 1}. ${nombreT(t, f.i)} — ${f.pts} ${f.pts === 1 ? 'pt' : 'pts'} (${f.pj} PJ, ${f.gf - f.gc > 0 ? '+' : ''}${f.gf - f.gc})`));
+  }
+  const jugados = partidosTorneo(t).filter(x => x.ga != null);
+  if (jugados.length) {
+    L.push('', '*Resultados*');
+    jugados.forEach(x => L.push(`${typeof x.key === 'string' ? nombreRonda(x.n) + ': ' : ''}${nombreT(t, x.a)} ${x.ga} - ${x.gb} ${nombreT(t, x.b)}${x.ga === x.gb && x.gana ? ` (ganó ${t.equipos[x.gana === 'a' ? x.a : x.b].nombre} por penales)` : ''}`));
+  }
+  return L.join('\n');
+}
+
+// ---- Pantallas ----
+function vistaTorneo() {
+  const t = D.grupo.torneo;
+  if (t?.estado === 'armando') return esAdmin() ? armandoTorneo(t) : esperandoTorneo(t);
+  if (t) return jugandoTorneo(t);
+  return `
+    ${cancha(`
+      <div class="text-center py-2">
+        <div class="flex items-end justify-center">
+          ${[0, 1, 2, 3].map(i => `<span class="inline-block -mx-1" style="rotate:${[-10, -3, 4, 11][i]}deg">${camiseta(colorT(i)[2], 44)}</span>`).join('')}
+        </div>
+        <h2 class="text-2xl font-black text-white mt-3">Torneo interno</h2>
+        <p class="text-sm text-white/85 mt-1">Varios equipos fijos con los del grupo. Liga, copa o las dos.</p>
+      </div>`)}
+    ${card(`
+      <ul class="space-y-2 text-sm">
+        ${[['shirt', 'Arman los equipos como siempre: equilibrados o al azar'], ['chart-column', 'Liga con tabla de posiciones, o copa con llave'], ['calendar', 'Cada fecha cae en el partido del grupo o en otro día'], ['trophy', 'Al final, el campeón y el podio']].map(([i, txt]) => `
+          <li class="flex items-center gap-2.5"><span class="w-8 h-8 shrink-0 rounded-xl bg-emerald-500/15 text-emerald-300 grid place-items-center">${ic(i)}</span>${txt}</li>`).join('')}
+      </ul>
+      ${esAdmin() ? `<button data-action="torneo-nuevo" class="${BTN_OK} w-full mt-4 py-3 text-base">${ic('plus')} Armar torneo</button>`
+        : '<p class="text-sm text-slate-400 text-center mt-4">Lo arma un admin del grupo.</p>'}`)}
+    ${torneosViejos()}`;
+}
+
+const torneosViejos = () => (D.grupo.torneosViejos || []).length ? card(`
+  <h2 class="font-bold">${ic('trophy', 'text-amber-300')} Campeones anteriores</h2>
+  <ul class="mt-2 space-y-1.5 text-sm">${D.grupo.torneosViejos.map(v => `
+    <li class="flex items-center justify-between gap-2 rounded-xl bg-slate-800/40 px-3 py-2">
+      <span class="truncate text-slate-300">${esc(v.nombre)}</span>
+      <span class="shrink-0 font-bold text-amber-300">👑 ${esc(v.campeon)}</span>
+    </li>`).join('')}</ul>`) : '';
+
+// En el partido del grupo: si jugás el torneo, tu próximo partido y un acceso.
+function avisoTorneo() {
+  const t = D.grupo.torneo;
+  if (!t || t.estado !== 'jugando') return '';
+  const mio = t.equipos.findIndex(e => e.ids.includes(miUid())), prox = proximoTorneo(t);
+  // Si jugás, tu próximo partido; si no, el próximo del torneo.
+  const x = mio >= 0 ? partidosTorneo(t).find(p => (p.a === mio || p.b === mio) && definido(p.a) && definido(p.b) && p.ga == null) || prox : prox;
+  const cuando = x && cuandoFechaTorneo(t, x.f);
+  const hoy = x && t.cuando?.tipo !== 'propio' && x.f === prox.f;
+  return `
+    <a href="#/torneo" class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-500/15 to-transparent px-4 py-3 hover:border-amber-400/60 transition">
+      ${mio >= 0 ? camisetaT(t, mio, 38) : `<span class="text-amber-300">${ic('trophy', '!w-8 !h-8')}</span>`}
+      <span class="flex-1 min-w-0">
+        <span class="block text-[11px] font-black uppercase tracking-wide text-amber-300">${hoy ? `Este partido es la ${typeof x.key === 'string' ? nombreRonda(x.n) : `fecha ${x.f}`} del torneo` : mio >= 0 ? 'Tu próximo partido del torneo' : esc(t.nombre)}</span>
+        <span class="block text-sm truncate">${x ? `${nombreT(t, x.a)} vs ${nombreT(t, x.b)}${cuando && !hoy ? ` · ${cuando}` : ''}` : 'Mirá la tabla'}</span>
+      </span>
+      <span class="${BTN_CHIP}">Ver torneo ${ic('chevron-right')}</span>
+    </a>`;
+}
+
+// Lista de equipos del torneo. Mientras se arma, el admin pasa a cualquiera de equipo.
+// Cada equipo tiene capitán (lo pone el admin; si no hay, hace de capitán el admin): elige el nombre y los colores.
+function equiposTorneo(t, editar) {
+  const prom = e => e.ids.reduce((s, id) => s + puntaje(id), 0) / (e.ids.length || 1);
+  const insignia = '<span class="w-4 h-4 shrink-0 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black grid place-items-center" title="Capitán">C</span>';
+  return `
+    <div class="grid sm:grid-cols-2 gap-3 mt-3">
+      ${t.equipos.map((e, i) => `
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+          <div class="flex items-center gap-2.5 px-3 py-2.5" style="background:linear-gradient(90deg,${colorT(i)[2]}40,transparent)">
+            ${camisetaT(t, i, 42)}
+            <p class="font-black flex-1 min-w-0 truncate">${esc(e.nombre)}</p>
+            ${editar ? `<span class="text-[11px] text-slate-300 shrink-0 text-center leading-tight">nivel<br><b class="text-base text-white">${prom(e).toFixed(1)}</b></span>` : `<span class="text-xs text-slate-400 shrink-0">${e.ids.length} jug.</span>`}
+          </div>
+          <div class="flex flex-wrap items-center gap-2 px-3 pt-2.5 text-xs">
+            ${esAdmin() && t.estado !== 'terminado' ? `
+              <label class="flex items-center gap-1.5 min-w-0">${insignia}
+                <select data-change="torneo-capitan" data-i="${i}" aria-label="Capitán del equipo" class="rounded-lg bg-slate-800 border border-slate-700 text-xs py-1 px-1 max-w-[9rem]">
+                  <option value="">Capitán: el admin</option>
+                  ${e.ids.map(id => `<option value="${id}" ${id === e.capitan ? 'selected' : ''}>Capitán: ${esc(jugador(id)?.usuario || '?')}</option>`).join('')}
+                </select>
+              </label>`
+              : `<span class="flex items-center gap-1.5 text-slate-300">${insignia} Capitán: <b>${e.capitan && jugador(e.capitan) ? esc(jugador(e.capitan).usuario) : 'el admin'}</b></span>`}
+            ${puedeEditarEquipo(t, i) ? `<button data-action="equipo-editar" data-i="${i}" class="ml-auto ${BTN_CHIP} !text-amber-200">${ic('palette')} Nombre y colores</button>` : ''}
+          </div>
+          <ul class="space-y-1.5 p-3 pt-2">
+            ${e.ids.map(id => jugador(id) || { id, usuario: 'Ex jugador' }).map(p => `
+              <li class="flex items-center gap-2 text-sm ${p.id === miUid() ? 'text-emerald-300 font-semibold' : ''}">
+                ${avatar(p, 26)}
+                <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}</span>
+                ${p.id === e.capitan ? insignia : ''}
+                <span class="text-xs" title="${pos(p).corto}">${pos(p).emoji}</span>
+                ${editar ? `<select data-change="torneo-mover" data-id="${p.id}" aria-label="Pasar a otro equipo" class="rounded-lg bg-slate-800 border border-slate-700 text-xs py-1 px-1 max-w-[6.5rem]">
+                  ${t.equipos.map((x, j) => `<option value="${j}" ${j === i ? 'selected' : ''}>${j === i ? 'Pasar a…' : colorT(j)[0] + ' ' + esc(x.nombre)}</option>`).join('')}
+                </select>` : ''}
+              </li>`).join('')}
+          </ul>
+        </div>`).join('')}
+    </div>`;
+}
+
+// Al capitán que todavía no eligió: que elija nombre y colores.
+function avisoCapitan(t) {
+  const i = t.equipos.findIndex(e => e.capitan === miUid());
+  if (i < 0 || t.estado === 'terminado' || D.torneoEquipos?.[i]?.torneo === t.creado) return '';
+  return card(`
+    <div class="flex items-center gap-3">
+      ${camisetaT(t, i, 52)}
+      <div class="min-w-0">
+        <p class="text-[11px] font-black uppercase tracking-widest text-amber-300">Sos el capitán</p>
+        <p class="font-bold leading-tight">Elegí el nombre y los colores de tu equipo</p>
+      </div>
+    </div>
+    <button data-action="equipo-editar" data-i="${i}" class="${BTN_OK} w-full mt-3">${ic('palette')} Elegir nombre y colores</button>`);
+}
+
+// Nombre, colores y diseño de un equipo (capitán o admin).
+function modalEquipo() {
+  const t = D.grupo.torneo, i = ui.eqI, d = ui.eqDraft;
+  const [c1, c2] = d.colores.map(c => CATALOGO_COLORES[c][2]);
+  const duenoPrincipal = c => t.equipos.findIndex((e, j) => j !== i && coloresT(j)[0] === c);
+  const choque = choqueColores(t, i, d.colores);
+  const muestra = (n, c) => {
+    const [, nombre, hex] = CATALOGO_COLORES[c];
+    const dueno = n === 0 ? duenoPrincipal(c) : -1, repetido = n === 1 && c === d.colores[0], elegido = d.colores[n] === c;
+    return `
+      <button type="button" data-action="equipo-color" data-n="${n}" data-c="${c}" ${dueno >= 0 || repetido ? 'disabled' : ''} title="${nombre}${dueno >= 0 ? ` (lo usa ${esc(t.equipos[dueno].nombre)})` : ''}" class="flex flex-col items-center gap-0.5 min-w-0 disabled:opacity-25">
+        <span class="w-9 h-9 rounded-full border-2 grid place-items-center transition ${elegido ? 'border-emerald-400 ring-2 ring-emerald-400/60 scale-110' : 'border-white/25'}" style="background:${hex};color:${luz(hex) > .6 ? '#0f172a' : '#fff'}">${elegido ? ic('check', '!w-4 !h-4') : dueno >= 0 ? ic('lock', '!w-3.5 !h-3.5') : ''}</span>
+        <span class="text-[9px] text-slate-400 truncate max-w-full">${nombre}</span>
+      </button>`;
+  };
+  const colores = Object.keys(CATALOGO_COLORES);
+  return modal(`
+    <div class="flex items-center gap-4">
+      ${camiseta(c1, 92, inicial(d.nombre), c2, d.diseno)}
+      <div class="flex-1 min-w-0">
+        <p class="text-[11px] font-black uppercase tracking-widest text-slate-500">Tu equipo</p>
+        <input id="eq-nombre" value="${esc(d.nombre)}" maxlength="20" placeholder="Nombre del equipo" class="${INPUT} mt-1 !text-lg font-black">
+      </div>
+    </div>
+    <p class="text-sm font-bold mt-5">Color principal</p>
+    <div class="grid grid-cols-7 gap-1.5 mt-2">${colores.map(c => muestra(0, c)).join('')}</div>
+    <p class="text-sm font-bold mt-4">Segundo color <span class="font-normal text-slate-500">(si tienen)</span></p>
+    <div class="grid grid-cols-7 gap-1.5 mt-2">
+      <button type="button" data-action="equipo-color" data-n="1" data-c="" class="flex flex-col items-center gap-0.5">
+        <span class="w-9 h-9 rounded-full border-2 grid place-items-center text-slate-400 ${d.colores[1] ? 'border-white/25' : 'border-emerald-400 ring-2 ring-emerald-400/60'}">${ic('ban', '!w-4 !h-4')}</span>
+        <span class="text-[9px] text-slate-400">Ninguno</span>
+      </button>
+      ${colores.map(c => muestra(1, c)).join('')}
+    </div>
+    ${d.colores[1] ? `
+      <p class="text-sm font-bold mt-4">Diseño</p>
+      <div class="grid grid-cols-4 gap-2 mt-2">
+        ${Object.keys(DISENOS).map(z => `
+          <button type="button" data-action="equipo-diseno" data-d="${z}" class="flex flex-col items-center gap-0.5 rounded-xl border-2 p-1.5 transition ${d.diseno === z ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-700'}">
+            ${camiseta(c1, 40, '', c2, z)}<span class="text-[11px] font-bold">${NOMBRE_DISENO[z]}</span>
+          </button>`).join('')}
+      </div>` : ''}
+    ${choque ? `<p class="text-sm text-red-300 mt-3">${ic('circle-alert')} ${esc(choque)}</p>` : ''}
+    <div class="flex gap-2 mt-5">
+      <button data-action="cerrar-modal" class="${BTN_SEC} text-sm flex-1">Cancelar</button>
+      <button data-action="equipo-guardar" ${choque ? 'disabled' : ''} class="${BTN_OK} text-sm flex-1">${ic('save')} Guardar</button>
+    </div>`);
+}
+
+// Un partido de la liga como marcador: camiseta, nombre, resultado. Si el admin lo puede tocar, carga el resultado.
+function partidoTorneo(t, x) {
+  const hecho = x.ga != null, cargar = x.key != null && puedeCargar(t, x);
+  const mio = t.equipos.findIndex(e => e.ids.includes(miUid()));
+  const lado = (i, g, r, der) => `
+    <span class="flex-1 min-w-0 flex items-center gap-2 ${der ? 'flex-row-reverse text-right' : ''}">
+      ${camisetaT(t, i, 30)}
+      <span class="min-w-0 truncate text-sm ${hecho && g > r ? 'font-black text-white' : hecho && g < r ? 'text-slate-400' : 'font-semibold text-slate-200'} ${i === mio ? 'underline decoration-emerald-400/70 underline-offset-4' : ''}">${esc(t.equipos[i].nombre)}</span>
+    </span>`;
+  const tag = cargar ? 'button' : 'div';
+  return `
+    <${tag} ${cargar ? `data-action="torneo-res" data-k="${x.key}"` : ''} class="w-full flex items-center gap-2 rounded-2xl px-2.5 py-2 ${hecho ? 'bg-slate-800/60' : 'bg-slate-900/40 border border-dashed border-slate-700'} ${cargar ? 'hover:bg-slate-800 active:scale-[.99] transition' : ''}">
+      ${lado(x.a, x.ga, x.gb)}
+      <span class="shrink-0 min-w-[4.25rem] text-center rounded-lg px-2 ${hecho ? 'py-0.5 bg-slate-950 border border-slate-700 font-mono font-black text-lg text-amber-300 tracking-wider' : cargar ? 'py-1.5 bg-emerald-500/15 text-emerald-300 text-xs font-bold' : 'py-1 text-slate-500 text-xs font-black'}">${hecho ? `${x.ga}-${x.gb}` : cargar ? `${ic('pencil')} Cargar` : 'VS'}</span>
+      ${lado(x.b, x.gb, x.ga, true)}
+    </${tag}>`;
+}
+
+// La llave de la copa, como en las copas de verdad: columnas por ronda unidas con rayitas, y el campeón al final.
+function llaveTorneo(t) {
+  const R = rondasCopa(t);
+  const fila = (x, lado) => {
+    const i = x[lado], g = lado === 'a' ? x.ga : x.gb, gan = ganadorLlave(x);
+    if (i === null) return '<div class="h-8 px-2 flex items-center text-[11px] text-slate-500 italic">pasa directo</div>';
+    const jugado = x.ga != null, gano = jugado && gan === i, perdio = jugado && gan !== i;
+    return `
+      <div class="h-8 px-2 flex items-center gap-1.5 ${gano ? 'bg-emerald-500/15' : ''}">
+        ${camisetaT(t, i, 20)}
+        <span class="flex-1 min-w-0 truncate text-xs ${gano ? 'font-black text-white' : perdio ? 'text-slate-500 line-through decoration-slate-600' : definido(i) ? 'font-semibold' : 'text-slate-500 italic'}">${definido(i) ? esc(t.equipos[i].nombre) : 'A definir'}</span>
+        <span class="font-mono font-black text-sm ${gano ? 'text-amber-300' : 'text-slate-400'}">${g ?? ''}${jugado && x.ga === x.gb && gano ? '<sup class="text-[8px] ml-px">pen</sup>' : ''}</span>
+      </div>`;
+  };
+  const caja = x => {
+    const tocar = puedeCargar(t, x), tag = tocar ? 'button' : 'div';
+    return `<${tag} ${tocar ? `data-action="torneo-res" data-k="${x.key}"` : ''} class="block w-full text-left rounded-xl border divide-y divide-slate-800 overflow-hidden ${x.ga != null ? 'border-slate-700 bg-slate-800/70' : tocar ? 'border-emerald-500/50 bg-slate-900/80 hover:border-emerald-400' : 'border-dashed border-slate-700 bg-slate-900/60'}">${fila(x, 'a')}${fila(x, 'b')}</${tag}>`;
+  };
+  const rayita = 'border-slate-600';
+  const columnas = R.map((ronda, r) => {
+    const pares = [];
+    for (let s = 0; s < ronda.length; s += 2) pares.push(ronda.slice(s, s + 2));
+    return `
+      <div class="w-36 shrink-0 flex flex-col">
+        <p class="h-6 text-[10px] font-black uppercase tracking-widest text-center text-slate-500">${nombreRonda(ronda.length)}</p>
+        <div class="flex-1 flex flex-col">
+          ${pares.map(par => `
+            <div class="flex-1 flex flex-col justify-around relative">
+              ${par.map(x => `<div class="relative my-1.5">${r ? `<span class="absolute right-full top-1/2 w-3 border-t-2 ${rayita}"></span>` : ''}${caja(x)}</div>`).join('')}
+              ${par.length === 2 ? `<span class="absolute left-full top-1/4 h-1/2 w-3 border-y-2 border-r-2 rounded-r-md ${rayita}"></span>` : `<span class="absolute left-full top-1/2 w-3 border-t-2 ${rayita}"></span>`}
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+  const campeon = ganadorLlave(R[R.length - 1][0]);
+  return `
+    <div class="sin-barra overflow-x-auto -mx-4 px-4 pb-2 mt-3">
+      <div class="flex gap-6 w-max">
+        ${columnas}
+        <div class="w-24 shrink-0 flex flex-col">
+          <p class="h-6 text-[10px] font-black uppercase tracking-widest text-center text-amber-300">Campeón</p>
+          <div class="flex-1 relative flex flex-col items-center justify-center text-center">
+            <span class="absolute right-full top-1/2 w-3 border-t-2 ${rayita}"></span>
+            <span class="text-amber-300">${ic('trophy', '!w-9 !h-9')}</span>
+            ${definido(campeon) ? `${camisetaT(t, campeon, 30)}<span class="text-xs font-black mt-0.5 truncate max-w-full">${esc(t.equipos[campeon].nombre)}</span>` : '<span class="text-[11px] text-slate-500 mt-1">¿Quién será?</span>'}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ---- Armado (solo admin): Jugadores → Equipos → Formato → Fechas ----
+const PASOS_TORNEO = [['users', 'Jugadores'], ['shirt', 'Equipos'], ['trophy', 'Formato'], ['calendar', 'Fechas']];
+function pasoTorneo(t) {
+  const max = t.equipos ? 4 : t.ids.length >= 4 ? 2 : 1;
+  return Math.min(ui.torneoPaso || (t.equipos ? 2 : 1), max);
+}
+const botonesPaso = (atras, accion, txt) => `
+  <div class="flex gap-2">
+    ${atras ? `<button data-action="torneo-paso" data-n="${atras}" aria-label="Volver" class="${BTN_SEC} px-4">${ic('arrow-left')}</button>` : ''}
+    <button ${accion || 'disabled'} class="${BTN_OK} flex-1 py-3 text-base inline-flex items-center justify-center gap-2">${txt} ${accion && !accion.includes('empezar') ? ic('arrow-right') : ''}</button>
+  </div>`;
+// Tarjeta grande para elegir una opción (formato, cuándo se juega, cómo armar).
+const opcionGrande = (attrs, elegida, dibujo, titulo, txt) => `
+  <button ${attrs} class="w-full flex items-center gap-3 text-left rounded-2xl border-2 p-3 transition active:scale-[.98] ${elegida ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-700 bg-slate-800/40 hover:border-slate-500'}">
+    <span class="w-14 h-14 shrink-0 rounded-xl bg-slate-950/60 grid place-items-center text-emerald-300">${dibujo}</span>
+    <span class="flex-1 min-w-0"><span class="block font-black">${titulo}</span><span class="block text-xs text-slate-400 mt-0.5">${txt}</span></span>
+    <span class="w-6 h-6 shrink-0 rounded-full border-2 grid place-items-center ${elegida ? 'border-emerald-400 bg-emerald-500 text-slate-950' : 'border-slate-600'}">${elegida ? ic('check', '!w-3.5 !h-3.5') : ''}</span>
+  </button>`;
+const DIBUJO_LIGA = '<svg viewBox="0 0 40 30" width="40" height="30" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1.5" fill="#fbbf24"/><rect x="11" y="3" width="27" height="4" rx="2" fill="currentColor"/><rect x="2" y="12" width="6" height="6" rx="1.5" fill="#94a3b8"/><rect x="11" y="13" width="22" height="4" rx="2" fill="currentColor" opacity=".6"/><rect x="2" y="22" width="6" height="6" rx="1.5" fill="#fb923c"/><rect x="11" y="23" width="16" height="4" rx="2" fill="currentColor" opacity=".35"/></svg>';
+const DIBUJO_COPA = '<svg viewBox="0 0 40 30" width="40" height="30" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h7v8H2M2 18h7v8H2"/><path d="M9 8h5v14H9M14 15h8"/><circle cx="30" cy="15" r="5" fill="#fbbf24" stroke="none"/></svg>';
+
+function armandoTorneo(t) {
+  const paso = pasoTorneo(t);
+  const n = t.ids.length;
+  const pasos = PASOS_TORNEO.map(([icono, txt], k) => {
+    const p = k + 1, hecho = p < paso, ahora = p === paso;
+    const puede = p === 1 || (p === 2 && n >= 4) || (p >= 3 && !!t.equipos);
+    return `
+      ${k ? `<span class="flex-1 h-1 rounded-full mb-5 ${p <= paso ? 'bg-emerald-500' : 'bg-slate-700'}"></span>` : ''}
+      <button data-action="torneo-paso" data-n="${p}" ${puede ? '' : 'disabled'} class="flex flex-col items-center gap-1 shrink-0 w-[3.75rem] disabled:opacity-40">
+        <span class="w-10 h-10 rounded-full grid place-items-center border-2 transition ${ahora ? 'bg-emerald-500 border-emerald-300 text-slate-950 scale-110' : hecho ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' : 'border-slate-600 text-slate-400'}">${ic(hecho ? 'check' : icono, '!w-5 !h-5')}</span>
+        <span class="text-[11px] font-bold ${ahora ? 'text-white' : 'text-slate-400'}">${txt}</span>
+      </button>`;
+  }).join('');
+  return `
+    ${cancha(`
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[11px] font-black uppercase tracking-widest text-amber-200">${ic('trophy', '!w-4 !h-4')} Nuevo torneo</p>
+        <button data-action="torneo-borrar" class="${BTN_CHIP} !bg-slate-950/50">Cancelar</button>
+      </div>
+      <input value="${esc(t.nombre)}" maxlength="40" data-change="torneo-titulo" aria-label="Nombre del torneo" class="w-full mt-2 bg-transparent text-2xl font-black text-white border-b-2 border-dashed border-white/40 focus:outline-none focus:border-white py-1">
+      <p class="text-xs text-white/80 mt-1.5">${ic('pencil')} Tocá el nombre para cambiarlo</p>`)}
+    ${card(`<div class="flex items-center">${pasos}</div>`)}
+    ${[torneoPaso1, torneoPaso2, torneoPaso3, torneoPaso4][paso - 1](t)}`;
+}
+
+function torneoPaso1(t) {
+  const elegidos = new Set(t.ids), n = t.ids.length, todos = jugadoresDelGrupo();
+  const anotados = D.grupo.anotados.filter(id => !!jugador(id)).length;
+  return `
+    ${card(`
+      <h2 class="text-xl font-black">¿Quiénes juegan?</h2>
+      <p class="text-sm text-slate-400 mt-0.5">Tocá a cada uno para sacarlo o sumarlo.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <span class="rounded-xl bg-emerald-500/15 border border-emerald-500/40 px-3 py-1.5 text-sm font-black text-emerald-300">${n} ${n === 1 ? 'jugador' : 'jugadores'}</span>
+        <button data-action="torneo-todos" data-que="todos" class="${BTN_CHIP} !text-sm !py-2">${ic('users')} Todos (${todos.length})</button>
+        ${anotados ? `<button data-action="torneo-todos" data-que="anotados" class="${BTN_CHIP} !text-sm !py-2">${ic('clipboard-list')} Los anotados (${anotados})</button>` : ''}
+      </div>
+      <div class="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
+        ${todos.map(p => { const si = elegidos.has(p.id); return `
+          <button data-action="torneo-jugador" data-id="${p.id}" aria-pressed="${si}" class="relative flex flex-col items-center gap-1 rounded-2xl border-2 p-2 pt-3 transition active:scale-95 ${si ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/40 opacity-45 grayscale'}">
+            ${si ? `<span class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 text-slate-950 grid place-items-center">${ic('check', '!w-3.5 !h-3.5')}</span>` : ''}
+            ${avatar(p, 44)}
+            <span class="text-xs font-semibold truncate max-w-full">${esc(p.usuario)}</span>
+            <span class="text-[10px] text-slate-400">${pos(p).emoji} ${pos(p).corto}</span>
+          </button>`; }).join('')}
+      </div>`)}
+    ${botonesPaso(null, n >= 4 ? 'data-action="torneo-paso" data-n="2"' : '', n >= 4 ? 'Siguiente: los equipos' : 'Elegí al menos 4 jugadores')}`;
+}
+
+function torneoPaso2(t) {
+  const n = t.ids.length, max = Math.min(8, Math.floor(n / 2));
+  const por = n / t.cant, porTxt = Number.isInteger(por) ? `${por}` : `${Math.floor(por)} o ${Math.ceil(por)}`;
+  return `
+    ${card(`
+      <h2 class="text-xl font-black">¿Cuántos equipos?</h2>
+      <div class="grid grid-cols-7 gap-1.5 mt-3">
+        ${[2, 3, 4, 5, 6, 7, 8].map(k => `<button data-action="torneo-cant" data-n="${k}" ${k > max ? 'disabled' : ''} class="h-11 rounded-xl text-lg font-black transition active:scale-95 disabled:opacity-20 disabled:pointer-events-none ${k === t.cant ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}">${k}</button>`).join('')}
+      </div>
+      <div class="flex items-end flex-wrap gap-0.5 mt-4">${Array.from({ length: t.cant }, (_, i) => camiseta(colorT(i)[2], 38)).join('')}</div>
+      <p class="text-sm text-slate-400 mt-1">${t.cant} equipos de <b class="text-slate-100">${porTxt} jugadores</b></p>
+
+      <h2 class="text-xl font-black mt-6">¿Cómo los armamos?</h2>
+      <div class="space-y-2 mt-3">
+        ${opcionGrande('data-action="torneo-armar" data-modo="equilibrado"', t.equipos && t.modo === 'equilibrado', ic('scale', '!w-7 !h-7'), 'Equilibrados', 'Según el nivel de cada uno. Un arquero por equipo.')}
+        ${opcionGrande('data-action="torneo-armar" data-modo="aleatorio"', t.equipos && t.modo === 'aleatorio', ic('dices', '!w-7 !h-7'), 'Al azar', 'Sorteo, como en el potrero.')}
+      </div>
+      ${t.equipos ? `<p class="text-xs text-slate-500 mt-2">${ic('repeat')} Tocá otra vez para probar otra combinación.</p>` : ''}`)}
+    ${t.equipos ? card(`
+      <h2 class="text-lg font-black">Así quedaron</h2>
+      <p class="text-sm text-slate-400">Elegí un capitán por equipo: él le pone el nombre y los colores. Si no hay capitán, los elegís vos. También podés pasar a alguien de un equipo a otro.</p>
+      ${equiposTorneo(t, true)}`) : ''}
+    ${botonesPaso(1, t.equipos ? 'data-action="torneo-paso" data-n="3"' : '', t.equipos ? 'Siguiente: el formato' : 'Primero armá los equipos')}`;
+}
+
+function torneoPaso3(t) {
+  const f = t.formato || 'liga', liga = fixtureTorneo(t.cant, t.vueltas).length, k = clasificanCopa(t);
+  const vuelta = (v, icono, titulo) => `
+    <button data-action="torneo-vueltas" data-n="${v}" class="flex-1 rounded-xl border-2 px-3 py-2 text-sm font-bold inline-flex items-center justify-center gap-1.5 transition ${t.vueltas === v ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-700 text-slate-400'}">${ic(icono)} ${titulo}</button>`;
+  return `
+    ${card(`
+      <h2 class="text-xl font-black">¿Cómo se juega?</h2>
+      <div class="space-y-2 mt-3">
+        ${opcionGrande('data-action="torneo-formato" data-f="liga"', f === 'liga', DIBUJO_LIGA, 'Liga', `Todos contra todos. Gana el que suma más puntos. ${liga} partidos.`)}
+        ${opcionGrande('data-action="torneo-formato" data-f="copa"', f === 'copa', DIBUJO_COPA, 'Copa', `Eliminación directa: el que pierde se va, hasta la final. ${t.cant - 1} partidos.`)}
+        ${opcionGrande('data-action="torneo-formato" data-f="ligacopa"', f === 'ligacopa', `<span class="flex items-center -space-x-1 scale-[.8]">${DIBUJO_LIGA}${DIBUJO_COPA}</span>`, 'Liga + Copa', `Primero todos contra todos y los ${k} mejores juegan ${k === 4 ? 'semis y final' : 'la final'}. ${liga + k - 1} partidos.`)}
+      </div>
+      ${f !== 'copa' ? `
+        <p class="text-sm font-bold mt-5">La liga, ¿a una o dos ruedas?</p>
+        <div class="flex gap-2 mt-2">${vuelta(1, 'arrow-right', 'Solo ida')}${vuelta(2, 'arrow-left-right', 'Ida y vuelta')}</div>` : ''}`)}
+    ${botonesPaso(2, 'data-action="torneo-paso" data-n="4"', 'Siguiente: las fechas')}`;
+}
+
+function torneoPaso4(t) {
+  const c = t.cuando || { tipo: 'grupo' }, p = D.grupo.partido;
+  const diaGrupo = p.fecha ? DIAS_PLURAL[new Date(`${p.fecha}T12:00:00Z`).getUTCDay()] : '';
+  const hayLibre = (t.formato || 'liga') !== 'copa' && t.cant % 2;
+  const arb = t.arbitro || 'nadie', uno = arb !== 'nadie' && arb !== 'libre';
+  const chip = (attrs, si, html) => `<button ${attrs} class="rounded-xl border-2 px-3 py-2 text-sm font-bold inline-flex items-center gap-1.5 transition ${si ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-700 text-slate-400 hover:border-slate-500'}">${html}</button>`;
+  const fecha1 = t.formato === 'copa' ? [] : fixtureTorneo(t.cant, t.vueltas).filter(x => x.f === 1);
+  return `
+    ${card(`
+      <h2 class="text-xl font-black">¿Cuándo se juega?</h2>
+      <div class="space-y-2 mt-3">
+        ${opcionGrande('data-action="torneo-cuando" data-tipo="grupo"', c.tipo !== 'propio', '<span class="text-3xl">⚽</span>', 'En el partido del grupo', diaGrupo ? `Cada partido de los ${diaGrupo} es una fecha del torneo.` : 'Cada partido del grupo es una fecha del torneo.')}
+        ${opcionGrande('data-action="torneo-cuando" data-tipo="propio"', c.tipo === 'propio', ic('calendar', '!w-7 !h-7'), 'Otro día fijo', 'El torneo tiene su propio día y hora, aparte del partido de siempre.')}
+      </div>
+      ${c.tipo === 'propio' ? `
+        <div class="grid grid-cols-7 gap-1.5 mt-3">
+          ${[1, 2, 3, 4, 5, 6, 0].map(d => `<button data-action="torneo-dia" data-d="${d}" class="h-11 rounded-xl text-xs font-black uppercase transition ${c.dia === d ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">${DIAS[d].slice(0, 3)}</button>`).join('')}
+        </div>
+        <label class="flex items-center gap-3 mt-2 text-sm text-slate-400">${ic('clock')} Hora
+          <input type="time" value="${esc(c.hora || '')}" data-change="torneo-hora" class="${INPUT} !w-auto !py-2">
+        </label>` : ''}
+
+      <h2 class="text-xl font-black mt-6 flex items-center gap-2">${tarjetaAmarilla(20)} ¿Quién dirige?</h2>
+      <div class="flex flex-wrap gap-2 mt-3">
+        ${chip('data-action="torneo-arbitro" data-a="nadie"', arb === 'nadie', 'Sin árbitro')}
+        ${hayLibre ? chip('data-action="torneo-arbitro" data-a="libre"', arb === 'libre', 'El equipo libre') : ''}
+        ${chip('data-action="torneo-arbitro" data-a="uno"', uno, 'Alguien del grupo')}
+      </div>
+      ${arb === 'libre' ? '<p class="text-xs text-slate-400 mt-2">En cada fecha queda un equipo libre: ese dirige.</p>' : ''}
+      ${uno ? `<select data-change="torneo-arbitro-id" class="${INPUT} mt-2">${jugadoresDelGrupo().map(p => `<option value="${p.id}" ${p.id === arb ? 'selected' : ''}>${esc(p.usuario)}</option>`).join('')}</select>` : ''}
+
+      <p class="text-[11px] font-black uppercase tracking-wide text-slate-500 mt-6 mb-2">Así arranca</p>
+      ${fecha1.length ? `<div class="space-y-1.5">${fecha1.map(x => partidoTorneo(t, x)).join('')}</div>`
+        : `<p class="text-sm text-slate-400 rounded-2xl border border-dashed border-slate-700 px-3 py-3">${ic('dices')} La llave se sortea cuando empieza el torneo.</p>`}`)}
+    ${botonesPaso(3, 'data-action="torneo-empezar"', `${ic('flag')} ¡Que ruede la pelota!`)}`;
+}
+
+// Los jugadores, mientras el admin arma el torneo.
+const esperandoTorneo = t => `
+  ${avisoCapitan(t)}
+  ${cancha(`
+    <div class="text-center py-2">
+      <span class="inline-grid place-items-center w-14 h-14 rounded-3xl bg-slate-950/50 text-amber-300">${ic('trophy', '!w-8 !h-8')}</span>
+      <h2 class="text-xl font-black text-white mt-3">${esc(t.nombre)}</h2>
+      <p class="text-sm text-white/85 mt-1">El admin está armando el torneo. Cuando arranque, acá vas a ver tu equipo, los partidos y la tabla.</p>
+    </div>`)}
+  ${t.equipos ? card(`<h2 class="text-lg font-black">Equipos (los jugadores todavía pueden cambiar)</h2>${equiposTorneo(t, false)}`) : ''}`;
+
+// Papelitos que caen sobre el campeón.
+const confeti = () => `<div class="confeti" aria-hidden="true">${Array.from({ length: 18 }, (_, k) =>
+  `<i style="left:${(k * 37) % 100}%;background:${['#fbbf24', '#34d399', '#f87171', '#60a5fa', '#fff'][k % 5]};animation-delay:${(k * 0.37) % 3}s;animation-duration:${2.6 + (k % 4) * .5}s"></i>`).join('')}</div>`;
+
+function jugandoTorneo(t) {
+  const admin = esAdmin(), terminado = t.estado === 'terminado';
+  const mio = t.equipos.findIndex(e => e.ids.includes(miUid()));
+  const conLiga = (t.partidos || []).length > 0, enCopa = !!t.llave;
+  const tabla = conLiga ? tablaTorneo(t) : [], podio = podioTorneo(t);
+  const fechas = [...new Set((t.partidos || []).map(x => x.f))];
+  const total = totalPartidosTorneo(t), jugados = partidosTorneo(t).filter(x => x.ga != null).length;
+  const prox = proximoTorneo(t);
+  const k = clasificanCopa(t);
+  // Los últimos tres resultados de un equipo en la liga: G, E o P.
+  const forma = i => t.partidos.filter(x => x.ga != null && (x.a === i || x.b === i)).slice(-3).map(x => {
+    const d = x.a === i ? x.ga - x.gb : x.gb - x.ga;
+    return d > 0 ? ['G', 'bg-emerald-500'] : d < 0 ? ['P', 'bg-red-500'] : ['E', 'bg-slate-500'];
+  });
+  const nom = i => esc(t.equipos[i].nombre);
+  const fase = t.formato === 'ligacopa' ? (enCopa ? 'Fase de copa' : 'Fase de liga') : t.formato === 'copa' ? 'Copa' : 'Liga';
+  return `
+    ${avisoCapitan(t)}
+    ${terminado && podio.length ? `
+      <div class="relative overflow-hidden rounded-3xl border border-amber-400/40 bg-gradient-to-b from-amber-500/30 via-amber-500/10 to-slate-900/60 p-5 text-center">
+        ${confeti()}
+        <p class="relative text-xs font-black uppercase tracking-[.3em] text-amber-300">¡Campeón!</p>
+        <div class="relative flex justify-center mt-2">${camisetaT(t, podio[0], 96)}</div>
+        <p class="relative text-3xl font-black mt-1">${nom(podio[0])}</p>
+        <p class="relative text-sm text-amber-100/80 mt-1">${t.equipos[podio[0]].ids.map(id => jugador(id)?.usuario).filter(Boolean).map(esc).join(' · ')}</p>
+        <div class="relative flex items-end justify-center gap-2 mt-5">
+          ${[1, 0, 2].filter(n => podio[n] != null).map(n => `
+            <div class="flex flex-col items-center w-24 min-w-0">
+              ${camisetaT(t, podio[n], 36)}
+              <span class="text-xs font-bold truncate max-w-full mt-1">${nom(podio[n])}</span>
+              <div class="w-full mt-1 rounded-t-xl grid place-items-center font-black text-slate-950 ${['bg-amber-300 h-16 text-2xl', 'bg-slate-300 h-11 text-lg', 'bg-orange-400 h-8'][n]}">${n + 1}°</div>
+            </div>`).join('')}
+        </div>
+        <p class="relative text-xs text-amber-100/70 mt-3">${esc(t.nombre)}</p>
+      </div>` : cancha(`
+      <div class="flex items-center gap-3">
+        <span class="w-12 h-12 shrink-0 rounded-2xl bg-slate-950/50 text-amber-300 grid place-items-center">${ic('trophy', '!w-7 !h-7')}</span>
+        <div class="min-w-0">
+          <p class="text-[11px] font-black uppercase tracking-widest text-emerald-100/80">${fase} · en juego</p>
+          <h2 class="text-xl font-black text-white truncate">${esc(t.nombre)}</h2>
+        </div>
+      </div>
+      <div class="mt-4 h-2.5 rounded-full bg-slate-950/50 overflow-hidden"><div class="h-full rounded-full bg-amber-300" style="width:${Math.round(jugados / (total || 1) * 100)}%"></div></div>
+      <p class="text-xs text-white/85 mt-1.5 flex flex-wrap justify-between gap-x-3 gap-y-1">
+        <span>${jugados} de ${total} partidos jugados</span>
+        ${mio >= 0 ? `<span class="inline-flex items-center gap-1">Jugás en ${camisetaT(t, mio, 18)} <b>${nom(mio)}</b></span>` : ''}
+      </p>`)}
+
+    ${prox ? card(`
+      <p class="text-[11px] font-black uppercase tracking-widest text-amber-300">${ic('timer')} Próximo · ${typeof prox.key === 'string' ? nombreRonda(prox.n) : `Fecha ${prox.f}`}</p>
+      ${cuandoFechaTorneo(t, prox.f) ? `<p class="text-sm text-slate-300 mt-0.5">${ic('calendar', 'text-slate-500')} ${cuandoFechaTorneo(t, prox.f)}</p>` : ''}
+      <div class="rounded-2xl bg-slate-950/50 py-4 mt-3">${versus({ camiseta: camisetaT(t, prox.a, 60), nombre: t.equipos[prox.a].nombre }, { camiseta: camisetaT(t, prox.b, 60), nombre: t.equipos[prox.b].nombre }, 60)}</div>
+      ${arbitroTorneo(t, prox.f) ? `<p class="flex items-center justify-center gap-2 text-sm text-slate-300 mt-2">${tarjetaAmarilla(16)} Dirige <b>${esc(arbitroTorneo(t, prox.f))}</b></p>` : ''}
+      ${puedeCargar(t, prox) ? `<button data-action="torneo-res" data-k="${prox.key}" class="${BTN_OK} w-full mt-3 py-3">${ic('pencil')} Cargar resultado</button>` : ''}`) : ''}
+
+    ${enCopa ? card(`
+      <h2 class="text-lg font-black">${ic('trophy', 'text-amber-300')} La llave</h2>
+      <p class="text-xs text-slate-500 mt-0.5">${rondasCopa(t).flat().some(x => puedeCargar(t, x)) ? 'Tocá un cruce tuyo para cargar el resultado. ' : ''}Deslizá para ver hasta la final →</p>
+      ${llaveTorneo(t)}`) : ''}
+
+    ${conLiga ? card(`
+      <h2 class="text-lg font-black">${ic('chart-column', 'text-emerald-400')} ${t.formato === 'ligacopa' ? 'Tabla de la liga' : 'Tabla de posiciones'}</h2>
+      ${t.formato === 'ligacopa' ? `<p class="text-xs text-slate-400 mt-0.5">Los ${k} primeros pasan a la copa.</p>` : ''}
+      <table class="w-full text-sm mt-3 tabular-nums">
+        <thead><tr class="text-[11px] uppercase tracking-wide text-slate-500">
+          <th class="w-6"></th><th class="text-left font-semibold py-1">Equipo</th><th class="font-semibold w-7">PJ</th><th class="font-semibold w-6">G</th><th class="font-semibold w-6">E</th><th class="font-semibold w-6">P</th><th class="font-semibold w-8">DG</th><th class="font-semibold w-9 text-emerald-300">Pts</th>
+        </tr></thead>
+        <tbody>${tabla.map((f, n) => `
+          <tr class="border-t ${t.formato === 'ligacopa' && n === k ? 'border-t-2 border-dashed border-emerald-500/60' : 'border-slate-800'} ${f.i === mio ? 'bg-emerald-500/10' : ''}">
+            <td class="py-2 text-center"><span class="inline-grid place-items-center w-5 h-5 rounded-md text-[11px] font-black ${n === 0 && f.pj ? 'bg-amber-300 text-slate-950' : t.formato === 'ligacopa' && n < k ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-500'}">${n + 1}</span></td>
+            <td class="py-2 pr-1"><div class="flex items-center gap-2 min-w-0">
+              ${camisetaT(t, f.i, 28)}
+              <div class="min-w-0">
+                <p class="truncate font-bold leading-tight">${nom(f.i)}</p>
+                ${f.pj ? `<div class="flex gap-0.5 mt-0.5">${forma(f.i).map(([l, c]) => `<span class="w-4 h-4 rounded-full ${c} text-[9px] font-black text-white grid place-items-center">${l}</span>`).join('')}</div>` : ''}
+              </div>
+            </div></td>
+            <td class="text-center">${f.pj}</td><td class="text-center">${f.pg}</td><td class="text-center">${f.pe}</td><td class="text-center">${f.pp}</td>
+            <td class="text-center text-slate-400">${f.gf - f.gc > 0 ? '+' : ''}${f.gf - f.gc}</td>
+            <td class="text-center text-base font-black text-emerald-300">${f.pts}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="text-[11px] text-slate-500 mt-2">Ganado 3 puntos · empate 1. Si empatan en puntos, desempata la diferencia de gol.</p>`) : ''}
+
+    ${card(`<button data-action="copiar-torneo" class="${BTN_SEC} w-full text-sm">${ic('copy')} Copiar ${conLiga ? 'tabla y resultados' : 'resultados'} para WhatsApp</button>`)}
+
+    ${conLiga ? card(`
+      <h2 class="text-lg font-black">${ic('calendar', 'text-emerald-400')} Fixture${t.formato === 'ligacopa' ? ' de la liga' : ''}</h2>
+      ${!enCopa && t.partidos.some(x => puedeCargar(t, x)) ? `<p class="text-xs text-slate-500 mt-0.5">${admin ? 'Tocá un partido para cargar o corregir el resultado.' : 'Tocá un partido de tu equipo para cargar el resultado.'}</p>` : ''}
+      <div class="space-y-4 mt-3">
+        ${fechas.map(f => {
+          const l = libreEn(t, f), arb = arbitroTorneo(t, f), cuando = cuandoFechaTorneo(t, f);
+          return `
+            <div>
+              <p class="text-[11px] font-black uppercase tracking-wide text-slate-500 mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span>Fecha ${f}</span>
+                ${cuando ? `<span class="normal-case font-semibold text-slate-400">${cuando}</span>` : ''}
+                ${l != null ? `<span class="normal-case font-semibold">· libre: ${nom(l)}</span>` : ''}
+                ${arb ? `<span class="normal-case font-semibold inline-flex items-center gap-1">· ${tarjetaAmarilla(11)} ${esc(arb)}</span>` : ''}
+              </p>
+              <div class="space-y-1.5">${(t.partidos || []).map((x, n) => x.f === f ? partidoTorneo(t, { ...x, key: enCopa ? null : n }) : '').join('')}</div>
+            </div>`;
+        }).join('')}
+      </div>`) : ''}
+
+    ${card(`
+      <h2 class="text-lg font-black">${ic('shirt', 'text-emerald-400')} Equipos</h2>
+      ${equiposTorneo(t, false)}`)}
+
+    ${admin ? `
+      <div class="flex flex-col gap-2">
+        ${terminado ? `<button data-action="torneo-nuevo" class="${BTN_OK} w-full py-3">${ic('plus')} Armar otro torneo</button>`
+          : t.formato === 'ligacopa' && !enCopa ? `<button data-action="torneo-copa" class="${BTN_OK} w-full py-3">${ic('trophy')} Terminar la liga y pasar a la copa</button>`
+          : !enCopa ? `<button data-action="torneo-terminar" class="${BTN_OK} w-full py-3">${ic('flag')} Terminar el torneo</button>` : ''}
+        <button data-action="torneo-borrar" class="${BTN_CHIP} self-center hover:!text-red-300">${ic('trash-2')} Borrar torneo</button>
+      </div>` : ''}
+    ${torneosViejos()}`;
+}
+
+const guardarResultadoTorneo = (k, datos, okMsg) => act(() => F.setDoc(F.doc(colTorneoResultados(D.gid), String(k)), { torneo: D.grupo.torneo.creado, ...datos, por: miUid(), ts: Date.now() }), okMsg);
+
+// Cargar el resultado de un partido del torneo, como un tablero. En la copa, si empatan, se elige quién ganó por penales.
+function modalTorneoResultado() {
+  const t = D.grupo.torneo, x = partidoK(t, ui.torneoK);
+  const copa = typeof ui.torneoK === 'string', empate = ui.goles[0] === ui.goles[1];
+  const lado = (i, k) => `
+    <div class="flex-1 min-w-0 flex flex-col items-center gap-2">
+      ${camisetaT(t, i, 56)}
+      <p class="text-sm font-black truncate max-w-full">${esc(t.equipos[i].nombre)}</p>
+      <div class="w-20 h-20 rounded-2xl bg-slate-950 border-2 border-slate-700 grid place-items-center font-mono text-5xl font-black text-amber-300 tabular-nums">${ui.goles[k]}</div>
+      <div class="flex gap-1.5">
+        <button type="button" data-action="torneo-gol" data-lado="${k}" data-delta="-1" aria-label="Un gol menos" class="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-2xl font-bold text-slate-300">−</button>
+        <button type="button" data-action="torneo-gol" data-lado="${k}" data-delta="1" aria-label="Un gol más" class="w-11 h-11 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-2xl font-black text-slate-950">+</button>
+      </div>
+    </div>`;
+  return modal(`
+    <p class="text-center text-[11px] font-black uppercase tracking-widest text-slate-500">${copa ? nombreRonda(x.n) : `Fecha ${x.f}`} · ${esc(t.nombre)}</p>
+    <h2 class="text-center text-xl font-black mb-4">¿Cómo salió?</h2>
+    ${x.ga != null && x.por ? `<p class="text-center text-xs text-slate-500 -mt-3 mb-3">Lo cargó ${esc(jugador(x.por)?.usuario || 'alguien')}. Si está mal, corregilo.</p>` : ''}
+    <div class="flex items-start gap-1">${lado(x.a, 0)}<span class="mt-[7.4rem] text-3xl font-black text-slate-600">-</span>${lado(x.b, 1)}</div>
+    ${copa && empate ? `
+      <div class="mt-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3">
+        <p class="text-sm font-bold text-center">Empataron. ¿Quién ganó por penales?</p>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          ${[['a', x.a], ['b', x.b]].map(([g, i]) => `<button data-action="torneo-penales" data-g="${g}" class="rounded-xl border-2 py-2 px-2 text-sm font-bold inline-flex items-center justify-center gap-1.5 min-w-0 ${ui.gana === g ? 'border-emerald-500 bg-emerald-500/15' : 'border-slate-700'}">${camisetaT(t, i, 22)} <span class="truncate">${esc(t.equipos[i].nombre)}</span></button>`).join('')}
+        </div>
+      </div>` : ''}
+    <div class="flex gap-2 mt-5">
+      ${x.ga != null ? `<button data-action="torneo-borrar-res" class="${BTN_SEC} text-sm" aria-label="Borrar resultado">${ic('trash-2')}</button>` : ''}
+      <button data-action="cerrar-modal" class="${BTN_SEC} text-sm flex-1">Cancelar</button>
+      <button data-action="torneo-guardar-res" class="${BTN_OK} text-sm flex-1">${ic('save')} Guardar</button>
+    </div>`);
+}
+
 // Pantalla de administración del grupo (solo admins).
 function vistaAdmin() {
   // Dos pestañas: Partido (fecha, cancha, fecha fija, resultado) y Grupo (foto, link, jugadores).
@@ -3613,7 +4786,7 @@ function vistaAdmin() {
       ${[['partido', 'calendar', 'Partido'], ['grupo', 'users', 'Grupo']].map(([k, i, t]) => `
         <button data-action="admin-tab" data-tab="${k}" class="rounded-xl py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5 ${tab === k ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}">${ic(i)} ${t}${k === 'grupo' && D.pendientes.length ? ` <span class="rounded-full bg-amber-400 text-slate-950 text-[10px] font-black px-1.5">${D.pendientes.length}</span>` : ''}</button>`).join('')}
     </div>
-    ${tab === 'partido' ? panelPartido(derivar()) : `
+    ${tab === 'partido' ? tarjetaModos() + panelPartido(derivar()) : `
     ${card(`
       <div class="flex items-center gap-4">
         ${fotoGrupo(D.grupo, 64)}
@@ -3812,7 +4985,7 @@ function sumarGoles() {
 }
 const textoResultado = x => x.ganador === 'empate'
   ? `Empate${x.golesA != null ? ` ${x.golesA} – ${x.golesB}` : ''}`
-  : `Ganó el ${NOMBRE_EQUIPO[x.ganador]}${x.golesA != null ? ` · ${x.ganador === 'A' ? x.golesA : x.golesB} a ${x.ganador === 'A' ? x.golesB : x.golesA}` : ''}`;
+  : `Ganó el ${nombreEquipo(x.ganador)}${x.golesA != null ? ` · ${x.ganador === 'A' ? x.golesA : x.golesB} a ${x.ganador === 'A' ? x.golesB : x.golesA}` : ''}`;
 // El admin o un armador anota cuántos hizo cada uno; el marcador sale de la suma.
 function formGoleadores(actual) {
   const d = derivar(), eq = D.grupo.equipos;
@@ -3831,7 +5004,7 @@ function formGoleadores(actual) {
     const otros = actual?.goles ? Math.max(0, (e === 'A' ? actual.golesA : actual.golesB) - asignados) : '';
     return `
       <div class="rounded-xl border ${color} p-2 space-y-1.5">
-        <p class="text-xs font-bold flex justify-between">${NOMBRE_EQUIPO[e]}<span id="r-total-${e}" class="text-lg leading-none font-black">0</span></p>
+        <p class="text-xs font-bold flex justify-between">${nombreEquipo(e)}<span id="r-total-${e}" class="text-lg leading-none font-black">0</span></p>
         <ul class="space-y-1.5">${(eq[e] || []).map(id => fila(id, e)).join('')}${sups.map(id => fila(id, e, true)).join('')}
           <li class="flex items-center gap-2"><span class="flex-1 text-xs text-slate-500">En contra / no sé quién</span>
             <input id="r-x-${e}" name="x_${e}" data-gol="${e}" type="number" inputmode="numeric" min="0" max="30" value="${otros || ''}" placeholder="0" class="${INPUT} !w-12 !px-1 !py-1 text-center font-bold shrink-0"></li>
@@ -3933,7 +5106,7 @@ function equiposDelResultado(x) {
   const persona = id => jugador(id) || { id, usuario: nombre(id) };
   const col = (e, color) => `
     <div class="rounded-xl border ${color} p-2.5 ${x.ganador === e ? 'ring-1 ring-amber-400/60' : ''}">
-      <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}${x.ganador === e ? ' 🏆' : ''}</p>
+      <p class="text-xs font-bold mb-1.5">${nombreEquipo(e)}${x.ganador === e ? ' 🏆' : ''}</p>
       <ul class="space-y-1 text-sm">${(x[e] || []).map(id => `<li class="flex items-center gap-1.5 min-w-0">${avatar(persona(id), 18)}<span class="truncate">${esc(nombre(id))}</span>${x.goles?.[id] ? `<span class="text-xs shrink-0">⚽${x.goles[id] > 1 ? x.goles[id] : ''}</span>` : ''}</li>`).join('')}</ul>
       ${sup(e).length ? `
         <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
@@ -3961,7 +5134,7 @@ function tarjetaPartido() {
   const sups = e => suplentesDe(e, d);
   const col = (e, color) => `
     <div class="rounded-xl border ${color} p-2.5">
-      <p class="text-xs font-bold mb-1.5">${NOMBRE_EQUIPO[e]}</p>
+      <p class="text-xs font-bold mb-1.5">${nombreEquipo(e)}</p>
       <ul class="space-y-1 text-sm">${(eq?.[e] || []).map(jugador).filter(Boolean).map(p => `<li class="flex items-center gap-1.5 min-w-0">${fotoLesion(p, avatar(p, 18))}<span class="truncate flex-1">${esc(p.usuario)}</span>${chipNota(p.id)}</li>`).join('')}</ul>
       ${sups(e).length ? `
         <p class="text-[10px] font-bold uppercase tracking-wider text-amber-300/80 mt-2 mb-1">Suplentes</p>
@@ -4547,9 +5720,12 @@ function renderModal() {
   if (ui.modal === 'reemplazar' && !esAdmin()) ui.modal = null;
   if (ui.modal === 'cancha' && !D.grupo.equipos) ui.modal = null;
   if (ui.modal === 'fecha' && !esAdmin()) ui.modal = null;
+  if (ui.modal === 'torneo-res' && !puedeCargar(D.grupo.torneo, partidoK(D.grupo.torneo, ui.torneoK))) ui.modal = null;
+  if (ui.modal === 'arbitro' && !esAdmin()) ui.modal = null;
+  if (ui.modal === 'equipo' && !(D.grupo?.torneo?.equipos?.[ui.eqI] && puedeEditarEquipo(D.grupo.torneo, ui.eqI))) ui.modal = null;
   if (ui.modal === 'reemplazar' && ui.reemplazar && !D.grupo.anotados.includes(ui.reemplazar)) ui.reemplazar = null;
   return ui.modal === 'mvp-votar' ? modalVotarMvp() : ui.modal === 'mvp-editar' ? modalEditarMvp()
-    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : ui.modal === 'fecha' ? modalFecha() : '';
+    : ui.modal === 'faltas' ? modalFaltas() : ui.modal === 'reemplazar' ? modalReemplazar() : ui.modal === 'avisos' ? modalAvisos() : ui.modal === 'calificar' ? modalCalificar() : ui.modal === 'bajar' ? modalBajar() : ui.modal === 'foto' ? modalFoto() : ui.modal === 'recalificar' ? modalRecalificar() : ui.modal === 'ficha' ? modalFicha() : ui.modal === 'instalar' ? modalInstalar() : ui.modal === 'cancha' ? modalCancha() : ui.modal === 'fecha' ? modalFecha() : ui.modal === 'torneo-res' ? modalTorneoResultado() : ui.modal === 'arbitro' ? modalArbitro() : ui.modal === 'equipo' ? modalEquipo() : '';
 }
 
 const avisoCalificaciones = `
@@ -4908,6 +6084,7 @@ function anuncio() {
 }
 
 function render() {
+  aplicarIdentidades();
   contarPantalla();
   historialModal();
   renderVistas();
@@ -5095,6 +6272,164 @@ const acciones = {
   },
   copiar: () => copiar(mensajeWsp()),
   'copiar-equipos': () => copiar(mensajeEquipos(), '📋 Equipos copiados. Pegalos en el grupo'),
+  'copiar-amistoso': () => copiar(mensajeAmistoso(), '📋 Invitación copiada. Pegala en los dos grupos'),
+  'copiar-torneo': () => copiar(mensajeTorneo(D.grupo.torneo), '📋 Tabla copiada. Pegala en el grupo'),
+  'sumarme-amistoso': async ({ gid }) => {
+    const a = rivales().find(x => x.gid === gid);
+    if (a && await unirse(a.gid, a.codigo)) location.hash = '#/';
+  },
+  'quitar-amistoso': ({ gid }) => {
+    const a = rivales().find(x => x.gid === gid);
+    if (a && confirm(`¿Quitar a ${a.rival} de la lista? Se pierde el historial acá; el grupo del amistoso sigue existiendo.`)) actualizarGrupo(s => { s.amistosos = (s.amistosos || []).filter(x => x.gid !== gid); });
+  },
+  // En el grupo del amistoso: lista nueva para la revancha y a poner la fecha.
+  revancha: async () => {
+    if (!confirm('¿Armar la revancha? Se vacía la lista y los equipos, y ponés la fecha nueva. El resultado anterior queda en el historial.')) return;
+    // Como en "Nueva fecha": la votación del mejor queda armada con los que jugaron.
+    const f = D.grupo.partido.fecha;
+    if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
+    const ok = await actualizarGrupo(s => {
+      s.anotados = []; s.equipos = null; s.solicitudes = {}; s.rehacer = null; s.avisos = []; s.publico = [];
+      delete s.partido.suspendido;
+      s.partido.fecha = '';
+    }, '⚔️ ¡Revancha! Poné la fecha y pasá el link');
+    if (ok) { ui.modal = 'fecha'; render(); }
+  },
+  // ---- Modos del grupo y árbitro ----
+  'modos-ocultar': () => { guardado.set(LS + 'modosOcultos', '1'); toast('Listo. Lo encontrás en Administrar.'); render(); },
+  arbitro: () => { ui.modal = 'arbitro'; render(); },
+  'arbitro-quitar': () => { ui.modal = null; actualizarGrupo(s => { s.arbitro = null; }, 'Sin árbitro'); },
+  // ---- Torneo interno ----
+  'torneo-nuevo': () => actualizarGrupo(s => {
+    const viejo = s.torneo && D.grupo.torneo?.creado === s.torneo.creado ? D.grupo.torneo : s.torneo;
+    const campeon = viejo?.estado === 'terminado' ? podioTorneo(viejo)[0] : null;
+    if (campeon != null) s.torneosViejos = [{ nombre: viejo.nombre, campeon: viejo.equipos[campeon].nombre, ts: viejo.termino || Date.now() }, ...(s.torneosViejos || [])].slice(0, 10);
+    const existe = id => !!jugador(id);
+    const anotados = s.anotados.filter(existe);
+    const ids = anotados.length >= 4 ? anotados : Object.keys(D.miembros);
+    const mes = new Date(Date.now() - 3 * 3600e3).toLocaleDateString('es-AR', { month: 'long', timeZone: 'UTC' });
+    const dia = s.partido.fecha ? new Date(`${s.partido.fecha}T12:00:00Z`).getUTCDay() : 6;
+    ui.torneoPaso = 1;
+    s.torneo = {
+      nombre: `Torneo de ${mes}`, estado: 'armando', ids, cant: Math.max(2, Math.min(8, Math.floor(ids.length / 5))),
+      formato: 'liga', vueltas: 1, equipos: null, modo: null, cuando: { tipo: 'grupo', dia, hora: s.partido.cuando || '' }, arbitro: 'nadie',
+      partidos: [], llave: null, res: {}, creado: Date.now(),
+    };
+    location.hash = '#/torneo';
+  }),
+  'torneo-jugador': ({ id }) => actualizarGrupo(s => {
+    const t = s.torneo;
+    t.ids = t.ids.includes(id) ? t.ids.filter(x => x !== id) : [...t.ids, id];
+    t.equipos = null;
+  }),
+  'torneo-todos': ({ que }) => actualizarGrupo(s => {
+    s.torneo.ids = que === 'anotados' ? s.anotados.filter(id => !!jugador(id)) : jugadoresDelGrupo().map(p => p.id);
+    s.torneo.equipos = null;
+  }),
+  'torneo-paso': ({ n }) => { ui.torneoPaso = Number(n); render(); scrollTo(0, 0); },
+  'torneo-cant': ({ n: k }) => actualizarGrupo(s => {
+    const n = Math.max(2, Math.min(8, Number(k)));
+    if (n !== s.torneo.cant) { s.torneo.cant = n; s.torneo.equipos = null; }
+    if (s.torneo.arbitro === 'libre' && !(n % 2)) s.torneo.arbitro = 'nadie';
+  }),
+  'torneo-vueltas': ({ n }) => actualizarGrupo(s => { s.torneo.vueltas = Number(n); }),
+  'torneo-formato': ({ f }) => actualizarGrupo(s => {
+    s.torneo.formato = f;
+    if (f === 'copa' && s.torneo.arbitro === 'libre') s.torneo.arbitro = 'nadie';
+  }),
+  'torneo-cuando': ({ tipo }) => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, tipo }; }),
+  'torneo-dia': ({ d }) => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, dia: Number(d) }; }),
+  'torneo-arbitro': ({ a }) => actualizarGrupo(s => { s.torneo.arbitro = a === 'uno' ? miUid() : a; }),
+  'torneo-armar': ({ modo }) => actualizarGrupo(s => {
+    const t = s.torneo, viejos = t.equipos || [];
+    t.equipos = repartirEnEquipos(t.ids, t.cant, modo).map((ids, i) => ({ nombre: viejos[i]?.nombre || colorT(i)[1], ids }));
+    t.modo = modo;
+  }, '🆚 Equipos armados'),
+  'torneo-empezar': () => {
+    const t = D.grupo.torneo;
+    if (t.equipos.some(e => !e.ids.length)) return toast('Hay un equipo sin jugadores');
+    if (!confirm(`¿Empezar "${t.nombre}"? Los equipos quedan fijos hasta el final.`)) return;
+    actualizarGrupo(s => {
+      const t = s.torneo;
+      // La copa sola se sortea; en liga + copa, la llave se arma al terminar la liga.
+      t.partidos = t.formato === 'copa' ? [] : fixtureTorneo(t.cant, t.vueltas);
+      t.llave = t.formato === 'copa' ? armarLlave(shuffle(t.equipos.map((e, i) => i))) : null;
+      t.res = {};
+      t.estado = 'jugando';
+      t.empezo = Date.now();
+    }, '🏁 ¡Arrancó el torneo!');
+  },
+  'torneo-copa': () => {
+    const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length, k = clasificanCopa(t);
+    if (!confirm(`${faltan ? `Faltan ${faltan} partidos de la liga. ` : ''}¿Pasar a la copa con los ${k} primeros de la tabla?`)) return;
+    const llave = armarLlave(tablaTorneo(t).slice(0, k).map(f => f.i));
+    actualizarGrupo(s => { s.torneo.llave = llave; s.torneo.res = {}; }, '🏆 ¡Empieza la copa!');
+  },
+  'torneo-res': ({ k }) => {
+    const key = String(k).includes('-') ? String(k) : Number(k), x = partidoK(D.grupo.torneo, key);
+    if (!x) return;
+    ui.torneoK = key;
+    ui.goles = [x.ga ?? 0, x.gb ?? 0];
+    ui.gana = x.gana || null;
+    ui.modal = 'torneo-res';
+    render();
+  },
+  'torneo-gol': ({ lado, delta }) => { ui.goles[lado] = Math.max(0, Math.min(99, ui.goles[lado] + Number(delta))); render(); },
+  'torneo-penales': ({ g }) => { ui.gana = g; render(); },
+  'equipo-editar': ({ i }) => {
+    const e = D.grupo.torneo.equipos[i];
+    ui.eqI = Number(i);
+    ui.eqDraft = { nombre: e.nombre, colores: [...coloresT(Number(i))], diseno: e.diseno || 'franja' };
+    ui.modal = 'equipo';
+    render();
+  },
+  'equipo-color': ({ n, c }) => {
+    const d = ui.eqDraft;
+    d.nombre = $('#eq-nombre')?.value ?? d.nombre;
+    if (n === '0') { d.colores = [c, ...d.colores.slice(1).filter(x => x !== c)]; }
+    else d.colores = c ? [d.colores[0], c] : [d.colores[0]];
+    if (d.colores[1] && !DISENOS[d.diseno]) d.diseno = 'franja';
+    render();
+  },
+  'equipo-diseno': ({ d: z }) => { ui.eqDraft.nombre = $('#eq-nombre')?.value ?? ui.eqDraft.nombre; ui.eqDraft.diseno = z; render(); },
+  'equipo-guardar': async () => {
+    const t = D.grupo.torneo, i = ui.eqI, d = ui.eqDraft;
+    const nombre = ($('#eq-nombre')?.value ?? d.nombre).trim().slice(0, 20);
+    if (!nombre) return toast('Ponele un nombre al equipo');
+    if (esInsulto(nombre)) return toast(MSJ_INSULTO);
+    const choque = choqueColores(t, i, d.colores);
+    if (choque) return toast(choque);
+    ui.modal = null;
+    render();
+    const datos = { torneo: t.creado, nombre, colores: d.colores, diseno: d.colores[1] ? d.diseno : 'lisa', por: miUid(), ts: Date.now() };
+    await act(() => F.setDoc(F.doc(colTorneoEquipos(D.gid), String(i)), datos), '👕 ¡Listo el equipo!');
+  },
+  'torneo-guardar-res': async () => {
+    const k = ui.torneoK, [ga, gb] = ui.goles, gana = ga === gb ? ui.gana : null;
+    const t = D.grupo.torneo, x = partidoK(t, k);
+    if (!x) return;
+    if (typeof k === 'string' && ga === gb && !gana) return toast('Empataron: elegí quién ganó por penales');
+    ui.modal = null;
+    render();
+    await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga, gb, gana: typeof k === 'string' ? gana : null }, '💾 Resultado guardado');
+  },
+  'torneo-borrar-res': async () => {
+    const k = ui.torneoK, x = partidoK(D.grupo.torneo, k);
+    ui.modal = null;
+    render();
+    if (x) await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga: null, gb: null, gana: null }, 'Resultado borrado');
+  },
+  'torneo-terminar': () => {
+    const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length;
+    if (!confirm(faltan ? `Faltan ${faltan} partidos. ¿Terminar igual? Gana el que va primero en la tabla.` : '¿Terminar el torneo? Queda la tabla final con el campeón.')) return;
+    actualizarGrupo(s => { s.torneo.estado = 'terminado'; s.torneo.termino = Date.now(); }, '🏆 ¡Torneo terminado!');
+  },
+  'torneo-borrar': () => {
+    const t = D.grupo.torneo;
+    if (!confirm(t.estado === 'armando' ? '¿Cancelar el torneo?' : '¿Borrar el torneo con todos sus resultados? No se puede deshacer.')) return;
+    actualizarGrupo(s => { s.torneo = null; });
+    location.hash = '#/torneo';
+  },
   'copiar-invitacion': () => copiar(`⚽ Sumate al grupo *${D.grupo.nombre}* para anotarte al fulbo:\n${linkInvitacion()}`, '📋 Link copiado'),
   'nuevo-codigo': () => {
     if (!confirm('¿Generar un link nuevo? El actual deja de funcionar (los que ya están en el grupo siguen adentro).')) return;
@@ -5379,6 +6714,20 @@ const acciones = {
 const guardarNivel = (id, n) => act(() => F.setDoc(refNiveles(D.gid), { [id]: n }, { merge: true }));
 
 const cambios = {
+  'torneo-titulo': el => {
+    const v = el.value.trim().slice(0, 40);
+    if (esInsulto(v)) { el.value = D.grupo.torneo.nombre; return toast(MSJ_INSULTO); }
+    if (v) actualizarGrupo(s => { s.torneo.nombre = v; });
+  },
+  'torneo-capitan': (el, { i }) => actualizarGrupo(s => { s.torneo.equipos[i].capitan = el.value || null; }, el.value ? `Capitán: ${jugador(el.value)?.usuario}` : null),
+  'torneo-hora': el => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, hora: el.value }; }),
+  'torneo-arbitro-id': el => actualizarGrupo(s => { s.torneo.arbitro = el.value; }),
+  'torneo-mover': (el, { id }) => actualizarGrupo(s => {
+    const eqs = s.torneo.equipos, a = Number(el.value);
+    if (!eqs[a] || eqs[a].ids.includes(id)) return;
+    eqs.forEach(e => { e.ids = e.ids.filter(x => x !== id); });
+    eqs[a].ids.push(id);
+  }),
   modalidad: el => {
     const c = $('#p-cupo');
     if (el.value && c) { c.value = el.value; c.dataset.dirty = '1'; }
@@ -5441,6 +6790,7 @@ const formularios = {
     const usuario = f.get('usuario').trim();
     if (avisoMail(usuario)) return toast(avisoMail(usuario));
     if (!/^[A-Za-z0-9_.]{3,20}$/.test(usuario)) return toast('El usuario puede tener letras, números, punto o guion bajo (3 a 20)');
+    if (esInsulto(usuario.replace(/[_.]/g, ' '))) return toast(MSJ_INSULTO);
     const edad = parseInt(f.get('edad'));
     const minima = CONFIG.publico ? 13 : 10;
     if (!(edad >= minima && edad <= 99)) return toast(`Poné una edad entre ${minima} y 99`);
@@ -5549,7 +6899,15 @@ const formularios = {
     if (ok) { ui.borrarCuenta = false; location.hash = '#/'; }
     return ok;
   },
-  'crear-grupo': f => crearGrupo(f.get('nombre').trim()),
+  'crear-grupo': f => esInsulto(f.get('nombre')) ? toast(MSJ_INSULTO) : crearGrupo(f.get('nombre').trim()),
+  amistoso: f => esInsulto(f.get('rival')) ? toast(MSJ_INSULTO) : armarAmistoso(f.get('rival').trim()),
+  arbitro: f => {
+    const id = f.get('id'), nombre = id ? jugador(id)?.usuario : f.get('nombre').trim().slice(0, 30);
+    if (!nombre) return toast('Elegí a alguien o escribí el nombre');
+    if (esInsulto(nombre)) return toast(MSJ_INSULTO);
+    ui.modal = null;
+    actualizarGrupo(s => { s.arbitro = { id: id || null, nombre }; }, `🟨 Dirige ${nombre}`);
+  },
   unirse: f => {
     const m = f.get('link').match(/unirse\/([^/\s]+)\/([^/\s#?]+)/);
     if (!m) return toast('Ese no parece un link de invitación');
@@ -5677,6 +7035,7 @@ const formularios = {
     return ok;
   },
   invitado: f => {
+    if (esInsulto(f.get('nombre'))) return toast(MSJ_INSULTO);
     const id = 'inv_' + genId(10);
     const nivel = Number(f.get('nivel'));
     return actualizarGrupo(s => {
@@ -5779,7 +7138,7 @@ document.addEventListener('submit', async e => {
   try {
     if (await formularios[form.dataset.form]?.(new FormData(form), form.dataset)) {
       form.querySelectorAll('[data-dirty]').forEach(i => delete i.dataset.dirty);
-      if (['crear-grupo', 'unirse', 'invitado', 'cambiar-clave'].includes(form.dataset.form)) {
+      if (['crear-grupo', 'unirse', 'invitado', 'cambiar-clave', 'amistoso'].includes(form.dataset.form)) {
         form.reset();
         form.querySelectorAll('[data-out]').forEach(i => (document.getElementById(i.dataset.out).textContent = i.value));
       }
