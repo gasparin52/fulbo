@@ -351,6 +351,7 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.f
 // Para agregar uno: copiá el contenido del <svg> de lucide.dev/icons.
 const ICONOS = {
   'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+  'chevron-left': '<path d="m15 18-6-6 6-6"/>',
   'arrow-left': '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
   house: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
@@ -1758,6 +1759,62 @@ function sincronizarDesplegables() {
     });
     const t = d.querySelector('[data-texto]');
     if (texto != null) { t.textContent = texto; t.classList.remove('text-slate-500'); }
+  });
+}
+
+// Selector de fecha con los colores de la app (el calendario del navegador no se puede pintar).
+// El valor va en un input oculto ("AAAA-MM-DD"); el calendario se dibuja al abrirlo, sin redibujar la página.
+function campoFecha({ id, name, valor = '', clase = '' }) {
+  return `
+    <div class="relative ${clase}" data-fecha>
+      <input type="hidden" id="${id}" name="${name}" value="${esc(valor)}">
+      <button type="button" data-action="fecha-abrir" data-id="${id}" aria-haspopup="dialog" aria-expanded="false" class="${INPUT} flex items-center gap-2 text-left">
+        <span class="text-emerald-400">${ic('calendar')}</span>
+        <span data-texto class="flex-1 truncate ${valor ? '' : 'text-slate-500'}">${valor ? esc(fechaLinda(valor)) : 'Elegí el día'}</span>
+      </button>
+      <div data-cal role="dialog" aria-label="Elegir fecha" hidden class="absolute z-40 left-0 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60 p-3"></div>
+    </div>`;
+}
+function dibujarCalendario(d) {
+  const v = d.querySelector('input').value, hoy = hoyArg();
+  const mes = d.dataset.mes || (v || hoy).slice(0, 7);
+  d.dataset.mes = mes;
+  const [a, m] = mes.split('-').map(Number);
+  const primero = new Date(Date.UTC(a, m - 1, 1)), dias = new Date(Date.UTC(a, m, 0)).getUTCDate();
+  const antes = (primero.getUTCDay() + 6) % 7;  // la semana empieza el lunes
+  const titulo = primero.toLocaleDateString('es-AR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const id = d.querySelector('input').id;
+  const celdas = [...Array(antes).fill(''), ...Array.from({ length: dias }, (_, k) => `${mes}-${String(k + 1).padStart(2, '0')}`)];
+  d.querySelector('[data-cal]').innerHTML = `
+    <div class="flex items-center gap-1">
+      <button type="button" data-action="fecha-mes" data-id="${id}" data-paso="-1" aria-label="Mes anterior" class="${BTN_ICONO} !w-9 !h-9">${ic('chevron-left')}</button>
+      <p class="flex-1 text-center font-black text-white first-letter:uppercase">${titulo}</p>
+      <button type="button" data-action="fecha-mes" data-id="${id}" data-paso="1" aria-label="Mes siguiente" class="${BTN_ICONO} !w-9 !h-9">${ic('chevron-right')}</button>
+    </div>
+    <div class="grid grid-cols-7 gap-1 mt-2 text-center text-[11px] font-bold text-slate-500">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(x => `<span>${x}</span>`).join('')}</div>
+    <div class="grid grid-cols-7 gap-1 mt-1">
+      ${celdas.map(f => !f ? '<span></span>' : `
+        <button type="button" data-action="fecha-elegir" data-id="${id}" data-f="${f}" aria-label="${esc(fechaLinda(f))}" aria-pressed="${f === v}"
+          class="h-9 rounded-xl text-sm font-semibold transition ${f === v ? 'bg-emerald-500 text-slate-950 font-black' : f === hoy ? 'ring-2 ring-emerald-500/60 text-emerald-200 hover:bg-slate-800' : f < hoy ? 'text-slate-600 hover:bg-slate-800' : 'text-slate-200 hover:bg-slate-800'}">${Number(f.slice(8))}</button>`).join('')}
+    </div>
+    <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-800">
+      <button type="button" data-action="fecha-elegir" data-id="${id}" data-f="" class="${BTN_CHIP} !bg-transparent text-slate-400">Borrar</button>
+      <button type="button" data-action="fecha-elegir" data-id="${id}" data-f="${hoy}" class="${BTN_CHIP}">Hoy</button>
+    </div>`;
+}
+function cerrarFechas(salvo) {
+  document.querySelectorAll('[data-fecha]').forEach(d => {
+    if (d === salvo) return;
+    d.querySelector('[data-cal]').hidden = true;
+    d.querySelector('[data-action="fecha-abrir"]').setAttribute('aria-expanded', 'false');
+  });
+}
+// El texto del botón según el valor (por si la página se redibujó con una fecha sin guardar).
+function sincronizarFechas() {
+  document.querySelectorAll('[data-fecha]').forEach(d => {
+    const v = d.querySelector('input').value, t = d.querySelector('[data-texto]');
+    t.textContent = v ? fechaLinda(v) : 'Elegí el día';
+    t.classList.toggle('text-slate-500', !v);
   });
 }
 
@@ -3243,7 +3300,7 @@ function modalFecha() {
     </div>
     <form data-form="fecha-partido" class="space-y-3">
       <div class="grid grid-cols-[1fr_6.5rem] gap-2">
-        <label class="text-sm text-slate-400">Fecha<input id="fp-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
+        <div class="text-sm text-slate-400">Fecha${campoFecha({ id: 'fp-fecha', name: 'fecha', valor: p.fecha, clase: 'mt-1' })}</div>
         <label class="text-sm text-slate-400">Hora<input id="fp-hora" name="cuando" value="${esc(hora || p.cuando)}" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} mt-1"></label>
       </div>
       <label class="block text-sm text-slate-400">Dónde<input id="fp-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
@@ -4105,7 +4162,7 @@ function formAmistoso() {
 }
 const camposVs = (a = {}) => `
   <div class="grid grid-cols-[1fr_6.5rem] gap-2">
-    <label class="text-sm text-slate-400">Fecha<input id="vs-fecha" name="fecha" type="date" value="${esc(a.fecha || '')}" class="${INPUT} mt-1"></label>
+    <div class="text-sm text-slate-400">Fecha${campoFecha({ id: 'vs-fecha', name: 'fecha', valor: a.fecha || '', clase: 'mt-1' })}</div>
     <label class="text-sm text-slate-400">Hora<input id="vs-hora" name="hora" value="${esc(a.hora || '')}" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} mt-1"></label>
   </div>
   <label class="block text-sm text-slate-400">Dónde<input id="vs-lugar" name="lugar" value="${esc(a.lugar || '')}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
@@ -6231,7 +6288,7 @@ function panelPartido(d) {
     <h2 class="text-lg font-bold">${ic('calendar', 'text-emerald-400')} Partido</h2>
     <form data-form="partido" class="grid sm:grid-cols-2 gap-3 mt-4">
       <label class="text-sm text-slate-400">Título<input id="p-titulo" name="titulo" value="${esc(p.titulo)}" maxlength="40" class="${INPUT} mt-1"></label>
-      <label class="text-sm text-slate-400">Fecha del partido<input id="p-fecha" name="fecha" type="date" value="${esc(p.fecha)}" class="${INPUT} mt-1"></label>
+      <div class="text-sm text-slate-400">Fecha del partido${campoFecha({ id: 'p-fecha', name: 'fecha', valor: p.fecha, clase: 'mt-1' })}</div>
       <label class="text-sm text-slate-400">Hora<input id="p-cuando" name="cuando" value="${esc(p.cuando)}" placeholder="20:00" maxlength="40" class="${INPUT} mt-1"></label>
       ${p.fecha && !horaDelPartido(p) ? '<p class="text-xs text-amber-300 sm:col-span-2">Poné la hora como 20:00 para que la votación del mejor abra una hora después del partido. Si no, abre a las 00:00 del día siguiente.</p>' : ''}
       <label class="text-sm text-slate-400">Dónde<input id="p-lugar" name="lugar" value="${esc(p.lugar)}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
@@ -6441,6 +6498,7 @@ function render() {
   sumarGoles();
   filtrarCuadros();
   sincronizarDesplegables();
+  sincronizarFechas();
   anuncio();
   if (listo) {
     asegurarRotacion();
@@ -6915,6 +6973,26 @@ const acciones = {
     lista.hidden = !lista.hidden;
     d.querySelector('[data-action="desplegar"]').setAttribute('aria-expanded', String(!lista.hidden));
     if (!lista.hidden) lista.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  },
+  'fecha-abrir': ({ id }) => {
+    const d = document.getElementById(id).closest('[data-fecha]'), cal = d.querySelector('[data-cal]');
+    cal.hidden = !cal.hidden;
+    d.querySelector('[data-action="fecha-abrir"]').setAttribute('aria-expanded', String(!cal.hidden));
+    if (!cal.hidden) { delete d.dataset.mes; dibujarCalendario(d); cal.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  },
+  'fecha-mes': ({ id, paso }) => {
+    const d = document.getElementById(id).closest('[data-fecha]');
+    const [a, m] = d.dataset.mes.split('-').map(Number), x = new Date(Date.UTC(a, m - 1 + Number(paso), 1));
+    d.dataset.mes = x.toISOString().slice(0, 7);
+    dibujarCalendario(d);
+  },
+  'fecha-elegir': ({ id, f }) => {
+    const input = document.getElementById(id);
+    cerrarFechas();
+    input.value = f;
+    input.dataset.dirty = '1';
+    sincronizarFechas();
+    input.dispatchEvent(new Event('change', { bubbles: true }));
   },
   'elegir-opcion': ({ id, v }) => {
     const input = document.getElementById(id);
@@ -7477,6 +7555,7 @@ const formularios = {
 
 document.addEventListener('click', e => {
   cerrarDesplegables(e.target.closest('[data-desplegable]'));
+  cerrarFechas(e.target.closest('[data-fecha]'));
   const b = e.target.closest('[data-action]');
   if (!b) return;
   if ('fondo' in b.dataset && e.target !== b) return;  // clic dentro del modal: no lo cierra
