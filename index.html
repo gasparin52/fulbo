@@ -4166,11 +4166,9 @@ const camposVs = (a = {}) => `
     <label class="text-sm text-slate-400">Hora<input id="vs-hora" name="hora" value="${esc(a.hora || '')}" placeholder="20:00" maxlength="5" inputmode="numeric" class="${INPUT} mt-1"></label>
   </div>
   <label class="block text-sm text-slate-400">Dónde<input id="vs-lugar" name="lugar" value="${esc(a.lugar || '')}" placeholder="Cancha" maxlength="60" class="${INPUT} mt-1"></label>
-  <label class="block text-sm text-slate-400">Jugadores por lado
-    <select id="vs-cupo" name="cupo" class="${INPUT} mt-1">
-      ${[[5, 'Fútbol 5 (5 por lado)'], [6, '6 por lado'], [7, 'Fútbol 7 (7 por lado)'], [8, 'Fútbol 8 (8 por lado)'], [9, '9 por lado'], [11, 'Fútbol 11 (11 por lado)']].map(([n, t]) => `<option value="${n}" ${n === (a.cupo || 5) ? 'selected' : ''}>${t}</option>`).join('')}
-    </select>
-  </label>`;
+  <div class="text-sm text-slate-400">Jugadores por lado
+    ${desplegable({ id: 'vs-cupo', name: 'cupo', clase: 'mt-1', valor: a.cupo || 5, opciones: [[5, 'Fútbol 5 (5 por lado)'], [6, '6 por lado'], [7, 'Fútbol 7 (7 por lado)'], [8, 'Fútbol 8 (8 por lado)'], [9, '9 por lado'], [11, 'Fútbol 11 (11 por lado)']].map(([v, t]) => ({ v, t })) })}
+  </div>`;
 const datosFormVs = f => ({
   fecha: f.get('fecha') || '', hora: (f.get('hora') || '').trim().slice(0, 5), lugar: (f.get('lugar') || '').trim().slice(0, 60),
   cupo: [5, 6, 7, 8, 9, 11].includes(+f.get('cupo')) ? +f.get('cupo') : 5,
@@ -4329,10 +4327,7 @@ function modalArbitro() {
     <div class="flex items-center gap-3">${tarjetaAmarilla(30)}<h2 class="text-xl font-black">Árbitro</h2></div>
     <p class="text-sm text-slate-400 mt-2">¿Quién dirige el partido del grupo? Se ve arriba de la lista para que todos sepan.</p>
     <form data-form="arbitro" class="space-y-2 mt-4">
-      <select name="id" class="${INPUT}">
-        <option value="">Alguien de afuera del grupo</option>
-        ${jugadoresDelGrupo().map(p => `<option value="${p.id}" ${a.id === p.id ? 'selected' : ''}>${esc(p.usuario)}</option>`).join('')}
-      </select>
+      ${desplegable({ id: 'arb-id', name: 'id', valor: a.id || '', opciones: [{ v: '', t: 'Alguien de afuera del grupo' }, ...jugadoresDelGrupo().map(p => ({ v: p.id, t: p.usuario }))] })}
       <input name="nombre" maxlength="30" value="${a.id ? '' : esc(a.nombre || '')}" placeholder="Nombre (si es de afuera)" class="${INPUT}">
       <div class="flex gap-2 pt-2">
         ${D.grupo.arbitro ? `<button type="button" data-action="arbitro-quitar" class="${BTN_SEC} text-sm">Sin árbitro</button>` : ''}
@@ -4690,26 +4685,32 @@ function equiposTorneo(t, editar) {
           </div>
           <div class="flex flex-wrap items-center gap-2 px-3 pt-2.5 text-xs">
             ${esAdmin() && t.estado !== 'terminado' ? `
-              <label class="flex items-center gap-1.5 min-w-0">${insignia}
-                <select data-change="torneo-capitan" data-i="${i}" aria-label="Capitán del equipo" class="rounded-lg bg-slate-800 border border-slate-700 text-xs py-1 px-1 max-w-[9rem]">
-                  <option value="">Capitán: el admin</option>
-                  ${e.ids.map(id => `<option value="${id}" ${id === e.capitan ? 'selected' : ''}>Capitán: ${esc(jugador(id)?.usuario || '?')}</option>`).join('')}
-                </select>
-              </label>`
+              <div class="flex items-center gap-1.5 min-w-0 flex-1 basis-48">${insignia}
+                ${desplegable({ id: `tc-${i}`, cambio: 'torneo-capitan', clase: 'flex-1 min-w-0', valor: e.capitan || '', opciones: [{ v: '', t: 'Capitán: el admin' }, ...e.ids.map(id => ({ v: id, t: `Capitán: ${jugador(id)?.usuario || '?'}` }))] })}
+              </div>`
               : `<span class="flex items-center gap-1.5 text-slate-300">${insignia} Capitán: <b>${e.capitan && jugador(e.capitan) ? esc(jugador(e.capitan).usuario) : 'el admin'}</b></span>`}
             ${puedeEditarEquipo(t, i) ? `<button data-action="equipo-editar" data-i="${i}" class="ml-auto ${BTN_CHIP} !text-amber-200">${ic('palette')} Nombre y colores</button>` : ''}
           </div>
           <ul class="space-y-1.5 p-3 pt-2">
-            ${e.ids.map(id => jugador(id) || { id, usuario: 'Ex jugador' }).map(p => `
-              <li class="flex items-center gap-2 text-sm ${p.id === miUid() ? 'text-emerald-300 font-semibold' : ''}">
-                ${avatar(p, 26)}
-                <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}</span>
-                ${p.id === e.capitan ? insignia : ''}
-                <span class="text-xs" title="${pos(p).corto}">${pos(p).emoji}</span>
-                ${editar ? `<select data-change="torneo-mover" data-id="${p.id}" aria-label="Pasar a otro equipo" class="rounded-lg bg-slate-800 border border-slate-700 text-xs py-1 px-1 max-w-[6.5rem]">
-                  ${t.equipos.map((x, j) => `<option value="${j}" ${j === i ? 'selected' : ''}>${j === i ? 'Pasar a…' : colorT(j)[0] + ' ' + esc(x.nombre)}</option>`).join('')}
-                </select>` : ''}
-              </li>`).join('')}
+            ${e.ids.map(id => jugador(id) || { id, usuario: 'Ex jugador' }).map(p => {
+              // Con dos equipos, el botón lo pasa al otro; con más, muestra a cuál.
+              const otros = t.equipos.map((x, j) => j).filter(j => j !== i), abierto = ui.torneoMover === p.id;
+              return `
+              <li class="text-sm ${p.id === miUid() ? 'text-emerald-300 font-semibold' : ''}">
+                <div class="flex items-center gap-2">
+                  ${avatar(p, 26)}
+                  <span class="flex-1 min-w-0 truncate">${esc(p.usuario)}</span>
+                  ${p.id === e.capitan ? insignia : ''}
+                  <span class="text-xs" title="${pos(p).corto}">${pos(p).emoji}</span>
+                  ${editar ? `<button data-action="torneo-mover" data-id="${p.id}" data-a="${otros.length === 1 ? otros[0] : ''}" title="${otros.length === 1 ? `Pasar a ${esc(t.equipos[otros[0]].nombre)}` : 'Pasar a otro equipo'}" aria-label="Pasar a otro equipo" aria-expanded="${abierto}" class="w-8 h-8 grid place-items-center rounded-lg shrink-0 ${abierto ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 hover:bg-slate-700 text-slate-200'}">${ic('arrow-left-right')}</button>` : ''}
+                </div>
+                ${editar && abierto ? `
+                  <div class="flex flex-wrap items-center gap-1.5 mt-1.5 ml-8">
+                    <span class="text-xs text-slate-400">Pasar a</span>
+                    ${otros.map(j => `<button data-action="torneo-mover" data-id="${p.id}" data-a="${j}" class="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800 hover:border-emerald-400 pl-1 pr-2.5 py-0.5 text-xs font-semibold text-slate-100">${camisetaT(t, j, 18)} ${esc(t.equipos[j].nombre)}</button>`).join('')}
+                  </div>` : ''}
+              </li>`;
+            }).join('')}
           </ul>
         </div>`).join('')}
     </div>`;
@@ -4990,7 +4991,7 @@ function torneoPaso4(t) {
         ${chip('data-action="torneo-arbitro" data-a="uno"', uno, 'Alguien del grupo')}
       </div>
       ${arb === 'libre' ? '<p class="text-xs text-slate-400 mt-2">En cada fecha queda un equipo libre: ese dirige.</p>' : ''}
-      ${uno ? `<select data-change="torneo-arbitro-id" class="${INPUT} mt-2">${jugadoresDelGrupo().map(p => `<option value="${p.id}" ${p.id === arb ? 'selected' : ''}>${esc(p.usuario)}</option>`).join('')}</select>` : ''}
+      ${uno ? desplegable({ id: 'ta-id', cambio: 'torneo-arbitro-id', clase: 'mt-2', valor: arb, opciones: jugadoresDelGrupo().map(p => ({ v: p.id, t: p.usuario })) }) : ''}
 
       <p class="text-[11px] font-black uppercase tracking-wide text-slate-500 mt-6 mb-2">Así arranca</p>
       ${fecha1.length ? `<div class="space-y-1.5">${fecha1.map(x => partidoTorneo(t, x)).join('')}</div>`
@@ -6714,6 +6715,17 @@ const acciones = {
     render();
     $('#form-amistoso')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
+  // Torneo armándose: pasar a alguien de equipo (con dos equipos, de una; con más, se elige a cuál).
+  'torneo-mover': ({ id, a }) => {
+    if (a === '') { ui.torneoMover = ui.torneoMover === id ? null : id; return render(); }
+    ui.torneoMover = null;
+    actualizarGrupo(s => {
+      const eqs = s.torneo.equipos, k = Number(a);
+      if (!eqs[k] || eqs[k].ids.includes(id)) return;
+      eqs.forEach(e => { e.ids = e.ids.filter(x => x !== id); });
+      eqs[k].ids.push(id);
+    });
+  },
   'vs-revancha-no': () => { ui.vsRevancha = null; render(); },
   'vs-modo': () => { ui.vsModo = ui.vsModo === 'link' ? 'codigo' : 'link'; render(); },
   'vs-ayuda-codigo': () => { ui.vsAyuda = !ui.vsAyuda; render(); },
@@ -7213,15 +7225,9 @@ const cambios = {
     if (esInsulto(v)) { el.value = D.grupo.torneo.nombre; return toast(MSJ_INSULTO); }
     if (v) actualizarGrupo(s => { s.torneo.nombre = v; });
   },
-  'torneo-capitan': (el, { i }) => actualizarGrupo(s => { s.torneo.equipos[i].capitan = el.value || null; }, el.value ? `Capitán: ${jugador(el.value)?.usuario}` : null),
+  'torneo-capitan': el => actualizarGrupo(s => { s.torneo.equipos[Number(el.id.slice(3))].capitan = el.value || null; }, el.value ? `Capitán: ${jugador(el.value)?.usuario}` : null),
   'torneo-hora': el => actualizarGrupo(s => { s.torneo.cuando = { ...s.torneo.cuando, hora: el.value }; }),
   'torneo-arbitro-id': el => actualizarGrupo(s => { s.torneo.arbitro = el.value; }),
-  'torneo-mover': (el, { id }) => actualizarGrupo(s => {
-    const eqs = s.torneo.equipos, a = Number(el.value);
-    if (!eqs[a] || eqs[a].ids.includes(id)) return;
-    eqs.forEach(e => { e.ids = e.ids.filter(x => x !== id); });
-    eqs[a].ids.push(id);
-  }),
   modalidad: el => {
     const c = $('#p-cupo');
     if (el.value && c) { c.value = el.value; c.dataset.dirty = '1'; }
