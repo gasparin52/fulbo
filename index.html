@@ -1762,6 +1762,50 @@ function sincronizarDesplegables() {
   });
 }
 
+// Confirmaciones con el estilo de la app (el cartel del navegador queda feo). Devuelven una promesa:
+// confirmar → true/false; pedirTexto → el texto o null si cancela. Va aparte del render, así no se pierde al redibujar.
+function preguntar({ texto, campo = null, si, no = 'Cancelar', peligro }) {
+  peligro ??= /\b(borr|expuls|sac|rechaz|suspend|vaci|quit|salir|cancel)/i.test(texto);
+  // El botón dice lo que hace ("¿Borrar el torneo?" → Borrar); si no hay un verbo así, "Sí".
+  if (!si) {
+    const verbo = texto.match(/¿([A-Za-zÁÉÍÓÚáéíóú]+(?:ar|er|ir))\b/)?.[1];
+    si = verbo ? verbo[0].toUpperCase() + verbo.slice(1) : 'Sí';
+    if (si === 'Cancelar') no = 'No';
+  }
+  return new Promise(listo => {
+    const el = document.createElement('div');
+    el.className = 'fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4';
+    el.innerHTML = `
+      <div role="alertdialog" aria-modal="true" class="w-full sm:max-w-sm bg-slate-900 border border-slate-700 rounded-t-3xl sm:rounded-3xl p-5 shadow-2xl shadow-black/60">
+        <p class="text-base leading-snug whitespace-pre-line">${esc(texto)}</p>
+        ${campo ? `<input data-campo maxlength="${campo.max || 60}" value="${esc(campo.valor || '')}" placeholder="${esc(campo.placeholder || '')}" class="${INPUT} mt-3">` : ''}
+        <div class="grid grid-cols-2 gap-2 mt-5">
+          <button type="button" data-no class="${BTN_SEC}">${esc(no)}</button>
+          <button type="button" data-si class="${peligro ? `${BTN} bg-red-600 hover:bg-red-500 text-white` : BTN_OK}">${esc(si)}</button>
+        </div>
+      </div>`;
+    const respuesta = () => campo ? el.querySelector('[data-campo]').value : true;
+    const cerrar = v => { el.remove(); document.removeEventListener('keydown', tecla, true); listo(v); };
+    const tecla = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(campo ? null : false); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); cerrar(respuesta()); }
+    };
+    // Los clics no llegan al manejador general (data-action) de la página.
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (e.target === el || e.target.closest('[data-no]')) cerrar(campo ? null : false);
+      else if (e.target.closest('[data-si]')) cerrar(respuesta());
+    });
+    document.addEventListener('keydown', tecla, true);
+    document.body.append(el);
+    const foco = el.querySelector('[data-campo]') || el.querySelector('[data-si]');
+    foco.focus();
+    if (campo?.valor) foco.select();
+  });
+}
+const confirmar = (texto, opc = {}) => preguntar({ texto, ...opc });
+const pedirTexto = (texto, campo = {}, opc = {}) => preguntar({ texto, campo, ...opc });
+
 // Selector de fecha con los colores de la app (el calendario del navegador no se puede pintar).
 // El valor va en un input oculto ("AAAA-MM-DD"); el calendario se dibuja al abrirlo, sin redibujar la página.
 function campoFecha({ id, name, valor = '', clase = '' }) {
@@ -4188,7 +4232,7 @@ async function armarAmistoso(f) {
     try { x = (await F.getDoc(refCodigo(c))).data(); } catch (e) { console.warn(e); }
     if (!x) return toast('No encontramos ese código. Revisalo con el admin del otro grupo');
     if (x.gid === D.gid) return toast('Ese es el código de tu grupo 😅 Pedile el suyo al otro grupo');
-    if (!confirm(`¿Le mandamos el desafío a "${x.nombre}"?`)) return;
+    if (!await confirmar(`¿Le mandamos el desafío a "${x.nombre}"?`, { si: 'Mandar' })) return;
     rival = x.nombre; rgid = x.gid;
   }
   if (rgid === D.gid) rgid = null;
@@ -6643,15 +6687,15 @@ const acciones = {
     D.reportes.filter(r => `${r.fecha}_${r.target}` === k).forEach(r => b.delete(F.doc(colReportes(D.gid), r.id)));
     await b.commit();
   }, 'Reporte rechazado'),
-  'marcar-falta': ({ id }) => {
+  'marcar-falta': async ({ id }) => {
     // La fecha del último partido si fue hace menos de una semana; si no, hoy.
     const fecha = D.mvp && Date.now() < D.mvp.abre + 7 * DIA ? D.mvp.id : hoyAR();
     const nombre = jugador(id)?.usuario || '?';
-    if (!confirm(`¿Marcar que ${nombre} faltó sin avisar el ${fechaLinda(fecha)}?`)) return;
+    if (!await confirmar(`¿Marcar que ${nombre} faltó sin avisar el ${fechaLinda(fecha)}?`)) return;
     act(() => F.setDoc(F.doc(colFaltas(D.gid), `${fecha}_${id}`), { fecha, target: id, nombre, por: miUid(), ts: Date.now() }), `🟥 Tarjeta roja para ${nombre}`);
   },
-  'quitar-falta': ({ k }) => {
-    if (!confirm('¿Sacar esta tarjeta roja?')) return;
+  'quitar-falta': async ({ k }) => {
+    if (!await confirmar('¿Sacar esta tarjeta roja?')) return;
     act(() => F.deleteDoc(F.doc(colFaltas(D.gid), k)), 'Tarjeta roja sacada');
   },
   'mvp-copiar': () => {
@@ -6687,22 +6731,22 @@ const acciones = {
     if (!lado) return;
     act(() => F.setDoc(F.doc(colVsAnot(id), miUid()), { lado, usuario: p.usuario, foto: p.foto || '', posicion: p.posicion || 'comodin', ts: Date.now() }), `✅ Anotado con ${nombreLado(a, lado)}`);
   },
-  'vs-bajarme': ({ id }) => { if (confirm('¿Te bajás del amistoso?')) act(() => F.deleteDoc(F.doc(colVsAnot(id), miUid())), 'Te bajaste del amistoso'); },
-  'vs-sacar': ({ id, u }) => {
+  'vs-bajarme': async ({ id }) => { if (await confirmar('¿Te bajás del amistoso?', { si: 'Me bajo', peligro: true })) act(() => F.deleteDoc(F.doc(colVsAnot(id), miUid())), 'Te bajaste del amistoso'); },
+  'vs-sacar': async ({ id, u }) => {
     const x = (D.vsAnot[id] || []).find(y => y.id === u);
-    if (x && confirm(`¿Sacar a ${x.usuario} del amistoso?`)) act(() => F.deleteDoc(F.doc(colVsAnot(id), u)), `${x.usuario} quedó afuera`);
+    if (x && await confirmar(`¿Sacar a ${x.usuario} del amistoso?`)) act(() => F.deleteDoc(F.doc(colVsAnot(id), u)), `${x.usuario} quedó afuera`);
   },
   'vs-editar': ({ id }) => { ui.vsId = id; ui.modal = 'vs-editar'; render(); },
   'vs-resultado': ({ id }) => { ui.vsId = id; ui.modal = 'vs-resultado'; render(); },
   'vs-invitado': ({ id }) => { ui.vsId = id; ui.modal = 'vs-invitado'; render(); },
   'vs-sin-resultado': () => { const id = ui.vsId; ui.modal = null; render(); act(() => F.updateDoc(refVs(id), { resultado: null }), 'Resultado borrado'); },
-  'vs-suspender': ({ id }) => {
+  'vs-suspender': async ({ id }) => {
     const a = D.vs[id];
-    if (a && (a.suspendido || confirm('¿Suspender el amistoso? Lo ven los dos grupos. Después lo podés volver a poner.'))) act(() => F.updateDoc(refVs(id), { suspendido: !a.suspendido }), a.suspendido ? '⚽ ¡Se juega!' : '🚫 Amistoso suspendido');
+    if (a && (a.suspendido || await confirmar('¿Suspender el amistoso? Lo ven los dos grupos. Después lo podés volver a poner.'))) act(() => F.updateDoc(refVs(id), { suspendido: !a.suspendido }), a.suspendido ? '⚽ ¡Se juega!' : '🚫 Amistoso suspendido');
   },
   'vs-borrar': async ({ id }) => {
     const a = D.vs[id];
-    if (!a || !confirm(`¿Borrar el amistoso contra ${a.rival.nombre}? Se borra para los dos grupos, con la lista y el resultado. No se puede deshacer.`)) return;
+    if (!a || !await confirmar(`¿Borrar el amistoso contra ${a.rival.nombre}? Se borra para los dos grupos, con la lista y el resultado. No se puede deshacer.`)) return;
     await act(async () => {
       await Promise.all((D.vsAnot[id] || []).map(x => F.deleteDoc(F.doc(colVsAnot(id), x.id))));
       await F.deleteDoc(refVs(id));
@@ -6743,7 +6787,7 @@ const acciones = {
   },
   'vs-rechazar': async ({ id }) => {
     const a = D.vs[id];
-    if (!a || !confirm(`¿Rechazar el desafío de ${a.local.nombre}? Les va a aparecer que esta vez no pueden.`)) return;
+    if (!a || !await confirmar(`¿Rechazar el desafío de ${a.local.nombre}? Les va a aparecer que esta vez no pueden.`)) return;
     await act(async () => {
       await F.updateDoc(refVs(id), { estado: 'rechazado' });
       await F.deleteDoc(F.doc(db, 'grupos', D.gid, 'desafios', id));
@@ -6767,7 +6811,7 @@ const acciones = {
   // ---- Borrar el grupo (solo admin) ----
   'borrar-grupo': async () => {
     const gid = D.gid, nombre = D.grupo.nombre;
-    const escrito = prompt(`Esto borra "${nombre}" para todos: la lista, los jugadores y la historia. No se puede deshacer.\n\nPara confirmar, escribí BORRAR`);
+    const escrito = await pedirTexto(`Esto borra "${nombre}" para todos: la lista, los jugadores y la historia. No se puede deshacer.\n\nPara confirmar, escribí BORRAR:`, { placeholder: 'BORRAR' }, { si: 'Borrar el grupo', peligro: true });
     if (escrito == null) return;
     if (escrito.trim().toUpperCase() !== 'BORRAR') return toast('No se borró: tenías que escribir BORRAR');
     borrandoGrupo = gid;
@@ -6831,10 +6875,10 @@ const acciones = {
     t.equipos = repartirEnEquipos(t.ids, t.cant, modo).map((ids, i) => ({ nombre: viejos[i]?.nombre || colorT(i)[1], ids }));
     t.modo = modo;
   }, '🆚 Equipos armados'),
-  'torneo-empezar': () => {
+  'torneo-empezar': async () => {
     const t = D.grupo.torneo;
     if (t.equipos.some(e => !e.ids.length)) return toast('Hay un equipo sin jugadores');
-    if (!confirm(`¿Empezar "${t.nombre}"? Los equipos quedan fijos hasta el final.`)) return;
+    if (!await confirmar(`¿Empezar "${t.nombre}"? Los equipos quedan fijos hasta el final.`)) return;
     actualizarGrupo(s => {
       const t = s.torneo;
       // La copa sola se sortea; en liga + copa, la llave se arma al terminar la liga.
@@ -6845,9 +6889,9 @@ const acciones = {
       t.empezo = Date.now();
     }, '🏁 ¡Arrancó el torneo!');
   },
-  'torneo-copa': () => {
+  'torneo-copa': async () => {
     const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length, k = clasificanCopa(t);
-    if (!confirm(`${faltan ? `Faltan ${faltan} partidos de la liga. ` : ''}¿Pasar a la copa con los ${k} primeros de la tabla?`)) return;
+    if (!await confirmar(`${faltan ? `Faltan ${faltan} partidos de la liga. ` : ''}¿Pasar a la copa con los ${k} primeros de la tabla?`)) return;
     const llave = armarLlave(tablaTorneo(t).slice(0, k).map(f => f.i));
     actualizarGrupo(s => { s.torneo.llave = llave; s.torneo.res = {}; }, '🏆 ¡Empieza la copa!');
   },
@@ -6905,20 +6949,20 @@ const acciones = {
     render();
     if (x) await guardarResultadoTorneo(k, { a: x.a, b: x.b, ga: null, gb: null, gana: null }, 'Resultado borrado');
   },
-  'torneo-terminar': () => {
+  'torneo-terminar': async () => {
     const t = D.grupo.torneo, faltan = t.partidos.filter(x => x.ga == null).length;
-    if (!confirm(faltan ? `Faltan ${faltan} partidos. ¿Terminar igual? Gana el que va primero en la tabla.` : '¿Terminar el torneo? Queda la tabla final con el campeón.')) return;
+    if (!await confirmar(faltan ? `Faltan ${faltan} partidos. ¿Terminar igual? Gana el que va primero en la tabla.` : '¿Terminar el torneo? Queda la tabla final con el campeón.')) return;
     actualizarGrupo(s => { s.torneo.estado = 'terminado'; s.torneo.termino = Date.now(); }, '🏆 ¡Torneo terminado!');
   },
-  'torneo-borrar': () => {
+  'torneo-borrar': async () => {
     const t = D.grupo.torneo;
-    if (!confirm(t.estado === 'armando' ? '¿Cancelar el torneo?' : '¿Borrar el torneo con todos sus resultados? No se puede deshacer.')) return;
+    if (!await confirmar(t.estado === 'armando' ? '¿Cancelar el torneo?' : '¿Borrar el torneo con todos sus resultados? No se puede deshacer.')) return;
     actualizarGrupo(s => { s.torneo = null; });
     location.hash = '#/torneo';
   },
   'copiar-invitacion': () => copiar(`⚽ Sumate al grupo *${D.grupo.nombre}* para anotarte al fulbo:\n${linkInvitacion()}`, '📋 Link copiado'),
-  'nuevo-codigo': () => {
-    if (!confirm('¿Generar un link nuevo? El actual deja de funcionar (los que ya están en el grupo siguen adentro).')) return;
+  'nuevo-codigo': async () => {
+    if (!await confirmar('¿Generar un link nuevo? El actual deja de funcionar (los que ya están en el grupo siguen adentro).')) return;
     actualizarGrupo(s => { s.codigo = genId(12); }, '🎟️ Link nuevo generado');
   },
   armar: ({ modo }) => actualizarGrupo(s => {
@@ -6945,8 +6989,8 @@ const acciones = {
     delete s.solicitudes[id];
   }, '✅ Cambio aprobado'),
   'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
-  suspender: () => {
-    const motivo = prompt('¿Por qué se suspende? (lo ven todos y les llega en la notificación)', 'Se suspende por lluvia');
+  suspender: async () => {
+    const motivo = await pedirTexto('¿Por qué se suspende? Lo ven todos y les llega en la notificación.', { valor: 'Se suspende por lluvia', max: 120 }, { si: 'Suspender', peligro: true });
     if (motivo === null) return;
     actualizarGrupo(s => { s.partido.suspendido = motivo.trim().slice(0, 120) || 'Partido suspendido'; }, '🚫 Partido suspendido')
       .then(ok => ok && avisar('suspendido'));
@@ -6964,8 +7008,8 @@ const acciones = {
   // Volver a calificar a todos los que jugaron (aunque ya los hayas calificado).
   'recalificar-si': () => { ui.cola = ui.recalificar || []; ui.colaPos = 0; ui.modal = 'calificar'; render(); },
   'rapido-saltar': () => { ui.colaPos++; render(); },
-  'perdonar-baja': ({ k }) => {
-    if (!confirm('¿Perdonar esta baja? Deja de contar para la asistencia.')) return;
+  'perdonar-baja': async ({ k }) => {
+    if (!await confirmar('¿Perdonar esta baja? Deja de contar para la asistencia.')) return;
     act(() => F.deleteDoc(F.doc(db, 'grupos', D.gid, 'bajas', k)), 'Baja perdonada');
   },
   'abrir-avisos': () => { ui.modal = 'avisos'; guardado.set(claveVisto(), String(Date.now())); render(); },
@@ -7028,15 +7072,15 @@ const acciones = {
     render();
   },
   'agenda-mas': () => { ui.agendaFilas = Math.min(3, (ui.agendaFilas || D.grupo.agenda?.slots?.length || 1) + 1); render(); },
-  'agenda-quitar': () => {
-    if (!confirm('¿Desactivar la fecha fija? La fecha cargada queda como está y "Nueva fecha" vuelve a dejarla vacía.')) return;
+  'agenda-quitar': async () => {
+    if (!await confirmar('¿Desactivar la fecha fija? La fecha cargada queda como está y "Nueva fecha" vuelve a dejarla vacía.')) return;
     ui.agendaFilas = 0;
     ui.agendaBorrador = null;
     actualizarGrupo(s => { s.agenda = null; }, 'Fecha fija desactivada');
   },
-  saltear: ({ fecha }) => {
+  saltear: async ({ fecha }) => {
     const salteada = (D.grupo.agenda?.saltear || []).includes(fecha);
-    if (!confirm(salteada ? `¿Volver a jugar el ${fechaLinda(fecha)}?` : `¿Saltear el ${fechaLinda(fecha)}? Esa semana no se juega y la lista pasa a la fecha siguiente.`)) return;
+    if (!await confirmar(salteada ? `¿Volver a jugar el ${fechaLinda(fecha)}?` : `¿Saltear el ${fechaLinda(fecha)}? Esa semana no se juega y la lista pasa a la fecha siguiente.`)) return;
     actualizarGrupo(s => {
       const hoy = hoyArg();
       const lista = (s.agenda.saltear || []).filter(f => f >= hoy && f !== fecha);
@@ -7045,12 +7089,12 @@ const acciones = {
   },
   agendar: ({ gid }) => { ui.agendar = ui.agendar === gid ? null : gid; render(); },
   'bajar-ics': ({ gid }) => { const x = misPartidos().find(p => p.id === gid); if (x?.t) bajarIcs(x); },
-  decidir: ({ id, si }) => {
+  decidir: async ({ id, si }) => {
     const p = D.pendientes.find(x => x.id === id);
-    if (!si && !confirm(`¿Rechazar a ${p?.usuario || 'esta persona'}?`)) return;
+    if (!si && !await confirmar(`¿Rechazar a ${p?.usuario || 'esta persona'}?`)) return;
     return act(() => api('decidir', { gid: D.gid, id, aceptar: !!si }, urlGrupo()), si ? `✅ ${p?.usuario || ''} ya está en el grupo` : 'Pedido rechazado');
   },
-  'cancelar-pedido': ({ gid }) => { if (confirm('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
+  'cancelar-pedido': async ({ gid }) => { if (await confirmar('¿Cancelar el pedido para entrar?')) cancelarPedido(gid); },
   resultado: ({ ganador }) => guardarResultado(ganador),
   'sin-goles': () => { ui.sinGoles = true; render(); },
   'admin-tab': ({ tab }) => { guardado.set(LS + 'adminTab', tab); render(); },
@@ -7126,7 +7170,7 @@ const acciones = {
     s.armadores = s.armadores.includes(id) ? s.armadores.filter(x => x !== id) : [...s.armadores, id];
   }, esArmador(id) ? 'Ya no puede editar equipos' : '🛠️ Ahora puede armar y editar equipos'),
   'nueva-fecha': async () => {
-    if (!confirm('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen, y la votación del jugador del partido queda guardada con los que jugaron.')) return;
+    if (!await confirmar('¿Vaciar la lista de anotados y los equipos? Las fichas y los votos se mantienen, y la votación del jugador del partido queda guardada con los que jugaron.')) return;
     // Antes de vaciar, deja armada la votación con los titulares de este partido.
     const f = D.grupo.partido.fecha;
     if (f && Date.now() < cierraVotacion(f)) await crearVotacion(f);
@@ -7141,17 +7185,17 @@ const acciones = {
   'toggle-anotado': ({ id }) => actualizarGrupo(s => {
     s.anotados = s.anotados.includes(id) ? s.anotados.filter(x => x !== id) : [...s.anotados, id];
   }),
-  'borrar-invitado': ({ id }) => {
-    if (!confirm(`¿Borrar a ${jugador(id)?.usuario}?`)) return;
+  'borrar-invitado': async ({ id }) => {
+    if (!await confirmar(`¿Borrar a ${jugador(id)?.usuario}?`)) return;
     actualizarGrupo(s => { delete s.invitados[id]; s.anotados = s.anotados.filter(x => x !== id); }, 'Invitado borrado');
   },
-  'hacer-admin': ({ id }) => {
-    if (!confirm(`¿Hacer admin a ${jugador(id)?.usuario}? Va a poder hacer todo lo que hacés vos.`)) return;
+  'hacer-admin': async ({ id }) => {
+    if (!await confirmar(`¿Hacer admin a ${jugador(id)?.usuario}? Va a poder hacer todo lo que hacés vos.`, { si: 'Hacer admin' })) return;
     actualizarGrupo(s => { if (!s.admins.includes(id)) s.admins.push(id); }, 'Ahora es admin');
   },
   expulsar: async ({ id }) => {
     const p = jugador(id);
-    if (!p || !confirm(`¿Expulsar a ${p.usuario}? No va a poder volver a entrar con el link.`)) return;
+    if (!p || !await confirmar(`¿Expulsar a ${p.usuario}? No va a poder volver a entrar con el link.`)) return;
     const ok = await actualizarGrupo(s => {
       s.anotados = s.anotados.filter(x => x !== id);
       s.admins = s.admins.filter(x => x !== id);
@@ -7169,7 +7213,7 @@ const acciones = {
   'salir-grupo': async ({ gid }) => {
     const g = D.perfil.grupos.find(x => x.id === gid);
     if (gid === D.gid && esAdmin() && D.grupo.admins.length === 1) return toast('Sos el único admin: nombrá a otro antes de salir');
-    if (!confirm(`¿Salir de ${g?.nombre}? Para volver vas a necesitar el link de invitación.`)) return;
+    if (!await confirmar(`¿Salir de ${g?.nombre}? Para volver vas a necesitar el link de invitación.`)) return;
     await act(async () => {
       if (gid === D.gid) await F.runTransaction(db, async tx => {
         const s = normGrupo((await tx.get(refGrupo(gid))).data());
@@ -7202,7 +7246,7 @@ const acciones = {
     if (ui.editDato === 'edad') $('#pd-edad')?.focus();
   },
   'elegir-pos': ({ pos: k }) => { ui.editDato = null; render(); if (k !== (D.perfil.posicion || 'comodin')) escribirPerfil({ posicion: k }); },
-  'quitar-foto-perfil': () => { if (confirm('¿Quitar tu foto?')) escribirPerfil({ foto: '' }, 'Foto quitada'); },
+  'quitar-foto-perfil': async () => { if (await confirmar('¿Quitar tu foto?')) escribirPerfil({ foto: '' }, 'Foto quitada'); },
   nivel: ({ id, delta }) => {
     const n = limitarNivel(nivelDe(id) + Number(delta));
     if (n !== nivelDe(id)) guardarNivel(id, n);
