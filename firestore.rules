@@ -82,7 +82,8 @@ service cloud.firestore {
     function amistoso(a) { return get(/databases/$(database)/documents/amistosos/$(a)).data; }
     function textoCorto(x, n) { return x is string && x.size() <= n; }
     function datosAmistoso(d) {
-      return d.keys().hasOnly(['local', 'rival', 'creador', 'admins', 'fecha', 'hora', 'lugar', 'cupo', 'suspendido', 'resultado', 'ts'])
+      return d.keys().hasOnly(['local', 'rival', 'creador', 'admins', 'fecha', 'hora', 'lugar', 'cupo', 'suspendido', 'resultado', 'ts', 'estado'])
+        && d.get('estado', 'aceptado') in ['pendiente', 'aceptado', 'rechazado']
         && d.local.keys().hasOnly(['gid', 'nombre']) && d.local.gid is string && textoCorto(d.local.nombre, 60)
         && d.rival.keys().hasOnly(['gid', 'nombre']) && (d.rival.gid == null || d.rival.gid is string) && textoCorto(d.rival.nombre, 60)
         && d.admins is list && d.admins.size() <= 12
@@ -100,14 +101,18 @@ service cloud.firestore {
         && request.resource.data.creador == uid()
         && uid() in request.resource.data.admins
         && esAdmin(request.resource.data.local.gid);
-      // Los admins cambian fecha, cancha, cupo, suspendido y resultado. Un admin del grupo rival lo suma a su grupo.
+      // Los admins cambian fecha, cancha, cupo, suspendido y resultado. Un admin del grupo rival lo acepta (o lo suma
+      // a su grupo, si vino por link) y queda como admin del amistoso; o lo rechaza.
       allow update: if logueado() && datosAmistoso(request.resource.data) && (
           (uid() in resource.data.admins
             && request.resource.data.local == resource.data.local
             && request.resource.data.rival == resource.data.rival
             && request.resource.data.creador == resource.data.creador
             && request.resource.data.admins == resource.data.admins)
-          || (cambia().hasOnly(['rival', 'admins'])
+          || (esAdmin(resource.data.rival.gid) && !(uid() in resource.data.admins)
+            && cambia().hasOnly(['estado']) && request.resource.data.estado == 'rechazado')
+          || (cambia().hasOnly(['rival', 'admins', 'estado'])
+            && request.resource.data.get('estado', 'aceptado') == 'aceptado'
             && request.resource.data.rival.nombre == resource.data.rival.nombre
             && (resource.data.rival.gid == null || resource.data.rival.gid == request.resource.data.rival.gid)
             && request.resource.data.rival.gid is string
@@ -140,6 +145,21 @@ service cloud.firestore {
               && request.resource.data.inv == true && request.resource.data.por == uid()));
         allow delete: if logueado() && (u == uid() || uid() in amistoso(a).admins);
       }
+    }
+
+    // Código de cada grupo para desafiarlo a un amistoso (UADE4821 → el grupo). Se busca por el código exacto:
+    // no se pueden listar. Lo crea y lo cambia un admin de ese grupo.
+    match /codigos/{c} {
+      allow get: if logueado();
+      allow create: if logueado() && esAdmin(request.resource.data.gid)
+        && request.resource.data.keys().hasOnly(['gid', 'nombre'])
+        && textoCorto(request.resource.data.nombre, 60)
+        && c.matches('[A-Z0-9]{6,10}');
+      allow update: if logueado() && esAdmin(resource.data.gid)
+        && request.resource.data.gid == resource.data.gid
+        && request.resource.data.keys().hasOnly(['gid', 'nombre'])
+        && textoCorto(request.resource.data.nombre, 60);
+      allow delete: if logueado() && esAdmin(resource.data.gid);
     }
 
     match /grupos/{g} {
@@ -374,6 +394,20 @@ service cloud.firestore {
           && (request.resource.data.gb == null || (request.resource.data.gb is int && request.resource.data.gb >= 0 && request.resource.data.gb <= 99))
           && request.resource.data.gana in [null, 'a', 'b'];
         allow delete: if esAdmin(g);
+      }
+
+      // Desafíos a un amistoso que le mandaron a este grupo (el id es el del amistoso). Los ven sus admins;
+      // los manda un admin del grupo que desafía, para un amistoso suyo contra este grupo.
+      match /desafios/{a} {
+        allow read: if esAdmin(g);
+        allow create: if logueado()
+          && request.resource.data.keys().hasOnly(['desde', 'nombre', 'por', 'ts'])
+          && esAdmin(request.resource.data.desde)
+          && request.resource.data.por == uid()
+          && textoCorto(request.resource.data.nombre, 60)
+          && amistoso(a).local.gid == request.resource.data.desde
+          && amistoso(a).rival.gid == g;
+        allow delete: if esAdmin(g) || esAdmin(resource.data.desde);
       }
 
       // Niveles que pone el admin: los ven admins y armadores (para equilibrar), los cambian solo los admins.

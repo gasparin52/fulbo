@@ -630,8 +630,8 @@ A.onAuthStateChanged(auth, user => {
   Object.values(subsVs).forEach(f => f());
   subsVs = {};
   D.vs = {}; D.vsAnot = {};
-  nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {} });
+  nivelesDe = mvpDe = pendientesDe = desafiosDe = null;
+  Object.assign(D, { misGrupos: {}, user, perfil: user ? undefined : null, privado: user ? undefined : null, gid: null, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [] });
   if (user) {
     subsUser.push(F.onSnapshot(refUsuario(user.uid), s => {
       D.perfil = s.exists() ? s.data() : null;
@@ -684,8 +684,8 @@ function elegirGrupo() {
   if (gid === D.gid) return;
   cortar(subsGrupo);
   cortar(subsMvp);
-  nivelesDe = mvpDe = pendientesDe = null;
-  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {} });
+  nivelesDe = mvpDe = pendientesDe = desafiosDe = null;
+  Object.assign(D, { gid, grupo: null, miembros: null, notas: undefined, pendientes: [], resultados: [], votos: {}, niveles: {}, mvp: null, mvps: [], estrellas: {}, cargado: {}, faltas: [], reportes: [], rehacer: [], bajas: [], torneoEquipos: {}, torneoResultados: {}, desafios: [] });
   if (!gid) return;
   guardado.set(LS + 'gid', gid);
   subsGrupo.push(F.onSnapshot(refGrupo(gid), s => {
@@ -694,6 +694,7 @@ function elegirGrupo() {
     rivales().forEach(x => seguirVs(x.id));
     suscribirNiveles();
     suscribirPendientes();
+    suscribirDesafios();
     suscribirReportes();
     suscribirRehacer();
     render();
@@ -1234,6 +1235,18 @@ function suscribirPendientes() {
   pendientesDe = D.gid;
   subsGrupo.push(F.onSnapshot(F.collection(db, 'grupos', D.gid, 'pendientes'), qs => {
     D.pendientes = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+    render();
+  }, e => console.warn(e.code)));
+}
+
+// Desafíos a un amistoso que le mandaron a este grupo (los ven los admins).
+let desafiosDe = null;
+function suscribirDesafios() {
+  if (!esAdmin() || desafiosDe === D.gid) return;
+  desafiosDe = D.gid;
+  subsGrupo.push(F.onSnapshot(F.collection(db, 'grupos', D.gid, 'desafios'), qs => {
+    D.desafios = qs.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+    D.desafios.forEach(x => seguirVs(x.id));
     render();
   }, e => console.warn(e.code)));
 }
@@ -1953,7 +1966,7 @@ function vistaPortada() {
       ${pregunta('¿Hay que descargar algo?', 'No. Se usa desde el navegador. Si querés, la agregás a la pantalla de inicio y queda como una app. <a href="#/ayuda" class="text-emerald-300 underline">Ver cómo</a>')}
       ${pregunta('¿Quién ve las calificaciones?', 'Solo se ve el promedio. Nadie ve lo que puso cada uno, ni el admin.')}
       ${pregunta('¿Puedo estar en más de un grupo?', 'Sí. Ves todos tus partidos juntos en el calendario.')}
-      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o un amistoso contra otro grupo: los dos ven la lista del partido y cada uno se anota de su lado. Nadie entra al grupo del otro.')}
+      ${pregunta('¿Podemos hacer un torneo o jugar contra otro grupo?', 'Sí. El admin arma un torneo entre los del grupo (liga, copa o las dos) o desafía a otro grupo a un amistoso con el código de ese grupo. Si lo aceptan, los dos ven la lista del partido y cada uno se anota de su lado. Nadie entra al grupo del otro.')}
     </section>
 
     <section class="relative isolate -mx-4 px-4 py-12 text-center overflow-hidden">
@@ -2696,7 +2709,7 @@ function vistaPrincipal() {
     : t === 'jugadores' ? [jugadoresGrid()]
     : t === 'torneo' ? [cartelera(), vistaTorneo()]
     : t === 'amistoso' ? [cartelera(), vistaAmistoso()]
-    : [cartelera(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
+    : [cartelera(), tarjetaDesafios(), header(d), avisoTorneo(), tarjetaArbitro(), tarjetaAvisos(d), tarjetaPartido(), tarjetaResultado(), avisoPendientes(), tarjetaMvp(), tarjetaFaltas(), miEstado(d), lista(d), tarjetaModos(), tarjetaPublico(), tarjetaUltimo(), tarjetaHistorialGrupo()];
   return [topBar(), tabsGrupo(), tarjetaMail(), ...contenido, pie()].join('');
 }
 
@@ -2885,8 +2898,8 @@ function guia() {
     [`${barraGrupo()}<div class="flex-1 p-1.5 space-y-1.5"><p class="font-bold">${ic('calendar', 'text-emerald-400')} Fixture</p><p class="text-slate-500 text-[7px] font-bold">FECHA 1</p>${marcador('#1d4ed8', '#16a34a', false)}${marcador('#ef4444', '#7dd3fc', true)}</div>`, 'Después de jugar, el <b>capitán</b> de uno de los dos equipos (o el árbitro, o el admin) toca <b>Cargar</b> y pone los goles. La tabla y la llave se actualizan solas.', true],
   ]);
   const amistosos = tira([
-    [`${barraGrupo({ admin: true })}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-8 rounded-lg bg-slate-800"></div>${modosMini('amistoso')}</div>`, 'El <b>admin</b> toca <b>Amistoso</b> en <b>Sumale algo al grupo</b> y escribe contra quién juegan.', true],
-    [`<div class="flex-1 p-1.5"><div class="rounded-lg p-2 text-center text-white" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)"><p class="text-[7px] font-black tracking-widest text-amber-200">AMISTOSO</p><div class="flex items-center justify-center gap-1 mt-1">${camiseta('#ef4444', 24)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 24)}</div><p class="text-[8px] mt-1">Pasale el link a los dos grupos</p><span class="mt-1.5 inline-block">${toca('<span class="block rounded bg-white text-slate-900 font-bold px-2 py-1">Copiar invitación</span>')}</span></div></div>`, 'Pasá la invitación a los dos grupos. Cada uno se anota <b>de su lado</b> y todos ven cómo se completa. <b>Nadie entra al grupo del otro</b>.', true],
+    [`${barraGrupo({ admin: true })}${tabsG('partido')}<div class="flex-1 p-1.5 space-y-1.5"><div class="h-8 rounded-lg bg-slate-800"></div>${modosMini('amistoso')}</div>`, 'El <b>admin</b> toca <b>Amistoso</b> en <b>Sumale algo al grupo</b> y pone el <b>código del otro grupo</b> (el <b>?</b> te dice dónde lo encuentran).', true],
+    [`<div class="flex-1 p-1.5"><div class="rounded-lg p-2 text-center text-white" style="background:repeating-linear-gradient(90deg,#15803d 0 10%,#16a34a 10% 20%)"><p class="text-[7px] font-black tracking-widest text-amber-200">AMISTOSO</p><div class="flex items-center justify-center gap-1 mt-1">${camiseta('#ef4444', 24)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 24)}</div><p class="text-[8px] mt-1">Con el código del otro grupo</p><span class="mt-1.5 inline-block">${toca('<span class="block rounded bg-white text-slate-900 font-bold px-2 py-1">Mandar desafío</span>')}</span></div></div>`, 'A su admin le llega el <b>desafío</b> y lo acepta. Aparece en los dos grupos, cada uno se anota <b>de su lado</b> y todos ven cómo se completa. <b>Nadie entra al grupo del otro</b>.', true],
     [`<div class="flex-1 p-1.5 space-y-1.5">${tarjeta(`<div class="flex items-center justify-center gap-1">${camiseta('#ef4444', 20)}<b class="text-amber-300 text-[8px]">VS</b>${camiseta('#0ea5e9', 20)}</div><div class="grid grid-cols-4 gap-0.5 mt-1.5 text-center">${[['5', 'PJ', ''], ['3', 'G', 'text-emerald-300'], ['1', 'E', ''], ['1', 'P', 'text-red-300']].map(([n, l, c]) => `<span class="rounded bg-slate-950/60 py-0.5"><b class="block text-[10px] ${c}">${n}</b>${l}</span>`).join('')}</div><p class="text-center font-bold mt-1">🔥 Van ganando 3 a 1</p><span class="mt-1 block">${toca('<span class="block rounded bg-emerald-500 text-slate-950 font-bold text-center py-1">🔁 Armar la revancha</span>', 'block')}</span>`)}</div>`, 'Cada rival queda con su <b>historial</b>. Para volver a jugar, tocá <b>Armar la revancha</b>: mismo link y mismo grupo.', true],
   ]);
   const paso = (titulo, cuerpo, abierto = false) => `
@@ -3080,9 +3093,9 @@ function vistaReglas() {
       'Al final aparecen el <b>campeón</b> y el podio, y el torneo queda en <b>Campeones anteriores</b>. Con <b>Copiar para WhatsApp</b> mandás la tabla y los resultados.',
     ])}
     ${seccion('⚔️ Amistosos contra otros grupos', [
-      'Sirven para jugar contra otro grupo, o cuando no llegan al cupo. Un admin toca <b>Sumale algo al grupo → Amistoso</b> y escribe contra quién juegan.',
+      'Sirven para jugar contra otro grupo, o cuando no llegan al cupo. Un admin toca <b>Sumale algo al grupo → Amistoso</b>, pone el <b>código del otro grupo</b>, la fecha y la cancha, y toca <b>Mandar desafío</b>.',
       'El amistoso <b>no es un grupo nuevo</b>: es un partido que comparten los dos grupos. Los dos ven lo mismo: fecha, cancha, quién se anotó de cada lado y el resultado. <b>Nadie entra al grupo del otro</b>: no se ven calificaciones, fichas ni historia.',
-      'Con <b>Copiar invitación</b> lo mandás por WhatsApp a los dos grupos. Los de tu grupo lo ven en <b>Partido → Amistoso</b> y se anotan con un toque. Si el otro grupo usa Fulbo, su admin abre el link y lo <b>suma a su grupo</b>; si no, cada uno entra con el link y se anota del lado de ellos.',
+      'Cada grupo tiene un <b>código</b> (por ejemplo UADE-4821) en <b>Administrar → Grupo</b> y abajo de todo en <b>Partido → Amistoso</b>. Al admin del otro grupo le llega el desafío en Fulbo: si lo <b>acepta</b>, aparece en los dos grupos y cada uno se anota de su lado. Si ya jugaron, lo desafiás de nuevo con un toque. Si el otro grupo no usa Fulbo, se arma con un link para mandar por WhatsApp.',
       'Cada lado tiene su cupo (5 en fútbol 5). Los equipos ya están: <b>ustedes contra ellos</b>. Un admin puede anotar a alguien sin cuenta, sacar a alguien, cambiar la fecha, <b>suspenderlo</b> o <b>borrarlo</b>.',
       'Después del partido, un admin carga el resultado y queda el <b>historial</b> con cada rival en los dos grupos: jugados, ganados, empatados y perdidos. Para volver a jugar, <b>Armar la revancha</b>.',
     ])}
@@ -3792,6 +3805,91 @@ const MSJ_INSULTO = 'Ese nombre no va 😅 Probá con otro.';
 const refVs = id => F.doc(db, 'amistosos', id);
 const colVsAnot = id => F.collection(db, 'amistosos', id, 'anotados');
 const linkVs = id => `${urlBase()}#/vs/${id}`;
+// Código de cada grupo para desafiarlo (codigos/UADE4821 → { gid, nombre }); se muestra UADE-4821.
+// Lo crea el primer admin que abre Administrar o Amistoso. Con el código no se ve nada del grupo: solo
+// se le manda un desafío (grupos/{gid}/desafios/{id del amistoso}) que su admin acepta o rechaza.
+const refCodigo = c => F.doc(db, 'codigos', c);
+const verCodigo = c => c ? `${c.slice(0, -4)}-${c.slice(-4)}` : '';
+const limpiarCodigo = x => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+let codigoListo = null;
+async function asegurarCodigo() {
+  if (!esAdmin() || codigoListo === D.gid) return;
+  const gid = codigoListo = D.gid, g = D.grupo, nombre = g.nombre.slice(0, 60);
+  try {
+    if (g.codigoVs) {
+      const x = (await F.getDoc(refCodigo(g.codigoVs))).data();
+      if (x && x.nombre !== nombre) await F.updateDoc(refCodigo(g.codigoVs), { nombre });
+      if (x) return;
+    }
+    const letras = g.nombre.normalize('NFD').replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 4);
+    const AZ = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    for (let k = 0; k < 5; k++) {
+      const c = (letras.length >= 2 ? letras : 'FULB') + Array.from({ length: 4 }, () => AZ[Math.floor(Math.random() * AZ.length)]).join('');
+      if ((await F.getDoc(refCodigo(c))).exists()) continue;
+      await F.setDoc(refCodigo(c), { gid, nombre });
+      await F.updateDoc(refGrupo(gid), { codigoVs: c });
+      return;
+    }
+  } catch (e) { console.warn(e); codigoListo = null; }
+}
+const mensajeCodigo = () => `⚽ El código de *${D.grupo.nombre}* en Fulbo es *${verCodigo(D.grupo.codigoVs)}*.\nPara desafiarnos a un amistoso: en tu grupo, Partido → Amistoso, y poné este código.`;
+function tarjetaCodigo() {
+  const c = D.grupo.codigoVs;
+  return `
+    <div class="flex items-center gap-3 rounded-2xl border border-sky-500/30 bg-sky-500/5 px-4 py-3">
+      ${ic('ticket', 'text-sky-300 !w-5 !h-5')}
+      <div class="flex-1 min-w-0">
+        <p class="text-xs text-slate-400">Código de tu grupo</p>
+        <p class="font-mono text-lg font-black tracking-widest">${c ? esc(verCodigo(c)) : '…'}</p>
+      </div>
+      ${c ? `<button data-action="copiar-codigo" class="${BTN_CHIP}">${ic('copy')} Copiar</button>` : ''}
+    </div>
+    <p class="text-xs text-slate-500 mt-1.5">Pasáselo a otro grupo para que los desafíe a un amistoso. Con el código no ven nada de tu grupo.</p>`;
+}
+const ayudaCodigo = () => `
+  <div class="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sm space-y-2 mt-2">
+    <p><b>¿Qué es?</b> Cada grupo de Fulbo tiene un código, como <b class="font-mono">UADE-4821</b>. Sirve para desafiarlo a un amistoso sin entrar a su grupo.</p>
+    <p><b>¿Dónde está?</b> El admin del otro grupo lo encuentra en Fulbo → su grupo → ${ic('settings')} <b>Administrar</b> → <b>Grupo</b> → <b>Código de tu grupo</b>. También está abajo de todo en <b>Partido → Amistoso</b>. Pedíselo por WhatsApp.</p>
+    <p><b>¿Y después?</b> A su admin le llega el desafío en Fulbo: si lo acepta, aparece en los dos grupos y cada uno se anota de su lado.</p>
+  </div>`;
+
+// Los grupos rivales con los que ya jugamos (para desafiarlos de nuevo con un toque).
+function rivalesConGrupo() {
+  const vistos = {};
+  for (const x of [...rivales()].reverse()) {
+    const a = D.vs[x.id];
+    if (!a || estadoVs(a) !== 'aceptado') continue;
+    const otro = x.lado === 'B' ? a.local : a.rival;
+    if (otro.gid && otro.gid !== D.gid && !vistos[otro.gid]) vistos[otro.gid] = { gid: otro.gid, nombre: otro.nombre };
+  }
+  return Object.values(vistos);
+}
+
+// Desafíos que nos mandaron: el admin los acepta o los rechaza.
+let limpiandoDesafios = '';
+function tarjetaDesafios() {
+  if (!esAdmin()) return '';
+  const xs = (D.desafios || []).filter(x => D.vs[x.id]?.estado === 'pendiente' && D.vs[x.id].rival.gid === D.gid);
+  // Los que ya no van (borrados o respondidos por otro admin) se limpian solos.
+  const viejos = (D.desafios || []).filter(x => D.vs[x.id] === null || (D.vs[x.id] && D.vs[x.id].estado !== 'pendiente')).map(x => x.id);
+  if (viejos.length && limpiandoDesafios !== viejos.join()) {
+    limpiandoDesafios = viejos.join();
+    setTimeout(() => viejos.forEach(id => F.deleteDoc(F.doc(db, 'grupos', D.gid, 'desafios', id)).catch(() => {})));
+  }
+  return xs.map(x => {
+    const a = D.vs[x.id];
+    return cancha(`
+      <p class="text-center text-[11px] font-black uppercase tracking-[.25em] text-amber-200">⚔️ ¡Los desafiaron!</p>
+      <div class="mt-3">${versus({ color: COLOR_VS.A, nombre: a.local.nombre }, { color: COLOR_VS.B, nombre: D.grupo.nombre })}</div>
+      <p class="text-center text-sm text-white mt-3">${a.fecha || a.hora ? `${ic('calendar')} <b>${esc(vsCuando(a))}</b>` : 'Sin fecha todavía'}${a.lugar ? `<br>${ic('map-pin')} ${esc(a.lugar)}` : ''}<br>${a.cupo} por lado</p>
+      <div class="grid grid-cols-2 gap-2 mt-4">
+        <button data-action="vs-rechazar" data-id="${x.id}" class="${BTN} bg-slate-950/60 hover:bg-slate-950/80 text-white">No, gracias</button>
+        <button data-action="vs-aceptar" data-id="${x.id}" class="${BTN_BLANCO}">${ic('check')} Aceptar</button>
+      </div>
+      <p class="text-xs text-white/80 text-center mt-2">Si aceptan, aparece en Partido → Amistoso y los de tu grupo se anotan de su lado. No ven nada más de tu grupo.</p>`);
+  }).join('');
+}
+
 // Los de antes (un grupo aparte por amistoso) tenían gid en vez de id: esos ya no se muestran.
 const rivales = () => (D.grupo?.amistosos || []).filter(x => x.id);
 
@@ -3824,6 +3922,12 @@ const adminVs = a => !!a && (a.admins || []).includes(miUid());
 const nombreLado = (a, l) => l === 'A' ? a.local.nombre : a.rival.nombre;
 const COLOR_VS = { A: '#ef4444', B: '#0ea5e9' };
 const vsJugado = a => !!a.resultado;
+const estadoVs = a => a.estado || 'aceptado';
+const mensajeDesafio = id => {
+  const a = D.vs[id];
+  return [`⚔️ Les mandamos un desafío en Fulbo: *${a.local.nombre} vs ${a.rival.nombre}*`, a.fecha || a.hora ? `📅 ${vsCuando(a)}` : '', a.lugar ? `📍 ${a.lugar}` : '',
+    '', 'El admin lo acepta entrando al grupo en Fulbo: aparece arriba de todo en Partido.'].filter((x, k) => x || k === 3).join('\n');
+};
 const vsCuando = a => [a.fecha ? fechaLinda(a.fecha) : '', a.hora].filter(Boolean).join(' · ');
 
 const mensajeVs = id => {
@@ -3836,7 +3940,8 @@ const mensajeVs = id => {
     const n = P[l].tit.length, falta = a.cupo - n;
     L.push(`${l === 'A' ? '🔴' : '🔵'} ${nombreLado(a, l)}: ${n}/${a.cupo}${falta > 0 ? ` (faltan ${falta})` : ' ✅'}`);
   }
-  L.push('', 'Anotate de tu lado acá 👇', linkVs(id));
+  if (a.rival.gid) L.push('', 'Anótense en Fulbo: en su grupo, Partido → Amistoso ⚽');
+  else L.push('', 'Anotate de tu lado acá 👇', linkVs(id));
   return L.join('\n');
 };
 
@@ -3887,22 +3992,27 @@ function tarjetaVs(id) {
         <div class="mt-3">${versus({ color: COLOR_VS.A, nombre: a.local.nombre }, { color: COLOR_VS.B, nombre: a.rival.nombre })}</div>
         ${marcador}
         <p class="text-center text-sm text-white mt-3">${a.fecha || a.hora ? `${ic('calendar')} <b>${esc(vsCuando(a))}</b>` : '<span class="text-white/70">Sin fecha todavía</span>'}${a.lugar ? `<br>${ic('map-pin')} ${esc(a.lugar)}` : ''}</p>
-        ${a.suspendido ? '<p class="text-center mt-2"><span class="inline-block rounded-lg bg-red-600 px-3 py-1 text-sm font-black text-white">🚫 Suspendido</span></p>' : ''}`, '!rounded-b-none')}
+        ${a.suspendido ? '<p class="text-center mt-2"><span class="inline-block rounded-lg bg-red-600 px-3 py-1 text-sm font-black text-white">🚫 Suspendido</span></p>' : ''}
+        ${estadoVs(a) === 'pendiente' ? `<p class="text-center mt-2"><span class="inline-block rounded-lg bg-slate-950/70 px-3 py-1 text-sm font-bold text-amber-200">⏳ Esperando que ${esc(a.rival.nombre)} acepte</span></p>` : ''}
+        ${estadoVs(a) === 'rechazado' ? `<p class="text-center mt-2"><span class="inline-block rounded-lg bg-red-600 px-3 py-1 text-sm font-black text-white">${esc(a.rival.nombre)} no puede esta vez</span></p>` : ''}`, '!rounded-b-none')}
       <div class="${CARD} !rounded-t-none !border-t-0 !mt-0">
         <div class="grid grid-cols-2 gap-3">${columnaVs(id, 'A')}${columnaVs(id, 'B')}</div>
         ${!jugado && completo ? `<p class="mt-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 px-3 py-2 text-center text-sm font-bold text-emerald-200">⚔️ ¡Están todos! ${esc(a.local.nombre)} vs ${esc(a.rival.nombre)}</p>` : ''}
-        ${jugado || a.suspendido ? '' : mio ? `
+        ${jugado || a.suspendido || estadoVs(a) === 'rechazado' ? '' : mio ? `
           <button data-action="vs-bajarme" data-id="${id}" class="${BTN_SEC} w-full mt-3">Me bajo</button>`
+        : lado === 'B' && estadoVs(a) === 'pendiente' ? ''
         : lado ? `
           <button data-action="vs-anotarme" data-id="${id}" class="${BTN_OK} w-full mt-3 py-3 text-base">${ic('user-plus')} Me anoto con ${esc(nombreLado(a, lado))}</button>`
         : `<p class="text-xs text-slate-400 text-center mt-3">Este amistoso es entre ${esc(a.local.nombre)} y ${esc(a.rival.nombre)}. Si querés jugar, pedile a un admin que te anote.</p>`}
-        ${jugado ? '' : `<button data-action="vs-copiar" data-id="${id}" class="${BTN_BLANCO} w-full mt-2 text-sm">${ic('copy')} Copiar invitación para WhatsApp</button>
-        <p class="text-[11px] text-slate-500 text-center mt-1">Mandala a los dos grupos: cada uno se anota de su lado. Nadie entra al grupo del otro.</p>`}
+        ${jugado || estadoVs(a) === 'rechazado' ? '' : estadoVs(a) === 'pendiente' ? (admin ? `<button data-action="vs-copiar-desafio" data-id="${id}" class="${BTN_BLANCO} w-full mt-2 text-sm">${ic('copy')} Copiar aviso para su admin</button>
+        <p class="text-[11px] text-slate-500 text-center mt-1">Por si no entra seguido: avisale por WhatsApp que tiene el desafío en Fulbo.</p>` : '')
+        : `<button data-action="vs-copiar" data-id="${id}" class="${BTN_BLANCO} w-full mt-2 text-sm">${ic('copy')} Copiar aviso para WhatsApp</button>
+        <p class="text-[11px] text-slate-500 text-center mt-1">${a.rival.gid ? 'Mandalo a tu grupo para que se anoten. Lo ven los dos grupos, nadie entra al del otro.' : 'Mandalo a los dos grupos: cada uno se anota de su lado con el link. Nadie entra al grupo del otro.'}</p>`}
         ${admin ? `
           <div class="flex flex-wrap justify-center gap-1.5 mt-3 pt-3 border-t border-slate-800">
             ${jugado ? '' : boton('vs-editar', 'calendar', 'Fecha y cancha')}
             ${jugado ? '' : boton('vs-invitado', 'user-plus', 'Anotar a alguien')}
-            ${jugado || pasado || completo ? boton('vs-resultado', 'pencil', jugado ? 'Corregir resultado' : '¿Cómo salió?', `${BTN_CHIP} !bg-emerald-500 !text-slate-950`) : ''}
+            ${estadoVs(a) !== 'aceptado' ? '' : jugado || pasado || completo ? boton('vs-resultado', 'pencil', jugado ? 'Corregir resultado' : '¿Cómo salió?', `${BTN_CHIP} !bg-emerald-500 !text-slate-950`) : ''}
             ${jugado ? '' : boton('vs-suspender', a.suspendido ? 'repeat' : 'ban', a.suspendido ? 'Se juega' : 'Suspender')}
             ${D.misGrupos?.[a.local.gid]?.admins?.includes(miUid()) ? boton('vs-borrar', 'trash-2', 'Borrar', `${BTN_CHIP} hover:!text-red-300`) : ''}
           </div>` : ''}
@@ -3954,24 +4064,44 @@ function fichasRivales() {
     ${esAdmin() ? `<button data-action="vs-revancha" data-nombre="${esc(r.nombre)}" data-gid="${esc(r.gid || '')}" class="${BTN_OK} w-full mt-3">${ic('repeat')} Armar la revancha</button>` : ''}`)).join('');
 }
 
-// Formulario para armar un amistoso (solo admin). Con revancha viene con el rival puesto.
+// Formulario para armar un amistoso (solo admin): se desafía a otro grupo con su código, o a uno con el que
+// ya jugaron con un toque. Si el otro grupo no usa Fulbo, se arma con un link.
 function formAmistoso() {
-  const rev = ui.vsRevancha;
+  const rev = ui.vsRevancha, link = ui.vsModo === 'link' && !rev, antes = rev ? [] : rivalesConGrupo();
+  const conGrupo = rev ? !!rev.gid : !link;
   return card(`
     <div id="form-amistoso" class="rounded-2xl bg-slate-950/40 py-3">${versus({ color: COLOR_VS.A, nombre: D.grupo.nombre }, { color: COLOR_VS.B, nombre: rev?.nombre || 'Otro grupo' })}</div>
-    <h2 class="text-xl font-black text-center mt-3">${rev ? `Revancha contra ${esc(rev.nombre)}` : 'Armar un amistoso'}</h2>
+    <h2 class="text-xl font-black text-center mt-3">${rev ? `Contra ${esc(rev.nombre)}` : 'Armar un amistoso'}</h2>
     <p class="text-sm text-slate-400 text-center mt-1">¿Les faltan jugadores o quieren medirse con otro grupo? Ustedes de un lado, ellos del otro.</p>
     <ol class="mt-3 space-y-2 text-sm">
-      ${['Poné contra quién, cuándo y dónde', 'Copiá la invitación y mandala a los dos grupos', 'Cada uno se anota de su lado y ven cómo se completa'].map((txt, k) => `
+      ${(conGrupo ? ['Poné el código del otro grupo, cuándo y dónde', 'A su admin le llega el desafío y lo acepta', 'Aparece en los dos grupos y cada uno se anota de su lado']
+        : ['Poné contra quién, cuándo y dónde', 'Copiá el aviso con el link y mandalo a los dos grupos', 'Cada uno se anota de su lado con el link']).map((txt, k) => `
         <li class="flex items-center gap-2.5"><span class="w-7 h-7 shrink-0 rounded-full bg-amber-400 text-slate-950 text-sm font-black grid place-items-center">${k + 1}</span>${txt}</li>`).join('')}
     </ol>
+    ${antes.length ? `
+      <p class="text-xs font-semibold text-slate-400 mt-4">Volver a jugar contra</p>
+      <div class="flex flex-wrap gap-1.5 mt-1.5">
+        ${antes.map(x => `<button data-action="vs-revancha" data-nombre="${esc(x.nombre)}" data-gid="${esc(x.gid)}" class="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 hover:border-sky-400 px-3 py-1.5 text-sm font-semibold">${camiseta(COLOR_VS.B, 18)} ${esc(x.nombre)}</button>`).join('')}
+      </div>` : ''}
     <form data-form="amistoso" class="mt-4 space-y-2">
-      <input type="hidden" name="rgid" value="${esc(rev?.gid || '')}">
-      <input id="a-rival" name="rival" required maxlength="30" value="${esc(rev?.nombre || '')}" placeholder="¿Contra quién? (ej: Los del laburo)" class="${INPUT}">
+      ${rev ? `
+        <div class="flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2.5 text-sm">${camiseta(COLOR_VS.B, 22)}<span class="flex-1 min-w-0 truncate">Contra <b>${esc(rev.nombre)}</b></span><button type="button" data-action="vs-revancha-no" class="${BTN_CHIP}">Cambiar</button></div>`
+      : link ? `
+        <input id="a-rival" name="rival" required maxlength="30" placeholder="¿Contra quién? (ej: Los del laburo)" class="${INPUT}">`
+      : `
+        <div>
+          <div class="flex items-center justify-between gap-2">
+            <label for="a-codigo" class="text-sm text-slate-400">Código del otro grupo</label>
+            <button type="button" data-action="vs-ayuda-codigo" aria-label="¿Qué es el código del grupo?" aria-expanded="${!!ui.vsAyuda}" class="w-7 h-7 rounded-full ${ui.vsAyuda ? 'bg-sky-400 text-slate-950' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'} text-sm font-black grid place-items-center">?</button>
+          </div>
+          ${ui.vsAyuda ? ayudaCodigo() : ''}
+          <input id="a-codigo" name="codigo" required maxlength="14" placeholder="Ej: UADE-4821" autocapitalize="characters" autocomplete="off" class="${INPUT} mt-1 font-mono uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal placeholder:font-sans">
+        </div>`}
       ${camposVs({ cupo: 5 })}
-      <button class="${BTN_OK} w-full py-3 text-base">${ic('swords')} Armar amistoso</button>
-      ${rev ? '<button type="button" data-action="vs-revancha-no" class="w-full py-2 text-sm text-slate-400">Otro rival</button>' : ''}
-    </form>`);
+      <button class="${BTN_OK} w-full py-3 text-base">${ic('swords')} ${conGrupo ? 'Mandar desafío' : 'Armar amistoso'}</button>
+    </form>
+    ${rev ? '' : `<button data-action="vs-modo" class="w-full pt-3 text-sm text-slate-400 hover:text-slate-200">${link ? '¿Tienen grupo en Fulbo? Desafialos con su código' : '¿El otro grupo no usa Fulbo? Armalo con un link'}</button>`}
+    <div class="mt-4 pt-4 border-t border-slate-800">${tarjetaCodigo()}</div>`);
 }
 const camposVs = (a = {}) => `
   <div class="grid grid-cols-[1fr_6.5rem] gap-2">
@@ -3990,21 +4120,35 @@ const datosFormVs = f => ({
 });
 
 async function armarAmistoso(f) {
-  const rival = f.get('rival').trim().slice(0, 30);
-  if (!rival) return toast('Escribí contra quién juegan');
-  if (esInsulto(rival)) return toast(MSJ_INSULTO);
+  let rival, rgid = null;
+  if (ui.vsRevancha) ({ nombre: rival, gid: rgid } = { ...ui.vsRevancha, gid: ui.vsRevancha.gid || null });
+  else if (ui.vsModo === 'link') {
+    rival = f.get('rival').trim().slice(0, 30);
+    if (!rival) return toast('Escribí contra quién juegan');
+    if (esInsulto(rival)) return toast(MSJ_INSULTO);
+  } else {
+    const c = limpiarCodigo(f.get('codigo'));
+    if (c.length < 6) return toast('Escribí el código del otro grupo (ej: UADE-4821)');
+    let x = null;
+    try { x = (await F.getDoc(refCodigo(c))).data(); } catch (e) { console.warn(e); }
+    if (!x) return toast('No encontramos ese código. Revisalo con el admin del otro grupo');
+    if (x.gid === D.gid) return toast('Ese es el código de tu grupo 😅 Pedile el suyo al otro grupo');
+    if (!confirm(`¿Le mandamos el desafío a "${x.nombre}"?`)) return;
+    rival = x.nombre; rgid = x.gid;
+  }
+  if (rgid === D.gid) rgid = null;
   const id = genId(20), ts = Date.now();
-  const rgid = ui.vsRevancha && f.get('rgid') && f.get('rgid') !== D.gid ? f.get('rgid') : null;
   const datos = {
-    local: { gid: D.gid, nombre: D.grupo.nombre.slice(0, 60) }, rival: { gid: rgid, nombre: rival },
+    local: { gid: D.gid, nombre: D.grupo.nombre.slice(0, 60) }, rival: { gid: rgid, nombre: rival.slice(0, 60) },
     creador: miUid(), admins: [miUid(), ...D.grupo.admins.filter(x => x !== miUid())].slice(0, 6),
-    ...datosFormVs(f), suspendido: false, resultado: null, ts,
+    ...datosFormVs(f), suspendido: false, resultado: null, ts, estado: rgid ? 'pendiente' : 'aceptado',
   };
   const ok = await act(async () => {
     await F.setDoc(refVs(id), datos);
+    if (rgid) await F.setDoc(F.doc(db, 'grupos', rgid, 'desafios', id), { desde: D.gid, nombre: D.grupo.nombre.slice(0, 60), por: miUid(), ts });
     await F.updateDoc(refGrupo(D.gid), { amistosos: [...rivales(), { id, rival, lado: 'A', ts }].slice(-20) });
-    evento('crear_amistoso');
-  }, '⚔️ ¡Amistoso armado! Ahora copiá la invitación y mandala');
+    evento('crear_amistoso', { con: rgid ? 'codigo' : 'link' });
+  }, rgid ? `⚔️ Desafío enviado a ${rival}. Cuando su admin lo acepte, aparece en los dos grupos` : '⚔️ ¡Amistoso armado! Ahora copiá el aviso y mandalo');
   if (ok) { ui.vsRevancha = null; seguirVs(id); scrollTo(0, 0); }
   return ok;
 }
@@ -4046,7 +4190,9 @@ function vistaAmistoso() {
     setTimeout(() => actualizarGrupo(s => { s.amistosos = (s.amistosos || []).filter(x => x.id && D.vs[x.id] !== null); }));
   }
   const fichas = fichasRivales();
+  setTimeout(asegurarCodigo);
   return `
+    ${tarjetaDesafios()}
     ${vienen.length ? '' : cancha(`
       <div class="text-center py-1">
         <div class="flex items-center justify-center gap-1">${camiseta(COLOR_VS.A, 44)}<b class="text-amber-300 text-sm">VS</b>${camiseta(COLOR_VS.B, 44)}</div>
@@ -4176,7 +4322,7 @@ function cartelera() {
   if (D.grupo.amistoso) return '';
   const t = D.grupo.torneo, tab = tabGrupo(), p = D.grupo.partido;
   const prox = rivales().map(x => D.vs[x.id] ? { id: x.id, a: D.vs[x.id] } : null)
-    .filter(x => x && !vsJugado(x.a) && !x.a.suspendido && (!x.a.fecha || x.a.fecha >= hoyArg()))
+    .filter(x => x && !vsJugado(x.a) && !x.a.suspendido && estadoVs(x.a) !== 'rechazado' && (!x.a.fecha || x.a.fecha >= hoyArg()))
     .sort((x, y) => (x.a.fecha || '9').localeCompare(y.a.fecha || '9'))[0];
   const items = [['partido', '#/', '<span class="text-2xl leading-none">⚽</span>', 'Del grupo', p.fecha ? `${fechaCorta(p.fecha)}${p.cuando ? ' · ' + esc(p.cuando) : ''}` : 'Sin fecha']];
   if (t && (t.estado !== 'armando' || esAdmin())) items.push(['torneo', '#/torneo', `<span class="text-amber-300">${ic('trophy', '!w-6 !h-6')}</span>`, t.nombre, estadoTorneo(t)]);
@@ -4184,7 +4330,7 @@ function cartelera() {
     const P = planillaVs(prox.id), yo = (D.vsAnot[prox.id] || []).some(x => x.id === miUid());
     const falta = Object.values(P).reduce((n, l) => n + Math.max(0, prox.a.cupo - l.tit.length), 0);
     const otro = rivales().find(x => x.id === prox.id)?.rival || prox.a.rival.nombre;
-    items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), `vs ${otro}`, `${prox.a.fecha ? fechaCorta(prox.a.fecha) + ' · ' : ''}${yo ? '✅ anotado' : falta ? `faltan ${falta}` : 'completo'}`]);
+    items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), `vs ${otro}`, `${prox.a.fecha ? fechaCorta(prox.a.fecha) + ' · ' : ''}${estadoVs(prox.a) === 'pendiente' ? '⏳ esperando' : yo ? '✅ anotado' : falta ? `faltan ${falta}` : 'completo'}`]);
   } else if (rivales().length) items.push(['amistoso', '#/amistoso', camiseta(COLOR_VS.B, 26), 'Amistosos', 'Historial']);
   if (items.length < 2) return '';
   return `
@@ -4995,6 +5141,7 @@ function vistaAdmin() {
         </div>
       </div>`)}
     ${tarjetaPendientes()}
+    ${(setTimeout(asegurarCodigo), card(`<h2 class="text-base font-bold mb-2">${ic('swords', 'text-sky-300')} Amistosos</h2>${tarjetaCodigo()}`))}
     ${panelAdmin(derivar())}
     ${card(`
       <h2 class="text-base font-bold">${ic('trash-2', 'text-red-400')} Borrar el grupo</h2>
@@ -6510,13 +6657,35 @@ const acciones = {
     $('#form-amistoso')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
   'vs-revancha-no': () => { ui.vsRevancha = null; render(); },
+  'vs-modo': () => { ui.vsModo = ui.vsModo === 'link' ? 'codigo' : 'link'; render(); },
+  'vs-ayuda-codigo': () => { ui.vsAyuda = !ui.vsAyuda; render(); },
+  'copiar-codigo': () => copiar(mensajeCodigo(), '📋 Código copiado'),
+  'vs-copiar-desafio': ({ id }) => D.vs[id] && copiar(mensajeDesafio(id), '📋 Aviso copiado. Mandáselo a su admin'),
+  'vs-aceptar': async ({ id }) => {
+    const a = D.vs[id], gid = D.gid;
+    if (!a) return;
+    const ok = await act(async () => {
+      if (!a.admins.includes(miUid())) await F.updateDoc(refVs(id), { admins: [...a.admins, miUid()], estado: 'aceptado' });
+      if (!rivales().some(x => x.id === id)) await F.updateDoc(refGrupo(gid), { amistosos: [...rivales(), { id, rival: a.local.nombre, lado: 'B', ts: Date.now() }].slice(-20) });
+      await F.deleteDoc(F.doc(db, 'grupos', gid, 'desafios', id));
+    }, '⚔️ ¡Desafío aceptado! Ya pueden anotarse');
+    if (ok) location.hash = '#/amistoso';
+  },
+  'vs-rechazar': async ({ id }) => {
+    const a = D.vs[id];
+    if (!a || !confirm(`¿Rechazar el desafío de ${a.local.nombre}? Les va a aparecer que esta vez no pueden.`)) return;
+    await act(async () => {
+      await F.updateDoc(refVs(id), { estado: 'rechazado' });
+      await F.deleteDoc(F.doc(db, 'grupos', D.gid, 'desafios', id));
+    }, 'Desafío rechazado');
+  },
   'vs-ir': ({ gid }) => { guardado.set(LS + 'gid', gid); elegirGrupo(); location.hash = '#/amistoso'; },
   // Un admin del otro grupo lo suma a su grupo: queda como admin del amistoso y lo ve todo su grupo.
   'vs-vincular': async ({ id, gid }) => {
     const a = D.vs[id];
     if (!a) return;
     const ok = await act(async () => {
-      if (!a.admins.includes(miUid())) await F.updateDoc(refVs(id), { rival: { gid, nombre: a.rival.nombre }, admins: [...a.admins, miUid()] });
+      if (!a.admins.includes(miUid())) await F.updateDoc(refVs(id), { rival: { gid, nombre: a.rival.nombre }, admins: [...a.admins, miUid()], estado: 'aceptado' });
       await F.runTransaction(db, async tx => {
         const g = (await tx.get(refGrupo(gid))).data();
         const lista = (g.amistosos || []).filter(x => x.id);
