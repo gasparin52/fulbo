@@ -42,13 +42,16 @@
     .brillo { background-size: 200% auto; animation: brillo 5s linear infinite; }
     .late { animation: late 7s ease-in-out infinite; }
     @keyframes caer { from { translate: 0 -1rem; rotate: 0deg; } to { translate: 0 26rem; rotate: 540deg; } }
-    /* Lo que se desliza de costado: barra finita y oscura, sin flechas (la del sistema queda fea en la compu). */
-    .overflow-x-auto::-webkit-scrollbar { height: 6px; }
-    .overflow-x-auto::-webkit-scrollbar-track, .overflow-x-auto::-webkit-scrollbar-corner { background: transparent; }
-    .overflow-x-auto::-webkit-scrollbar-button { display: none; }
-    .overflow-x-auto::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .3); border-radius: 9999px; }
-    .overflow-x-auto::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .55); }
-    @supports (-moz-appearance: none) { .overflow-x-auto { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, .35) transparent; } }
+    /* Todo lo que se desliza (la página, los modales, las listas): barra finita y oscura, sin flechas
+       (la del sistema queda blanca y fea en la compu). */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-button { display: none; }
+    ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .3); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .55); }
+    @supports (-moz-appearance: none) { * { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 184, .35) transparent; } }
+    /* En un modal, la lista de un desplegable se abre adentro (empuja lo de abajo) en vez de flotar y cortarse. */
+    [data-modal-cuerpo] [data-lista], [data-modal-cuerpo] [data-cal] { position: static; margin-top: .25rem; }
     .sin-barra { scrollbar-width: none; }
     .sin-barra::-webkit-scrollbar { display: none; }
     .confeti i { position: absolute; top: -1rem; width: 6px; height: 11px; border-radius: 1px; opacity: .85; animation: caer 3s linear infinite; }
