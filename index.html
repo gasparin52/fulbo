@@ -1822,7 +1822,7 @@ const pedirTexto = (texto, campo = {}, opc = {}) => preguntar({ texto, campo, ..
 // El valor va en un input oculto ("AAAA-MM-DD"); el calendario se dibuja al abrirlo, sin redibujar la página.
 function campoFecha({ id, name, valor = '', clase = '' }) {
   return `
-    <div class="relative ${clase}" data-fecha>
+    <div class="relative ${clase}" data-campo-fecha>
       <input type="hidden" id="${id}" name="${name}" value="${esc(valor)}">
       <button type="button" data-action="fecha-abrir" data-id="${id}" aria-haspopup="dialog" aria-expanded="false" class="${INPUT} flex items-center gap-2 text-left">
         <span class="text-emerald-400">${ic('calendar')}</span>
@@ -1859,7 +1859,7 @@ function dibujarCalendario(d) {
     </div>`;
 }
 function cerrarFechas(salvo) {
-  document.querySelectorAll('[data-fecha]').forEach(d => {
+  document.querySelectorAll('[data-campo-fecha]').forEach(d => {
     if (d === salvo) return;
     d.querySelector('[data-cal]').hidden = true;
     d.querySelector('[data-action="fecha-abrir"]').setAttribute('aria-expanded', 'false');
@@ -1867,7 +1867,7 @@ function cerrarFechas(salvo) {
 }
 // El texto del botón según el valor (por si la página se redibujó con una fecha sin guardar).
 function sincronizarFechas() {
-  document.querySelectorAll('[data-fecha]').forEach(d => {
+  document.querySelectorAll('[data-campo-fecha]').forEach(d => {
     const v = d.querySelector('input').value, t = d.querySelector('[data-texto]');
     t.textContent = v ? fechaLinda(v) : 'Elegí el día';
     t.classList.toggle('text-slate-500', !v);
@@ -7663,13 +7663,13 @@ const acciones = {
     if (!lista.hidden) lista.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   },
   'fecha-abrir': ({ id }) => {
-    const d = document.getElementById(id).closest('[data-fecha]'), cal = d.querySelector('[data-cal]');
+    const d = document.getElementById(id).closest('[data-campo-fecha]'), cal = d.querySelector('[data-cal]');
     cal.hidden = !cal.hidden;
     d.querySelector('[data-action="fecha-abrir"]').setAttribute('aria-expanded', String(!cal.hidden));
     if (!cal.hidden) { delete d.dataset.mes; dibujarCalendario(d); cal.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   },
   'fecha-mes': ({ id, paso }) => {
-    const d = document.getElementById(id).closest('[data-fecha]');
+    const d = document.getElementById(id).closest('[data-campo-fecha]');
     const [a, m] = d.dataset.mes.split('-').map(Number), x = new Date(Date.UTC(a, m - 1 + Number(paso), 1));
     d.dataset.mes = x.toISOString().slice(0, 7);
     dibujarCalendario(d);
@@ -8247,7 +8247,7 @@ const formularios = {
 
 document.addEventListener('click', e => {
   cerrarDesplegables(e.target.closest('[data-desplegable]'));
-  cerrarFechas(e.target.closest('[data-fecha]'));
+  cerrarFechas(e.target.closest('[data-campo-fecha]'));
   const b = e.target.closest('[data-action]');
   if (!b) return;
   if ('fondo' in b.dataset && e.target !== b) return;  // clic dentro del modal: no lo cierra
