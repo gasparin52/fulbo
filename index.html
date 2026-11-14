@@ -1231,7 +1231,7 @@ async function asegurarRotacion() {
   const clave = `${D.gid}/${p.fecha}`;
   if (!termino || (!fija && !cerroVotacion) || rotacionIntentada === clave) return;
   rotacionIntentada = clave;
-  if (p.fecha && Date.now() < cierraVotacion(p.fecha) && D.mvp?.id !== p.fecha) await crearVotacion(p.fecha);
+  if (p.fecha && !p.suspendido && Date.now() < cierraVotacion(p.fecha) && D.mvp?.id !== p.fecha) await crearVotacion(p.fecha);
   avisar('rotar');
 }
 
@@ -1262,7 +1262,7 @@ function asegurarAvisoMvp() {
 function asegurarVotacion() {
   const f = D.grupo?.partido.fecha;
   // Espera a tener las votaciones y las 🟥, que deciden quiénes fueron titulares.
-  if (!f || !D.miembros || !D.cargado.mvps || !D.cargado.faltas || D.mvp?.id === f || mvpIntentado === `${D.gid}/${f}`) return;
+  if (!f || D.grupo.partido.suspendido || !D.miembros || !D.cargado.mvps || !D.cargado.faltas || D.mvp?.id === f || mvpIntentado === `${D.gid}/${f}`) return;
   if (Date.now() < abreVotacion(f, D.grupo.partido.cuando) || Date.now() >= cierraVotacion(f)) return;
   mvpIntentado = `${D.gid}/${f}`;
   crearVotacion(f);
@@ -3239,6 +3239,7 @@ function vistaReglas() {
       'Si el grupo tiene <b>fecha fija</b> (por ejemplo, todos los viernes a las 20), cuando termina el partido la lista se vacía sola y se abre la fecha siguiente. Si un día cambia, el admin elige si el cambio es <b>solo para esa fecha</b> o <b>para todas las siguientes</b>, y puede saltear una semana (feriados).',
       '<b>Media hora antes</b> se cierran los equipos: ya no se rearman solos ni se pueden pedir cambios.',
       'Si no se llega al cupo, el admin elige en <b>Administrar → Partido → Si no se llena el cupo</b> qué pasa a la hora límite (de 1 a 12 h antes): nada, <b>avisarle a los admins</b> o <b>suspenderlo solo</b> y avisar a todos. Si ya es la hora y faltan jugadores, arriba de la lista aparece <b>No se llegó al cupo</b> y el admin lo suspende con un toque.',
+      'Si ya pasó y <b>no se jugó</b> (nadie lo suspendió a tiempo), el admin toca <b>No se jugó</b> en "¿Cómo salió?" o en la votación del mejor: queda como suspendido y se borran la votación, el resultado y las 🟥 de esa fecha.',
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
       'Al terminar, un admin o armador carga <b>¿Cómo salió?</b>: quién ganó y, si el grupo lo eligió, los goles (del equipo o de cada uno). Lo ven todos.',
@@ -3800,7 +3801,17 @@ function modalCancha() {
     </div>`;
 }
 
+// Al admin, en la votación del partido que acaba de pasar: si no se jugó, se anula todo.
 function tarjetaMvp() {
+  const m = D.mvp, p = D.grupo.partido;
+  const anular = esAdmin() && m && m.id === p.fecha && !p.suspendido && estadoMvp() !== 'cerrada' ? `
+    <div class="flex items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-2.5 text-sm">
+      <span class="text-slate-400">¿Este partido no se jugó?</span>
+      <button data-action="no-se-jugo" class="${BTN_CHIP} hover:!text-red-300">${ic('ban')} No se jugó</button>
+    </div>` : '';
+  return tarjetaMvpVotacion() + anular;
+}
+function tarjetaMvpVotacion() {
   const m = D.mvp, estado = estadoMvp();
   if (!m) return '';
   const quien = id => `${avatar(fichaCandidato(m, id), 28)}<b class="truncate">${esc(nombreCandidato(m, id))}</b>`;
@@ -6036,6 +6047,17 @@ function formGoleadores(actual) {
     <button data-action="sin-goles" class="${BTN_CHIP} w-full mt-2 !py-2">No sé los goles, solo quién ganó</button>`;
 }
 
+// Si no se jugó: se borra lo que se armó para esa fecha (la votación del mejor, el resultado y las 🟥).
+// Los votos del mejor quedan guardados pero no se ven: sin la votación no hay nada que mostrar.
+function limpiarFecha(f) {
+  if (!f) return;
+  const borrar = ref => F.deleteDoc(ref).catch(e => console.warn(e.code));
+  if (D.mvp?.id === f || D.mvps.some(m => m.id === f)) borrar(refMvp(D.gid, f));
+  if (D.resultados.some(x => x.fecha === f)) borrar(F.doc(colResultados(D.gid), f));
+  D.faltas.filter(x => x.fecha === f).forEach(x => borrar(F.doc(colFaltas(D.gid), x.id)));
+  D.reportes.filter(x => x.fecha === f).forEach(x => borrar(F.doc(colReportes(D.gid), x.id)));
+}
+
 function tarjetaResultado() {
   const p = D.grupo.partido, t = tiemposPartido();
   const actual = D.resultados.find(x => x.fecha === p.fecha);
@@ -6045,7 +6067,10 @@ function tarjetaResultado() {
   if (termino && puede && (!actual || ui.corregirResultado)) {
     const goles = conGoles() && !ui.sinGoles;
     return card(`
-      <h2 class="text-lg font-bold">${ic('flag', 'text-emerald-400')} ¿Cómo salió?</h2>
+      <div class="flex items-start justify-between gap-2">
+        <h2 class="text-lg font-bold">${ic('flag', 'text-emerald-400')} ¿Cómo salió?</h2>
+        ${esAdmin() && !actual ? `<button data-action="no-se-jugo" class="${BTN_CHIP} hover:!text-red-300">${ic('ban')} No se jugó</button>` : ''}
+      </div>
       <p class="text-xs text-slate-400 mt-0.5 mb-3">Lo ven todos los del grupo.${goles ? '' : ' Si saben los goles, el admin lo puede activar en Administrar.'}</p>
       ${goles && conGoleadores() ? formGoleadores(actual) : goles ? `
         <form data-form="resultado" class="space-y-3">
@@ -7676,8 +7701,16 @@ const acciones = {
   suspender: async ({ motivo: sugerido }) => {
     const motivo = await pedirTexto('¿Por qué se suspende? Lo ven todos y les llega en la notificación.', { valor: sugerido || 'Se suspende por lluvia', max: 120 }, { si: 'Suspender', peligro: true });
     if (motivo === null) return;
-    actualizarGrupo(s => { s.partido.suspendido = motivo.trim().slice(0, 120) || 'Partido suspendido'; }, '🚫 Partido suspendido')
-      .then(ok => ok && avisar('suspendido'));
+    const f = D.grupo.partido.fecha;
+    const ok = await actualizarGrupo(s => { s.partido.suspendido = motivo.trim().slice(0, 120) || 'Partido suspendido'; }, '🚫 Partido suspendido');
+    if (ok) { avisar('suspendido'); limpiarFecha(f); }
+  },
+  // Ya pasó la hora y no se jugó (no llegaron, se cayó la cancha y nadie lo suspendió a tiempo).
+  'no-se-jugo': async () => {
+    const f = D.grupo.partido.fecha;
+    if (!await confirmar(`¿El partido del ${fechaLinda(f)} no se jugó?\n\nQueda como suspendido y se borran la votación del mejor, el resultado y las 🟥 de esa fecha. Nadie va a tener que votar ni calificar.`, { si: 'No se jugó', peligro: true })) return;
+    const ok = await actualizarGrupo(s => { s.partido.suspendido = 'No se jugó'; }, '🚫 Listo: ese partido no cuenta');
+    if (ok) { avisar('suspendido'); limpiarFecha(f); }
   },
   'limite-accion': ({ a }) => actualizarGrupo(s => { s.limiteCupo = a ? { horas: s.limiteCupo?.horas || 2, accion: a } : null; },
     a === 'suspender' ? '⏰ Listo: si no se llena, se suspende solo' : a ? '⏰ Listo: si no se llena, te avisamos' : 'Listo'),

@@ -167,7 +167,7 @@ async function rotar(gid) {
       // Hasta cuándo se vota: lo que diga la votación; si no se armó, a las 15:00 del día siguiente.
       const cierra = mvp.data()?.cierra ?? Date.parse(`${p.fecha}T15:00:00-03:00`) + DIA;
       const votando = Date.now() < cierra;
-      if (votando && (g.anotados || []).length && !mvp.exists) return { rotado: false, falta: 'votacion' };
+      if (votando && !p.suspendido && (g.anotados || []).length && !mvp.exists) return { rotado: false, falta: 'votacion' };
       // Sin fecha fija: cuando cierra la votación, la lista y los equipos quedan vacíos para la próxima.
       if (!fija) {
         if (votando) return { rotado: false };
