@@ -191,6 +191,30 @@ async function rotar(gid) {
   });
 }
 
+// ---- Si no se llena el cupo ----
+// El admin elige qué pasa si a la hora límite (horas antes del partido) faltan jugadores: avisarle a los
+// admins o suspenderlo solo (grupo.limiteCupo = { accion: 'avisar' | 'suspender', horas }). Lo pide el primero
+// que abre la app pasada esa hora; acá se controla que sea cierto y sale una sola vez por fecha.
+async function sinCupo(gid) {
+  const ref = db.doc(`grupos/${gid}`);
+  return db.runTransaction(async tx => {
+    const g = (await tx.get(ref)).data() || {};
+    const p = g.partido || {}, l = g.limiteCupo, cupo = Number(p.cupo) || 10, n = (g.anotados || []).length;
+    if (!['avisar', 'suspender'].includes(l?.accion) || !p.fecha || p.suspendido || n >= cupo) return null;
+    const horas = horasAntes(p);
+    if (horas > (Number(l.horas) || 2) || -horas * 60 > duracionMin(p)) return null;
+    const clave = `sincupo:${p.fecha}:${l.accion}`;
+    if ((g.avisos || []).some(x => x.clave === clave)) return null;
+    const faltan = cupo - n, motivo = `No se llegó al cupo (${n}/${cupo})`;
+    const aviso = l.accion === 'suspender'
+      ? { clave, titulo: `🚫 Se suspendió el partido de ${cuando(p.fecha)}`, texto: `${motivo}.`, para: null }
+      : { clave, titulo: `⏰ ${faltan === 1 ? 'Falta 1' : `Faltan ${faltan}`} y es la hora límite`, texto: `Son ${n}/${cupo} para ${cuando(p.fecha)}. Si no se completa, suspendelo desde Fulbo.`, para: g.admins || [] };
+    const nuevo = { id: Math.random().toString(36).slice(2, 10), clave, titulo: aviso.titulo, texto: aviso.texto, ts: Date.now() };
+    tx.update(ref, { avisos: [...(g.avisos || []), nuevo].slice(-MAX_AVISOS), ...(l.accion === 'suspender' ? { 'partido.suspendido': motivo } : {}) });
+    return { aviso, suspendio: l.accion === 'suspender', fecha: p.fecha };
+  });
+}
+
 // ---- Jugador del partido ----
 // Cuando cierra la votación, una notificación con el ganador. Sale una sola vez por
 // votación (queda marcada en la votación misma, que la lista nueva no borra).
@@ -250,6 +274,14 @@ export default async function handler(req, res) {
     if (!gid || !(await db.doc(`grupos/${gid}/miembros/${uid}`).get()).exists) throw new ErrorApi(403, 'No sos del grupo');
 
     if (body.tipo === 'rotar') return res.status(200).json(await rotar(gid));
+    if (body.tipo === 'sincupo') {
+      const r = await sinCupo(gid);
+      if (!r) return res.status(200).json({ ok: true, enviado: false });
+      if (r.suspendio) await excusarBajas(gid, r.fecha, 'suspendido');
+      const para = r.aviso.para || (await db.collection(`grupos/${gid}/miembros`).listDocuments()).map(m => m.id);
+      const enviados = await notificar(gid, para, r.aviso).catch(e => { console.error(e); return 0; });
+      return res.status(200).json({ ok: true, enviado: true, suspendio: r.suspendio, notificaciones: enviados });
+    }
     if (body.tipo === 'mvp') {
       const fecha = String(body.fecha || '');
       const aviso = /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? await avisoMvp(gid, fecha) : null;

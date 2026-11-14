@@ -1023,6 +1023,42 @@ function modalAvisos() {
     ${bloquePush()}`);
 }
 
+// Si no se llena el cupo: a la hora límite (tantas horas antes del partido) se les avisa a los admins
+// o se suspende solo. Lo pide el primero del grupo que abre la app pasada esa hora; api/avisar.js
+// controla que sea cierto, lo hace una sola vez y les avisa a todos. grupo.limiteCupo = { accion, horas }.
+const LIMITE_HORAS = [1, 2, 3, 6, 12];
+const limiteCupo = () => D.grupo?.limiteCupo?.accion ? { horas: 2, ...D.grupo.limiteCupo } : null;
+const pasoLimite = p => { const l = limiteCupo(), t = tiemposDe(p); return !!(l && t && Date.now() >= t.inicio - l.horas * 3600e3 && Date.now() < t.fin); };
+let limiteAvisado = null;
+function asegurarLimiteCupo() {
+  const p = D.grupo.partido, d = derivar();
+  if (p.suspendido || d.titulares.length >= d.cupo || !pasoLimite(p)) return;
+  const clave = `${D.gid}/${p.fecha}/${limiteCupo().accion}`;
+  if (limiteAvisado === clave) return;
+  limiteAvisado = clave;
+  avisar('sincupo');
+}
+
+function tarjetaLimiteCupo() {
+  const l = limiteCupo() || { accion: '', horas: 2 };
+  const op = (a, txt, sub) => `
+    <button data-action="limite-accion" data-a="${a}" class="${BTN} !px-2 text-sm leading-tight ${l.accion === a ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">${txt}<span class="block text-[10px] font-normal text-slate-400 mt-0.5">${sub}</span></button>`;
+  return `
+    <div class="mt-6 rounded-xl border border-slate-800 p-3">
+      <h3 class="font-semibold text-sm text-slate-300">${ic('timer')} Si no se llena el cupo</h3>
+      <p class="text-xs text-slate-500 mt-0.5 mb-2">Qué pasa si a la hora límite todavía faltan jugadores.</p>
+      <div class="grid grid-cols-3 gap-2">
+        ${op('', 'Nada', 'como siempre')}${op('avisar', 'Avisarme', 'a los admins')}${op('suspender', 'Suspender solo', 'y avisar a todos')}
+      </div>
+      ${l.accion ? `
+        <p class="text-xs text-slate-400 mt-3 mb-1.5">Hora límite</p>
+        <div class="flex flex-wrap gap-1.5">
+          ${LIMITE_HORAS.map(h => `<button data-action="limite-horas" data-h="${h}" class="rounded-lg px-3 py-1.5 text-sm font-semibold ${l.horas === h ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">${h} h antes</button>`).join('')}
+        </div>
+        <p class="text-xs text-slate-500 mt-2">Pasa cuando alguien del grupo abre la app después de esa hora (casi siempre alguien la mira antes del partido).</p>` : ''}
+    </div>`;
+}
+
 // Carteles arriba de todo: partido suspendido y faltan jugadores.
 let faltanAvisado = null;
 function tarjetaAvisos(d) {
@@ -1035,7 +1071,16 @@ function tarjetaAvisos(d) {
     </div>`);
   const dias = p.fecha ? Math.round((Date.parse(p.fecha + 'T12:00:00Z') - Date.parse(hoyArg() + 'T12:00:00Z')) / DIA) : -1;
   const faltan = d.cupo - d.titulares.length;
-  if (!p.suspendido && !equiposCerrados() && faltan > 0 && (dias === 0 || dias === 1)) {
+  // Ya es la hora (o la hora límite) y no están todos: que no parezca que se juega como si nada.
+  if (!p.suspendido && dias === 0 && faltan > 0 && (equiposCerrados() || pasoLimite(p))) {
+    const solo = limiteCupo()?.accion === 'suspender';
+    partes.push(`
+      <div class="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+        <p class="font-bold text-red-200">${ic('triangle-alert')} No se llegó al cupo: ${d.titulares.length} de ${d.cupo}</p>
+        <p class="text-sm text-red-100/80 mt-0.5">${solo ? 'Se suspende solo y les avisa a todos.' : esAdmin() ? '¿Se juega igual? Si no, suspendelo y les llega el aviso a todos.' : 'Esperá lo que diga el admin.'}</p>
+        ${esAdmin() ? `<button data-action="suspender" data-motivo="No se llegó al cupo (${d.titulares.length}/${d.cupo})" class="${BTN} w-full mt-2 bg-red-600 hover:bg-red-500 text-white text-sm">${ic('ban')} Suspender el partido</button>` : ''}
+      </div>`);
+  } else if (!p.suspendido && !equiposCerrados() && faltan > 0 && (dias === 0 || dias === 1)) {
     partes.push(`
       <div class="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
         <p class="font-bold text-amber-200">${ic('triangle-alert')} ${faltan === 1 ? 'Falta 1' : `Faltan ${faltan}`} para ${dias ? 'mañana' : 'hoy'}</p>
@@ -3193,6 +3238,7 @@ function vistaReglas() {
       'El admin carga la <b>duración</b> del partido (hasta 2 h).',
       'Si el grupo tiene <b>fecha fija</b> (por ejemplo, todos los viernes a las 20), cuando termina el partido la lista se vacía sola y se abre la fecha siguiente. Si un día cambia, el admin elige si el cambio es <b>solo para esa fecha</b> o <b>para todas las siguientes</b>, y puede saltear una semana (feriados).',
       '<b>Media hora antes</b> se cierran los equipos: ya no se rearman solos ni se pueden pedir cambios.',
+      'Si no se llega al cupo, el admin elige en <b>Administrar → Partido → Si no se llena el cupo</b> qué pasa a la hora límite (de 1 a 12 h antes): nada, <b>avisarle a los admins</b> o <b>suspenderlo solo</b> y avisar a todos. Si ya es la hora y faltan jugadores, arriba de la lista aparece <b>No se llegó al cupo</b> y el admin lo suspende con un toque.',
       'Cuando empieza, arriba aparece el partido <b>EN JUEGO</b> con el cronómetro y los equipos. La lista queda cerrada: nadie se anota ni se baja hasta la próxima fecha.',
       'Si alguien se baja con el partido ya empezado, cuenta como que <b>faltó sin avisar</b> (🟥).',
       'Al terminar, un admin o armador carga <b>¿Cómo salió?</b>: quién ganó y, si el grupo lo eligió, los goles (del equipo o de cada uno). Lo ven todos.',
@@ -6885,6 +6931,8 @@ function panelPartido(d) {
         : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">${ic('ban')} Suspender partido</button>`}
     </form>
 
+    ${tarjetaLimiteCupo()}
+
     ${formAgenda()}
 
     <div class="mt-6 rounded-xl border border-slate-800 p-3">
@@ -7073,6 +7121,7 @@ function render() {
     asegurarSuplentesMvp();
     asegurarAvisoMvp();
     asegurarEquipos();
+    asegurarLimiteCupo();
   }
 }
 
@@ -7624,12 +7673,15 @@ const acciones = {
     delete s.solicitudes[id];
   }, '✅ Cambio aprobado'),
   'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
-  suspender: async () => {
-    const motivo = await pedirTexto('¿Por qué se suspende? Lo ven todos y les llega en la notificación.', { valor: 'Se suspende por lluvia', max: 120 }, { si: 'Suspender', peligro: true });
+  suspender: async ({ motivo: sugerido }) => {
+    const motivo = await pedirTexto('¿Por qué se suspende? Lo ven todos y les llega en la notificación.', { valor: sugerido || 'Se suspende por lluvia', max: 120 }, { si: 'Suspender', peligro: true });
     if (motivo === null) return;
     actualizarGrupo(s => { s.partido.suspendido = motivo.trim().slice(0, 120) || 'Partido suspendido'; }, '🚫 Partido suspendido')
       .then(ok => ok && avisar('suspendido'));
   },
+  'limite-accion': ({ a }) => actualizarGrupo(s => { s.limiteCupo = a ? { horas: s.limiteCupo?.horas || 2, accion: a } : null; },
+    a === 'suspender' ? '⏰ Listo: si no se llena, se suspende solo' : a ? '⏰ Listo: si no se llena, te avisamos' : 'Listo'),
+  'limite-horas': ({ h }) => actualizarGrupo(s => { s.limiteCupo = { ...s.limiteCupo, horas: Number(h) }; }),
   reactivar: () => actualizarGrupo(s => { delete s.partido.suspendido; }, '✅ Se levantó la suspensión').then(ok => ok && avisar('reactivado')),
   'abrir-voto': ({ id }) => { ui.votoAbierto = id; render(); },
   'cerrar-voto': () => { ui.votoAbierto = null; render(); },
