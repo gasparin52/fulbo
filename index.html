@@ -1039,20 +1039,25 @@ function asegurarLimiteCupo() {
   avisar('sincupo');
 }
 
+// Armado de equipos: un interruptor Manual / Automático y, si es automático, cómo (segmentado).
 function tarjetaArmado() {
-  const op = (accion, si, txt, sub) => `
-    <button data-action="${accion}" class="${BTN} !px-2 text-sm leading-tight ${si ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">${txt}<span class="block text-[10px] font-normal text-slate-400 mt-0.5">${sub}</span></button>`;
+  const auto = armadoAuto(), modo = modoArmado();
+  const segmento = (m, txt) => `
+    <button data-action="armado-modo" data-m="${m}" aria-pressed="${modo === m}" class="flex-1 rounded-lg py-2 text-sm font-semibold transition ${modo === m ? 'bg-emerald-500 text-slate-950 shadow' : 'text-slate-300 hover:text-white'}">${txt}</button>`;
   return `
     <div class="mt-6 rounded-xl border border-slate-800 p-3">
       <h3 class="font-semibold text-sm text-slate-300">${ic('scale')} Armado de equipos</h3>
-      <p class="text-xs text-slate-500 mt-0.5 mb-2">${armadoAuto() ? 'Desde que hay 2 anotados se arman solos, y se rearman cada vez que alguien entra o sale.' : 'Los arma un admin o un armador desde la pestaña Equipos.'}</p>
-      <div class="grid grid-cols-2 gap-2">
-        ${op('armado-auto" data-si="1', armadoAuto(), 'Automático', 'se arman solos')}${op('armado-auto" data-si="', !armadoAuto(), 'A mano', 'los armás vos')}
+      <div class="flex items-center justify-center gap-3 mt-3">
+        <span class="text-sm font-bold ${auto ? 'text-slate-500' : 'text-white'}">Manual</span>
+        <button data-action="armado-auto" data-si="${auto ? '' : '1'}" role="switch" aria-checked="${auto}" aria-label="Armado automático"
+          class="relative w-14 h-8 shrink-0 rounded-full transition ${auto ? 'bg-emerald-500' : 'bg-slate-700'}">
+          <span class="absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${auto ? 'translate-x-6' : ''}"></span>
+        </button>
+        <span class="text-sm font-bold ${auto ? 'text-emerald-300' : 'text-slate-500'}">Automático</span>
       </div>
-      ${armadoAuto() ? `
-        <div class="grid grid-cols-2 gap-2 mt-2">
-          ${op('armado-modo" data-m="equilibrado', modoArmado() === 'equilibrado', '⚖️ Equilibrados', 'según el nivel')}${op('armado-modo" data-m="aleatorio', modoArmado() === 'aleatorio', '🎲 Al azar', 'sorteo')}
-        </div>` : ''}
+      ${auto ? `
+        <div class="flex gap-1 rounded-xl bg-slate-800 p-1 mt-3">${segmento('equilibrado', '⚖️ Equilibrados')}${segmento('aleatorio', '🎲 Al azar')}</div>` : ''}
+      <p class="text-xs text-slate-500 text-center mt-2">${auto ? `Desde que hay 2 anotados se arman solos ${modo === 'aleatorio' ? 'por sorteo' : 'según el nivel de cada uno'}, y se rearman cuando alguien entra o sale.` : 'No se arman solos: los arma un admin o un armador desde la pestaña Equipos.'}</p>
     </div>`;
 }
 
