@@ -1039,6 +1039,23 @@ function asegurarLimiteCupo() {
   avisar('sincupo');
 }
 
+function tarjetaArmado() {
+  const op = (accion, si, txt, sub) => `
+    <button data-action="${accion}" class="${BTN} !px-2 text-sm leading-tight ${si ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700'}">${txt}<span class="block text-[10px] font-normal text-slate-400 mt-0.5">${sub}</span></button>`;
+  return `
+    <div class="mt-6 rounded-xl border border-slate-800 p-3">
+      <h3 class="font-semibold text-sm text-slate-300">${ic('scale')} Armado de equipos</h3>
+      <p class="text-xs text-slate-500 mt-0.5 mb-2">${armadoAuto() ? 'Desde que hay 2 anotados se arman solos, y se rearman cada vez que alguien entra o sale.' : 'Los arma un admin o un armador desde la pestaña Equipos.'}</p>
+      <div class="grid grid-cols-2 gap-2">
+        ${op('armado-auto" data-si="1', armadoAuto(), 'Automático', 'se arman solos')}${op('armado-auto" data-si="', !armadoAuto(), 'A mano', 'los armás vos')}
+      </div>
+      ${armadoAuto() ? `
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          ${op('armado-modo" data-m="equilibrado', modoArmado() === 'equilibrado', '⚖️ Equilibrados', 'según el nivel')}${op('armado-modo" data-m="aleatorio', modoArmado() === 'aleatorio', '🎲 Al azar', 'sorteo')}
+        </div>` : ''}
+    </div>`;
+}
+
 function tarjetaLimiteCupo() {
   const l = limiteCupo() || { accion: '', horas: 2 };
   const op = (a, txt, sub) => `
@@ -1429,8 +1446,11 @@ const derivar = () => dividir(D.grupo);
 const baseKey = titulares => titulares.map(p => p.id).sort().join(',');
 const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== baseKey(d.titulares);
 
-// Cuando se llena el cupo, el primer admin o armador que tiene la app abierta arma
-// los equipos equilibrados. Una sola vez por lista: si después los borran, no insiste.
+// Armado automático (grupo.armado = { auto, modo }; por defecto sí y equilibrados): desde que hay 2 titulares,
+// cada vez que cambia la lista el primer admin o armador que tiene la app abierta los vuelve a armar.
+// Una sola vez por lista: si después los borran o los tocan a mano, no insiste hasta que cambie la lista.
+const armadoAuto = () => D.grupo?.armado?.auto !== false;
+const modoArmado = () => D.grupo?.armado?.modo === 'aleatorio' ? 'aleatorio' : 'equilibrado';
 let autoArmado = null, supsRepartidos = null, rondaIniciada = null, rehechos = null, cambioHecho = null, completadas = null;
 function asegurarEquipos() {
   const c = D.cargado;
@@ -1489,27 +1509,28 @@ function asegurarEquipos() {
     actualizarGrupo(s => {
       if (!s.equipos || s.rehacer?.ronda !== ronda || s.rehacer.n < umbralRehacer(dividir(s))) return;
       const { titulares } = dividir(s);
-      s.equipos = { ...armarEquipos(titulares, 'equilibrado'), modo: 'equilibrado', base: baseKey(titulares) };
+      s.equipos = { ...armarEquipos(titulares, modoArmado()), modo: modoArmado(), base: baseKey(titulares) };
       repartirSuplentes(s);
       nuevaRonda(s);
       s.solicitudes = {};
     }, '🔄 La mayoría pidió rehacerlos: equipos nuevos');
   }
-  if (d.titulares.length < d.cupo) return;
+  if (!armadoAuto() || d.titulares.length < 2) return;
   const clave = `${D.gid}/${baseKey(d.titulares)}`;
   if (autoArmado === clave) return;
   autoArmado = clave;
   if (D.grupo.equipos && !equiposDesactualizados(d)) return;
+  const lleno = d.titulares.length >= d.cupo, modo = D.grupo.amistoso ? 'grupos' : modoArmado();
   actualizarGrupo(s => {
-    const { titulares, cupo } = dividir(s);
+    const { titulares } = dividir(s);
     const base = baseKey(titulares);
-    if (titulares.length < cupo || s.equipos?.base === base) return;
-    const modo = s.amistoso ? 'grupos' : 'equilibrado';
+    if (titulares.length < 2 || s.equipos?.base === base) return;
     s.equipos = { ...armarEquipos(titulares, modo), modo, base };
     repartirSuplentes(s);
     nuevaRonda(s);
     s.solicitudes = {};
-  }, D.grupo.amistoso ? '⚔️ Se llenó el cupo: equipos armados, cada grupo de un lado' : '⚖️ Se llenó el cupo: equipos equilibrados armados');
+  }, !lleno ? null : D.grupo.amistoso ? '⚔️ Se llenó el cupo: equipos armados, cada grupo de un lado'
+    : modo === 'aleatorio' ? '🎲 Se llenó el cupo: equipos sorteados' : '⚖️ Se llenó el cupo: equipos equilibrados armados');
 }
 
 function armarEquipos(jugadores, modo) {
@@ -2865,7 +2886,7 @@ function vistaPrincipal() {
   const t = tabGrupo();
   const sinEquipos = card(`
     <h2 class="text-lg font-bold">${ic('swords', 'text-emerald-400')} Equipos</h2>
-    <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. Se arman solos ${D.grupo.amistoso ? '(cada grupo de un lado)' : 'y equilibrados'} cuando se llena la lista${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
+    <p class="text-sm text-slate-400 mt-1">Todavía no hay equipos. ${!armadoAuto() ? 'Los arma un admin o un armador' : `Se arman solos ${D.grupo.amistoso ? '(cada grupo de un lado)' : modoArmado() === 'aleatorio' ? 'al azar' : 'y equilibrados'} cuando hay 2 anotados`}${d.titulares.length ? ` (van ${d.titulares.length} de ${d.cupo})` : ''}.</p>`);
   const contenido = idTG() ? [cartelera(), vistaTG(idTG())]
     : t === 'equipos' ? [equipos(d) || sinEquipos]
     : t === 'jugadores' ? [jugadoresGrid()]
@@ -3220,7 +3241,7 @@ function vistaReglas() {
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
     ${seccion(ic('swords') + ' Equipos', [
-      'Cuando se llena el cupo, los equipos se arman <b>solos y equilibrados</b>. Los admins y los <b>armadores</b> también los pueden armar a mano, al azar o pasar gente de un equipo al otro.',
+      'Desde que hay <b>2 anotados</b>, los equipos se arman <b>solos</b> y se rearman cada vez que alguien entra o sale. El admin elige en <b>Administrar → Partido → Armado de equipos</b> si son <b>equilibrados</b> (por defecto) o <b>al azar</b>, o si los arma a mano. Los admins y los <b>armadores</b> también los pueden rearmar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
@@ -6956,6 +6977,8 @@ function panelPartido(d) {
         : `<button type="button" data-action="suspender" class="${BTN} sm:col-span-2 bg-slate-800 hover:bg-red-950 text-red-300 text-sm">${ic('ban')} Suspender partido</button>`}
     </form>
 
+    ${tarjetaArmado()}
+
     ${tarjetaLimiteCupo()}
 
     ${formAgenda()}
@@ -7712,6 +7735,10 @@ const acciones = {
     const ok = await actualizarGrupo(s => { s.partido.suspendido = 'No se jugó'; }, '🚫 Listo: ese partido no cuenta');
     if (ok) { avisar('suspendido'); limpiarFecha(f); }
   },
+  'armado-auto': ({ si }) => actualizarGrupo(s => { s.armado = { modo: s.armado?.modo || 'equilibrado', auto: !!si }; },
+    si ? '⚖️ Listo: los equipos se arman solos' : 'Listo: los equipos los armás vos'),
+  'armado-modo': ({ m }) => actualizarGrupo(s => { s.armado = { auto: true, modo: m === 'aleatorio' ? 'aleatorio' : 'equilibrado' }; },
+    m === 'aleatorio' ? '🎲 Listo: se sortean solos' : '⚖️ Listo: se arman equilibrados'),
   'limite-accion': ({ a }) => actualizarGrupo(s => { s.limiteCupo = a ? { horas: s.limiteCupo?.horas || 2, accion: a } : null; },
     a === 'suspender' ? '⏰ Listo: si no se llena, se suspende solo' : a ? '⏰ Listo: si no se llena, te avisamos' : 'Listo'),
   'limite-horas': ({ h }) => actualizarGrupo(s => { s.limiteCupo = { ...s.limiteCupo, horas: Number(h) }; }),
