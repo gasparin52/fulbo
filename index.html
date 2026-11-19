@@ -3623,6 +3623,12 @@ function equipos(d) {
   const editando = editor && vigentes && ui.editarEquipos;
   const mover = (p, e) => editando ? `<button data-action="mover-equipo" data-id="${p.id}" title="Pasar al ${nombreEquipo(otroEquipo(e))}" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs shrink-0">${e === 'A' ? '→' : '←'}</button>` : '';
   const prom = e => { const js = eq[e].map(jugador).filter(Boolean); return js.reduce((t, p) => t + puntaje(p.id), 0) / (js.length || 1); };
+  const enCancha = lugaresDe(eq, D.grupo.anotados, posicionesCerradas());
+  const dondeJuega = (p, e) => {
+    const i = enCancha[e].ocupa.indexOf(p.id);
+    return i >= 0 ? `<span class="text-emerald-300/90">📍 ${ROLES[enCancha[e].forma[i].rol][1]}</span>`
+      : `<span title="Lo que puso en su ficha">sin lugar · suele ${pos(p).corto.toLowerCase()}</span>`;
+  };
   const columna = (e, borde, fondo, texto) => {
     const js = eq[e].map(jugador).filter(Boolean);
     const sups = vigentes ? suplentesDe(e, d) : [];
@@ -3634,7 +3640,7 @@ function equipos(d) {
               ${fotoLesion(p, avatar(p, 30))}
               <a href="#/jugador/${p.id}" class="flex-1 min-w-0">
                 <span class="block font-semibold truncate">${esc(p.usuario)}${D.grupo.solicitudes[p.id] && solicitudes.some(([id]) => id === p.id) ? ' <span title="Pidió cambiarse" class="text-sky-300">' + ic('arrow-left-right') + '</span>' : ''}</span>
-                <span class="block text-[11px] text-slate-500">${pos(p).emoji} ${pos(p).corto}</span>
+                <span class="block text-[11px] text-slate-500">${dondeJuega(p, e)}</span>
               </a>
               <span class="opacity-70">${chipNota(p.id)}</span>
               ${mover(p, e)}
@@ -3735,21 +3741,47 @@ function equipos(d) {
         ${botones}
       </div>` : ''}
     <div class="grid ${pedido && botonRehacer ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mt-3">${pedido}${botonRehacer}</div>
-    ${vigentes ? botonCancha(eq) : ''}
+    ${vigentes ? canchaChica(eq) : ''}
     ${vigentes ? `<button data-action="copiar-equipos" class="${BTN_SEC} w-full mt-2 text-xs py-2">${ic('copy')} Copiar equipos para WhatsApp</button>` : ''}
     ${editor && !vigentes ? botones : ''}`);
 }
 
-// Botón para abrir la cancha: si te falta elegir, resalta.
-function botonCancha(eq) {
-  const L = lugaresDe(eq, D.grupo.anotados);
-  const total = eq.A.length + eq.B.length;
-  const eligieron = ['A', 'B'].reduce((t, e) => t + L[e].ocupa.filter(Boolean).length, 0);
+// La cancha chica abajo de los equipos: muestra dónde juega cada uno. Al tocarla se abre la grande,
+// donde se elige o se mueve. Si te falta elegir, arriba lo resalta.
+function canchaChica(eq) {
+  const cerradas = posicionesCerradas(), L = lugaresDe(eq, D.grupo.anotados, cerradas);
   const yo = miUid(), mio = equipoDe(yo);
-  const meFalta = mio && !L[mio].ocupa.includes(yo) && !posicionesCerradas();
-  return meFalta
-    ? `<button data-action="ver-cancha" class="${BTN_OK} w-full mt-3 text-sm">📍 Elegí tu posición en la cancha</button>`
-    : `<button data-action="ver-cancha" class="${BTN_SEC} w-full mt-3 text-xs py-2">🏟️ Posiciones en la cancha${posicionesCerradas() ? '' : ` · ${eligieron} de ${total} eligieron`}</button>`;
+  const meFalta = mio && !L[mio].ocupa.includes(yo) && !cerradas;
+  const total = eq.A.length + eq.B.length, eligieron = ['A', 'B'].reduce((t, e) => t + L[e].ocupa.filter(Boolean).length, 0);
+  const punto = (e, i) => {
+    const l = L[e].forma[i], id = L[e].ocupa[i], p = id && jugador(id);
+    const top = e === 'A' ? (100 - l.y) / 2 : 50 + l.y / 2;
+    return `
+      <span style="left:${l.x}%;top:${top}%" class="absolute -translate-x-1/2 -translate-y-1/2 w-14 flex flex-col items-center gap-0.5 pointer-events-none">
+        ${p ? `<span class="rounded-full ring-2 ${id === yo ? 'ring-amber-300' : e === 'A' ? 'ring-red-400' : 'ring-sky-400'}">${avatar(p, 24)}</span>
+               <span class="max-w-full truncate rounded bg-black/60 px-1 text-[9px] font-semibold leading-[14px] text-white">${esc(p.usuario)}</span>`
+          : `<span class="w-6 h-6 rounded-full border-2 border-dashed border-white/40 bg-black/20 grid place-items-center text-[7px] font-black text-white/60">${ROLES[l.rol][0]}</span>`}
+      </span>`;
+  };
+  return `
+    <div class="mt-4">
+      <div class="flex items-center justify-between gap-2 mb-1.5">
+        <p class="text-sm font-bold">🏟️ En la cancha</p>
+        <p class="text-[11px] text-slate-500">${cerradas ? '🔒 cerradas' : `${eligieron} de ${total} eligieron`}</p>
+      </div>
+      ${meFalta ? `<button data-action="ver-cancha" class="${BTN_OK} w-full mb-2 text-sm">📍 Elegí tu posición en la cancha</button>` : ''}
+      <button data-action="ver-cancha" aria-label="Abrir la cancha" class="block w-full relative aspect-[4/5] rounded-2xl overflow-hidden border border-emerald-500/30 active:scale-[.99] transition" style="background:repeating-linear-gradient(180deg,#052e22 0 10%,#063a2b 10% 20%)">
+        <span class="absolute inset-x-0 top-1/2 border-t-2 border-emerald-300/25"></span>
+        <span class="absolute left-1/2 top-1/2 w-16 h-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-300/25"></span>
+        <span class="absolute left-1/2 top-0 w-2/5 h-[11%] -translate-x-1/2 border-2 border-t-0 border-emerald-300/25"></span>
+        <span class="absolute left-1/2 bottom-0 w-2/5 h-[11%] -translate-x-1/2 border-2 border-b-0 border-emerald-300/25"></span>
+        <span class="absolute left-2 top-2 text-[11px] font-black text-red-200 drop-shadow">🔴 ${esc(nombreCorto('A'))}</span>
+        <span class="absolute left-2 bottom-2 text-[11px] font-black text-sky-200 drop-shadow">🔵 ${esc(nombreCorto('B'))}</span>
+        ${['A', 'B'].map(e => L[e].forma.map((_, i) => punto(e, i)).join('')).join('')}
+        <span class="absolute right-2 bottom-2 rounded-lg bg-black/60 px-2 py-1 text-[11px] font-semibold text-white">${ic('pencil')} ${cerradas ? 'Ver' : 'Tocá para elegir'}</span>
+      </button>
+      <p class="text-[11px] text-slate-500 mt-1.5">📍 es dónde juega cada uno en este partido; la posición de la ficha es la que suele jugar.</p>
+    </div>`;
 }
 
 function modalCancha() {
