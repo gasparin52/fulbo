@@ -1039,25 +1039,26 @@ function asegurarLimiteCupo() {
   avisar('sincupo');
 }
 
-// Armado de equipos: un interruptor Manual / Automático y, si es automático, cómo (segmentado).
+// Armado de equipos: como en la configuración del celu, el texto a la izquierda y el switch a la derecha;
+// si es automático, abajo se elige cómo (segmentado).
 function tarjetaArmado() {
   const auto = armadoAuto(), modo = modoArmado();
   const segmento = (m, txt) => `
     <button data-action="armado-modo" data-m="${m}" aria-pressed="${modo === m}" class="flex-1 rounded-lg py-2 text-sm font-semibold transition ${modo === m ? 'bg-emerald-500 text-slate-950 shadow' : 'text-slate-300 hover:text-white'}">${txt}</button>`;
   return `
     <div class="mt-6 rounded-xl border border-slate-800 p-3">
-      <h3 class="font-semibold text-sm text-slate-300">${ic('scale')} Armado de equipos</h3>
-      <div class="flex items-center justify-center gap-3 mt-3">
-        <span class="text-sm font-bold ${auto ? 'text-slate-500' : 'text-white'}">Manual</span>
-        <button data-action="armado-auto" data-si="${auto ? '' : '1'}" role="switch" aria-checked="${auto}" aria-label="Armado automático"
-          class="relative w-14 h-8 shrink-0 rounded-full transition ${auto ? 'bg-emerald-500' : 'bg-slate-700'}">
-          <span class="absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${auto ? 'translate-x-6' : ''}"></span>
+      <div class="flex items-center gap-3">
+        <div class="flex-1 min-w-0">
+          <h3 class="font-semibold text-sm text-slate-200">${ic('scale', 'text-emerald-400')} Equipos automáticos</h3>
+          <p class="text-xs text-slate-500 mt-0.5">${auto ? 'Se arman solos desde 2 anotados y se rearman cuando alguien entra o sale.' : 'Apagado: los arma un admin o un armador desde la pestaña Equipos.'}</p>
+        </div>
+        <button data-action="armado-auto" data-si="${auto ? '' : '1'}" role="switch" aria-checked="${auto}" aria-label="Equipos automáticos"
+          class="relative w-12 h-7 shrink-0 rounded-full transition ${auto ? 'bg-emerald-500' : 'bg-slate-700'}">
+          <span class="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${auto ? 'translate-x-5' : ''}"></span>
         </button>
-        <span class="text-sm font-bold ${auto ? 'text-emerald-300' : 'text-slate-500'}">Automático</span>
       </div>
       ${auto ? `
         <div class="flex gap-1 rounded-xl bg-slate-800 p-1 mt-3">${segmento('equilibrado', '⚖️ Equilibrados')}${segmento('aleatorio', '🎲 Al azar')}</div>` : ''}
-      <p class="text-xs text-slate-500 text-center mt-2">${auto ? `Desde que hay 2 anotados se arman solos ${modo === 'aleatorio' ? 'por sorteo' : 'según el nivel de cada uno'}, y se rearman cuando alguien entra o sale.` : 'No se arman solos: los arma un admin o un armador desde la pestaña Equipos.'}</p>
     </div>`;
 }
 
