@@ -473,7 +473,7 @@ function moverDeEquipo(s, id, a) {
 // ---------------- Posiciones en la cancha ----------------
 // Cada titular elige un lugar libre de su equipo: el primero que lo toca se lo queda.
 // Se guardan en equipos.pos = { id: 'A3' } (equipo y número de lugar): si se rearman los
-// equipos se borran solas, y si alguien cambia de equipo su lugar viejo deja de valer.
+// equipos cada uno sigue en su lugar (ver rearmar), y si alguien cambia de equipo su lugar viejo deja de valer.
 // Una hora antes se cierran y los que no eligieron se acomodan solos. Admins y armadores
 // pueden mover a cualquiera siempre.
 const CIERRE_POSICIONES_MIN = 60;
@@ -1514,8 +1514,7 @@ function asegurarEquipos() {
     rehechos = ronda;
     actualizarGrupo(s => {
       if (!s.equipos || s.rehacer?.ronda !== ronda || s.rehacer.n < umbralRehacer(dividir(s))) return;
-      const { titulares } = dividir(s);
-      s.equipos = { ...armarEquipos(titulares, modoArmado()), modo: modoArmado(), base: baseKey(titulares) };
+      rearmar(s, modoArmado());
       repartirSuplentes(s);
       nuevaRonda(s);
       s.solicitudes = {};
@@ -1531,7 +1530,7 @@ function asegurarEquipos() {
     const { titulares } = dividir(s);
     const base = baseKey(titulares);
     if (titulares.length < 2 || s.equipos?.base === base) return;
-    s.equipos = { ...armarEquipos(titulares, modo), modo, base };
+    rearmar(s, modo);
     repartirSuplentes(s);
     nuevaRonda(s);
     s.solicitudes = {};
@@ -1539,7 +1538,24 @@ function asegurarEquipos() {
     : modo === 'aleatorio' ? '🎲 Se llenó el cupo: equipos sorteados' : '⚖️ Se llenó el cupo: equipos equilibrados armados');
 }
 
-function armarEquipos(jugadores, modo) {
+// Arma los equipos de nuevo sin sacar a nadie del lugar que eligió en la cancha: los que estaban
+// en el mismo lugar (cada uno en su equipo) van uno de cada lado, y si igual se pisan se lo queda
+// el que se anotó antes; el otro vuelve a elegir.
+function rearmar(s, modo) {
+  const { titulares } = dividir(s);
+  const elegidos = {};
+  if (s.equipos) {
+    const L = lugaresDe(s.equipos, s.anotados);
+    for (const e of ['A', 'B']) L[e].ocupa.forEach((id, i) => { if (id) elegidos[id] = i; });
+  }
+  const eq = { ...armarEquipos(titulares, modo, elegidos), modo, base: baseKey(titulares), pos: {} };
+  for (const [id, i] of Object.entries(elegidos)) for (const e of ['A', 'B']) if (eq[e].includes(id)) eq.pos[id] = e + i;
+  eq.pos = posDeLugares(lugaresDe(eq, s.anotados));
+  s.equipos = eq;
+}
+
+// elegidos = { id: número de lugar en la cancha }: los que eligieron el mismo lugar se reparten.
+function armarEquipos(jugadores, modo, elegidos = {}) {
   // Amistoso: los del grupo que lo armó contra los demás.
   if (modo === 'grupos') {
     const locales = new Set(D.grupo.amistoso?.locales || []);
@@ -1547,30 +1563,43 @@ function armarEquipos(jugadores, modo) {
   }
   const mezclados = shuffle([...jugadores]);
   const A = [], B = [];
+  const lugar = p => elegidos[p.id];
+  const repetido = p => lugar(p) != null && mezclados.filter(q => lugar(q) === lugar(p)).length > 1;
   if (modo === 'aleatorio') {
-    mezclados.forEach((p, i) => (i % 2 ? B : A).push(p.id));
-    return { A, B };
+    // Primero los que se pisan, juntos, así al alternar quedan uno de cada lado.
+    const orden = [...mezclados.filter(repetido).sort((a, b) => lugar(a) - lugar(b)), ...mezclados.filter(p => !repetido(p))];
+    orden.forEach((p, i) => (i % 2 ? B : A).push(p.id));
+    return Math.random() < 0.5 ? { A, B } : { A: B, B: A };
   }
   // Equilibrado: prueba todas las formas de partir en dos (mismo tamaño, ±1) y se queda
-  // con la de menor diferencia de puntaje. Los arqueros quedan repartidos mitad y mitad.
-  // Entre las que empatan elige una al azar, así "Armar equilibrados" puede variar.
+  // con la de menor diferencia de puntaje. Los arqueros quedan repartidos mitad y mitad
+  // (el que eligió un lugar en la cancha cuenta por ese lugar, no por su ficha), y lo mismo
+  // los que eligieron el mismo lugar. Entre las que empatan elige una al azar, así
+  // "Armar equilibrados" puede variar.
   const n = mezclados.length;
   const pts = mezclados.map(p => puntaje(p.id));
   const total = pts.reduce((a, b) => a + b, 0);
-  const arq = mezclados.map(p => p.posicion === 'arquero');
+  const arq = mezclados.map(p => lugar(p) != null ? lugar(p) === 0 : p.posicion === 'arquero');
   const nArq = arq.filter(Boolean).length;
+  const grupos = Object.values(mezclados.reduce((g, p, i) => { if (repetido(p) && lugar(p) !== 0) (g[lugar(p)] ||= []).push(i); return g; }, {}));
   const tam = Math.floor(n / 2);
   if (n > 20) return serpentina(mezclados);
-  let mejor = Infinity, mejores = [];
-  for (let m = 0; m < 1 << n; m++) {
-    let cant = 0, suma = 0, arqs = 0;
-    for (let i = 0; i < n; i++) if (m & (1 << i)) { cant++; suma += pts[i]; if (arq[i]) arqs++; }
-    if (cant !== tam) continue;
-    if (nArq >= 2 && (arqs < Math.floor(nArq / 2) || arqs > Math.ceil(nArq / 2))) continue;
-    const dif = Math.abs(total - 2 * suma);
-    if (dif < mejor - 1e-9) { mejor = dif; mejores = [m]; }
-    else if (dif < mejor + 1e-9) mejores.push(m);
-  }
+  const buscar = conLugares => {
+    let mejor = Infinity, mejores = [];
+    for (let m = 0; m < 1 << n; m++) {
+      let cant = 0, suma = 0, arqs = 0;
+      for (let i = 0; i < n; i++) if (m & (1 << i)) { cant++; suma += pts[i]; if (arq[i]) arqs++; }
+      if (cant !== tam) continue;
+      if (nArq >= 2 && (arqs < Math.floor(nArq / 2) || arqs > Math.ceil(nArq / 2))) continue;
+      if (conLugares && grupos.some(g => { const k = g.filter(i => m & (1 << i)).length; return k < Math.floor(g.length / 2) || k > Math.ceil(g.length / 2); })) continue;
+      const dif = Math.abs(total - 2 * suma);
+      if (dif < mejor - 1e-9) { mejor = dif; mejores = [m]; }
+      else if (dif < mejor + 1e-9) mejores.push(m);
+    }
+    return mejores;
+  };
+  const respetando = grupos.length ? buscar(true) : [];
+  const mejores = respetando.length ? respetando : buscar(false);
   const m = mejores[Math.floor(Math.random() * mejores.length)];
   mezclados.forEach((p, i) => (m & (1 << i) ? B : A).push(p.id));
   return Math.random() < 0.5 ? { A, B } : { A: B, B: A };
@@ -3247,7 +3276,7 @@ function vistaReglas() {
       'Si el admin cargó la ciudad, arriba ves el <b>pronóstico del clima</b> para la hora del partido (aparece cuando faltan 16 días o menos).',
     ])}
     ${seccion(ic('swords') + ' Equipos', [
-      'Desde que hay <b>2 anotados</b>, los equipos se arman <b>solos</b> y se rearman cada vez que alguien entra o sale. El admin elige en <b>Administrar → Partido → Armado de equipos</b> si son <b>equilibrados</b> (por defecto) o <b>al azar</b>, o si los arma a mano. Los admins y los <b>armadores</b> también los pueden rearmar o pasar gente de un equipo al otro.',
+      'Desde que hay <b>2 anotados</b>, los equipos se arman <b>solos</b> y se rearman cada vez que alguien entra o sale. Al rearmarse, <b>cada uno sigue en el lugar que eligió en la cancha</b>: si dos eligieron el mismo, van uno de cada lado y, si igual se pisan, se lo queda el que se anotó primero. El admin elige en <b>Administrar → Partido → Armado de equipos</b> si son <b>equilibrados</b> (por defecto) o <b>al azar</b>, o si los arma a mano. Los admins y los <b>armadores</b> también los pueden rearmar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
@@ -7736,8 +7765,7 @@ const acciones = {
     actualizarGrupo(s => { s.codigo = genId(12); }, '🎟️ Link nuevo generado');
   },
   armar: ({ modo }) => actualizarGrupo(s => {
-    const { titulares } = dividir(s);
-    s.equipos = { ...armarEquipos(titulares, modo), modo, base: baseKey(titulares) };
+    rearmar(s, modo);
     repartirSuplentes(s);
     nuevaRonda(s);
     s.solicitudes = {};
