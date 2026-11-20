@@ -470,6 +470,32 @@ function moverDeEquipo(s, id, a) {
   if (s.equipos.pos) delete s.equipos.pos[id];  // en el equipo nuevo elige otro lugar
 }
 
+// Cuando se aprueba un pedido de cambio y los equipos quedan desparejos (uno con 2 más), otro
+// titular hace el camino inverso. Equilibrados: el que deja la menor diferencia de puntaje
+// (si empatan, mejor uno que no eligió lugar en la cancha). Al azar: cualquiera de los que no
+// eligieron lugar o, si ya eligieron todos, cualquiera. Devuelve quién pasó.
+function compensarCambio(s, id, a) {
+  const eq = s.equipos, de = otroEquipo(a);
+  if (!eq || eq.modo === 'grupos' || !eq[a].includes(id) || eq[a].length - eq[de].length < 2) return null;
+  const L = lugaresDe(eq, s.anotados);
+  const sinLugar = x => !L[a].ocupa.includes(x);
+  const candidatos = eq[a].filter(x => x !== id);
+  if (!candidatos.length) return null;
+  let elegido;
+  if (eq.modo === 'aleatorio') {
+    const libres = candidatos.filter(sinLugar);
+    const pool = libres.length ? libres : candidatos;
+    elegido = pool[Math.floor(Math.random() * pool.length)];
+  } else {
+    const suma = e => eq[e].reduce((t, x) => t + puntaje(x), 0);
+    const sa = suma(a), sd = suma(de);
+    const dif = x => Math.abs(sa - puntaje(x) - (sd + puntaje(x)));
+    elegido = shuffle([...candidatos]).sort((x, y) => dif(x) - dif(y) || sinLugar(y) - sinLugar(x))[0];
+  }
+  moverDeEquipo(s, elegido, de);
+  return elegido;
+}
+
 // ---------------- Posiciones en la cancha ----------------
 // Cada titular elige un lugar libre de su equipo: el primero que lo toca se lo queda.
 // Se guardan en equipos.pos = { id: 'A3' } (equipo y número de lugar): si se rearman los
@@ -3279,7 +3305,7 @@ function vistaReglas() {
       'Desde que hay <b>2 anotados</b>, los equipos se arman <b>solos</b> y se rearman cada vez que alguien entra o sale. Al rearmarse, <b>cada uno sigue en el lugar que eligió en la cancha</b>: si dos eligieron el mismo, van uno de cada lado y, si igual se pisan, se lo queda el que se anotó primero. El admin elige en <b>Administrar → Partido → Armado de equipos</b> si son <b>equilibrados</b> (por defecto) o <b>al azar</b>, o si los arma a mano. Los admins y los <b>armadores</b> también los pueden rearmar o pasar gente de un equipo al otro.',
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
-      'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza.',
+      'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza. Si al aprobarlo un equipo queda con 2 más, <b>otro pasa al revés</b>: en equilibrados, el que deja los equipos más parejos; al azar, cualquiera de los que todavía no eligieron lugar en la cancha.',
       'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
@@ -7781,11 +7807,15 @@ const acciones = {
     if (de) s.solicitudes[miUid()] = { a: otroEquipo(de), ts: Date.now() };
   }, '🔄 Pedido enviado'),
   'cancelar-solicitud': () => actualizarGrupo(s => { delete s.solicitudes[miUid()]; }),
-  'aprobar-cambio': ({ id }) => actualizarGrupo(s => {
-    const sol = s.solicitudes[id];
-    if (sol) moverDeEquipo(s, id, sol.a);
-    delete s.solicitudes[id];
-  }, '✅ Cambio aprobado'),
+  'aprobar-cambio': ({ id }) => {
+    let vuelve = null;
+    actualizarGrupo(s => {
+      const sol = s.solicitudes[id];
+      vuelve = null;
+      if (sol) { moverDeEquipo(s, id, sol.a); vuelve = compensarCambio(s, id, sol.a); }
+      delete s.solicitudes[id];
+    }).then(ok => ok && toast(vuelve ? `✅ Cambio aprobado. ${jugador(vuelve)?.usuario || 'Otro'} pasa al otro equipo para que queden parejos` : '✅ Cambio aprobado'));
+  },
   'rechazar-cambio': ({ id }) => actualizarGrupo(s => { delete s.solicitudes[id]; }, 'Pedido rechazado'),
   suspender: async ({ motivo: sugerido }) => {
     const motivo = await pedirTexto('¿Por qué se suspende? Lo ven todos y les llega en la notificación.', { valor: sugerido || 'Se suspende por lluvia', max: 120 }, { si: 'Suspender', peligro: true });
