@@ -845,7 +845,7 @@ function nuevaRonda(s) {
   s.rehacer = { ronda: s.equipos.ronda, n: 0 };
 }
 // El pedido y el contador se escriben juntos: las reglas chequean que cuadren.
-function pedirRehacer(quiero) {
+function pedirRehacer(quiero, msg = quiero ? '🙋 Pedido enviado' : 'Pedido cancelado') {
   const gid = D.gid, uid = miUid();
   return act(() => F.runTransaction(db, async tx => {
     const g = normGrupo((await tx.get(refGrupo(gid))).data());
@@ -856,7 +856,7 @@ function pedirRehacer(quiero) {
     if (quiero) tx.set(refRehacer(gid, uid), { ronda, ts: Date.now() });
     else tx.delete(refRehacer(gid, uid));
     tx.update(refGrupo(gid), { rehacer: { ronda, n: g.rehacer.n + (quiero ? 1 : -1) } });
-  }), quiero ? '🙋 Pedido enviado' : 'Pedido cancelado');
+  }), msg);
 }
 
 // ---------------- 🌦️ Clima ----------------
@@ -1484,6 +1484,21 @@ const equiposDesactualizados = d => D.grupo.equipos && D.grupo.equipos.base !== 
 const armadoAuto = () => D.grupo?.armado?.auto !== false;
 const modoArmado = () => D.grupo?.armado?.modo === 'aleatorio' ? 'aleatorio' : 'equilibrado';
 let autoArmado = null, supsRepartidos = null, rondaIniciada = null, rehechos = null, cambioHecho = null, completadas = null;
+// O se pide pasar al otro equipo o se pide rehacerlos, no las dos cosas. Si me pasaron de
+// equipo por mi pedido (equipos.pasados) o tengo un pedido de cambio pendiente, mi pedido de
+// rehacer se cancela solo. Lo hace mi app porque ese pedido solo lo puedo borrar yo.
+let pedidoUnico = null;
+function asegurarPedidoUnico() {
+  const yo = miUid(), eq = D.grupo.equipos;
+  const mio = D.rehacer.find(r => r.id === yo && r.ronda && r.ronda === rondaActual());
+  if (!eq || !mio) return;
+  const pasado = eq.pasados?.[yo] > (mio.ts || 0), pendiente = D.grupo.solicitudes[yo] && D.grupo.solicitudes[yo].a !== equipoDe(yo);
+  const clave = `${D.gid}/${mio.ronda}/${mio.ts}`;
+  if (!(pasado || pendiente) || pedidoUnico === clave) return;
+  pedidoUnico = clave;
+  pedirRehacer(false, pasado ? 'Ya te pasaron de equipo: se canceló tu pedido de rehacerlos' : null);
+}
+
 function asegurarEquipos() {
   const c = D.cargado;
   if (!puedeEditarEquipos() || !D.miembros || !c.votos || !c.niveles || !c.mvps || !c.faltas) return;
@@ -3306,7 +3321,7 @@ function vistaReglas() {
       'Para equilibrar se usa el promedio de las calificaciones de cada uno (si todavía no tiene, un nivel que pone el admin). La app prueba todas las formas de armar los dos equipos y se queda con la de <b>menor diferencia de puntaje</b>. Si hay 2 arqueros, va uno a cada lado. Al lado de cada jugador ves su puntaje.',
       'Los suplentes también quedan asignados a un equipo, por si les toca entrar. Se equilibran aparte de los titulares.',
       'Si querés jugar en el otro equipo, tocá <b>Pedir pasar al otro equipo</b>: un admin o armador lo aprueba o lo rechaza. Si al aprobarlo un equipo queda con 2 más, <b>otro pasa al revés</b>: en equilibrados, el que deja los equipos más parejos; al azar, cualquiera de los que todavía no eligieron lugar en la cancha.',
-      'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero.',
+      'Si te parece que los equipos quedaron desparejos, tocá <b>Pedir rehacer los equipos</b>. Todos ven <b>cuántos</b> lo pidieron, pero no quiénes (eso lo ven solo los admins). Cuando lo pide el <b>60% de los titulares</b>, se rehacen solos y equilibrados, y el contador vuelve a cero. O pedís pasar al otro equipo o pedís rehacerlos, no las dos cosas: si pedís una, se cancela la otra, y si te pasan de equipo se cancela tu pedido de rehacerlos.',
       'Con <b>Copiar equipos para WhatsApp</b> mandás los equipos al grupo.',
     ])}
     ${seccion('📍 Posiciones en la cancha', [
@@ -3719,10 +3734,13 @@ function equipos(d) {
       </div>`;
   };
 
-  // Pedido propio para cambiarse (solo si no puede moverse solo).
+  // Pedido propio para cambiarse (solo si no puede moverse solo). O se pide pasar al otro
+  // equipo o se pide rehacerlos: mientras uno está pendiente, el otro botón no aparece.
   const yo = miUid(), miEquipo = equipoDe(yo), miSolicitud = D.grupo.solicitudes[yo];
   const abiertos = vigentes && miEquipo && !editor && !equiposCerrados();
-  const pedido = abiertos ? (miSolicitud && miSolicitud.a !== miEquipo
+  const pidioCambio = !!(miSolicitud && miSolicitud.a !== miEquipo);
+  const yaPedi = D.rehacer.some(r => r.id === yo && r.ronda === rondaActual());
+  const pedido = abiertos && (pidioCambio || !yaPedi) ? (pidioCambio
     ? `<div class="flex items-center justify-between gap-2 text-xs bg-sky-500/10 border border-sky-500/20 rounded-xl px-3 py-2">
          <span>${ic('arrow-left-right')} Pediste pasar al ${nombreEquipo(miSolicitud.a)}.</span>
          <button data-action="cancelar-solicitud" class="inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-200 transition active:scale-[.98] shrink-0 text-slate-400">Cancelar</button>
@@ -3756,8 +3774,7 @@ function equipos(d) {
       </div>
       ${quienes.length ? `<p class="text-violet-200/70 mt-1">${quienes.map(esc).join(', ')} <span class="text-slate-500">(solo lo ven los admins)</span></p>` : ''}
     </div>` : '';
-  const yaPedi = D.rehacer.some(r => r.id === yo && r.ronda === rondaActual());
-  const botonRehacer = abiertos && rondaActual() ? (yaPedi
+  const botonRehacer = abiertos && rondaActual() && !pidioCambio ? (yaPedi
     ? `<button data-action="rehacer-cancelar" class="${BTN} w-full text-xs py-2 bg-violet-500/15 text-violet-200 border border-violet-500/30" title="Nadie ve quién lo pidió">🙋 Pediste rehacerlos · Cancelar</button>`
     : `<button data-action="rehacer-pedir" class="${BTN_SEC} w-full text-xs py-2">🙋 Pedir rehacerlos</button>`) : '';
 
@@ -7262,6 +7279,7 @@ function render() {
     asegurarSuplentesMvp();
     asegurarAvisoMvp();
     asegurarEquipos();
+    asegurarPedidoUnico();
     asegurarLimiteCupo();
   }
 }
@@ -7802,17 +7820,25 @@ const acciones = {
     moverDeEquipo(s, id, otroEquipo(de));
     delete s.solicitudes[id];
   }),
-  'pedir-cambio': () => actualizarGrupo(s => {
-    const de = s.equipos?.A.includes(miUid()) ? 'A' : s.equipos?.B.includes(miUid()) ? 'B' : null;
-    if (de) s.solicitudes[miUid()] = { a: otroEquipo(de), ts: Date.now() };
-  }, '🔄 Pedido enviado'),
+  // Pedir pasar al otro equipo o pedir rehacerlos: uno cancela el otro.
+  'pedir-cambio': async () => {
+    if (D.rehacer.some(r => r.id === miUid() && r.ronda === rondaActual())) await pedirRehacer(false, null);
+    actualizarGrupo(s => {
+      const de = s.equipos?.A.includes(miUid()) ? 'A' : s.equipos?.B.includes(miUid()) ? 'B' : null;
+      if (de) s.solicitudes[miUid()] = { a: otroEquipo(de), ts: Date.now() };
+    }, '🔄 Pedido enviado');
+  },
   'cancelar-solicitud': () => actualizarGrupo(s => { delete s.solicitudes[miUid()]; }),
   'aprobar-cambio': ({ id }) => {
     let vuelve = null;
     actualizarGrupo(s => {
       const sol = s.solicitudes[id];
       vuelve = null;
-      if (sol) { moverDeEquipo(s, id, sol.a); vuelve = compensarCambio(s, id, sol.a); }
+      if (sol) {
+        moverDeEquipo(s, id, sol.a);
+        vuelve = compensarCambio(s, id, sol.a);
+        s.equipos.pasados = { ...(s.equipos.pasados || {}), [id]: Date.now() };  // su app le cancela el pedido de rehacer
+      }
       delete s.solicitudes[id];
     }).then(ok => ok && toast(vuelve ? `✅ Cambio aprobado. ${jugador(vuelve)?.usuario || 'Otro'} pasa al otro equipo para que queden parejos` : '✅ Cambio aprobado'));
   },
@@ -8007,7 +8033,10 @@ const acciones = {
   'desactivar-push': () => desactivarNotificaciones(),
   'toggle-clima': () => { ui.climaAbierto = !ui.climaAbierto; render(); },
   'editar-equipos': () => { ui.editarEquipos = !ui.editarEquipos; render(); },
-  'rehacer-pedir': () => pedirRehacer(true),
+  'rehacer-pedir': async () => {
+    if (D.grupo.solicitudes[miUid()]) await actualizarGrupo(s => { delete s.solicitudes[miUid()]; });
+    pedirRehacer(true);
+  },
   'rehacer-cancelar': () => pedirRehacer(false),
   'toggle-armador': ({ id }) => actualizarGrupo(s => {
     s.armadores = s.armadores.includes(id) ? s.armadores.filter(x => x !== id) : [...s.armadores, id];
